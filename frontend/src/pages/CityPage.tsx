@@ -5,18 +5,27 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { ArrowUpRight, LogOut, Plus, Settings, Building2 } from 'lucide-react'
-import { authApi, projectsApi } from '@/api/services'
+import { ArrowUpRight, Plus, Building2, Search } from 'lucide-react'
+import { projectsApi } from '@/api/services'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
 import { projectPlacements } from '@/features/projects/placements'
+import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { BuildingDesign } from '@/stores/workspaceStore'
 import { AsyncState } from '@/components/AsyncState'
-import { FormDialog } from '@/components/FormDialog'
+import { ActionForm } from '@/components/ActionForm'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { getApiErrorMessage } from '@/api/error'
+import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 const CityScene = lazy(() => import('@/three/CityScene'))
 
@@ -24,13 +33,6 @@ function City() {
   const session = useSession()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const logout = useMutation({
-    mutationFn: () => authApi.logout(),
-    onSuccess: () => {
-      queryClient.clear()
-      navigate('/login')
-    },
-  })
   const create = useMutation({
     mutationFn: (input: Parameters<typeof projectsApi.create>[0]) =>
       projectsApi.create(input),
@@ -38,6 +40,9 @@ function City() {
   const placements = useWorkspaceStore((state) => state.placements)
   const placeProject = useWorkspaceStore((state) => state.placeProject)
   const [creatingAt, setCreatingAt] = useState<number | null>(null)
+  const [design, setDesign] = useState<BuildingDesign>('modern')
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'recent' | 'name' | 'leader'>('recent')
   const projects = useInfiniteQuery({
     queryKey: ['projects'],
     queryFn: ({ pageParam }) => projectsApi.list({ cursor: pageParam }),
@@ -69,39 +74,26 @@ function City() {
   const nextLot = Array.from({ length: 8 }, (_, index) => index).find(
     (lot) => !assigned.some((item) => item.lot === lot),
   )
+  // ponytail: 불러온 페이지 안에서만 검색·정렬한다. 서버 검색·정렬 파라미터가 생기면 쿼리로 옮긴다.
+  const shownProjects = allProjects
+    .filter((project) =>
+      project.name.toLowerCase().includes(search.trim().toLowerCase()),
+    )
+    .sort((a, b) =>
+      sort === 'name'
+        ? a.name.localeCompare(b.name, 'ko')
+        : sort === 'leader' && a.my_role !== b.my_role
+          ? a.my_role === 'LEADER'
+            ? -1
+            : 1
+          : b.created_at.localeCompare(a.created_at),
+    )
+  const startCreate = (lot: number | null) => {
+    setDesign('modern')
+    setCreatingAt(lot)
+  }
   return (
     <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-8">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.2em] text-muted-foreground">
-            MY PROJECT CITY
-          </p>
-          <h2 className="mt-2 text-2xl font-bold">
-            {session.data?.name}님의 도시
-          </h2>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <Link to="/account">
-              <Settings />
-              회원 설정
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={logout.isPending}
-            onClick={() => logout.mutate()}
-          >
-            <LogOut />
-            로그아웃
-          </Button>
-        </div>
-      </div>
-      {logout.error && (
-        <p role="alert" className="mb-4 text-sm text-destructive">
-          {getApiErrorMessage(logout.error)}
-        </p>
-      )}
       <AsyncState query={projects}>
         {() => (
           <>
@@ -109,19 +101,23 @@ function City() {
               className="relative h-[54dvh] min-h-96 overflow-hidden rounded-3xl border bg-card shadow-sm"
               aria-label="내 프로젝트 도시"
             >
-              <div className="pointer-events-none absolute top-6 left-6 z-10 max-w-64">
-                <h3 className="text-xl font-semibold">함께 만드는 작은 도시</h3>
-                <p className="mt-2 text-xs leading-6 text-muted-foreground">
-                  빈 부지를 선택하고, 프로젝트와 함께 넓혀 가세요.
+              <div className="pointer-events-none absolute top-6 left-6 z-10">
+                <h2 className="text-2xl font-bold">
+                  {session.data?.name}님의 도시
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  부지 8칸 중{' '}
+                  {assigned.filter((item) => item.lot !== null).length}칸 사용 ·
+                  빈 부지를 누르면 프로젝트를 만들 수 있어요.
                 </p>
               </div>
               <div className="absolute top-6 right-6 z-10">
                 <Button
                   disabled={nextLot === undefined}
-                  onClick={() => setCreatingAt(nextLot ?? null)}
+                  onClick={() => startCreate(nextLot ?? null)}
                 >
                   <Plus />
-                  건물 짓기
+                  프로젝트 만들기
                 </Button>
               </div>
               <Suspense
@@ -137,7 +133,7 @@ function City() {
                 <CityScene
                   projects={sceneProjects}
                   onProjectSelect={(id) => navigate(`/projects/${id}`)}
-                  onLotSelect={setCreatingAt}
+                  onLotSelect={startCreate}
                   className="h-full w-full"
                 />
               </Suspense>
@@ -146,17 +142,44 @@ function City() {
               </p>
             </section>
             <section className="mt-7">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="font-semibold">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold">
                   내 프로젝트{' '}
-                  <span className="ml-2 text-muted-foreground">
+                  <span className="ml-1 text-muted-foreground">
                     {allProjects.length}
                   </span>
                 </h3>
-                <Badge variant="outline">참여 중인 프로젝트</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      aria-label="프로젝트 검색"
+                      placeholder="프로젝트 이름 검색"
+                      className="w-60 pl-8"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                    />
+                  </div>
+                  <NativeSelect
+                    aria-label="정렬"
+                    value={sort}
+                    onChange={(event) =>
+                      setSort(event.target.value as typeof sort)
+                    }
+                  >
+                    <NativeSelectOption value="recent">
+                      최근 만든 순
+                    </NativeSelectOption>
+                    <NativeSelectOption value="name">이름순</NativeSelectOption>
+                    <NativeSelectOption value="leader">
+                      내가 팀장인 프로젝트 먼저
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {allProjects.map((project) => (
+                {shownProjects.map((project) => (
                   <Link
                     className="group rounded-2xl border bg-card p-5 transition hover:-translate-y-1 hover:shadow-md"
                     key={project.id}
@@ -185,14 +208,14 @@ function City() {
                 ))}
                 <button
                   type="button"
-                  className="grid min-h-52 place-content-center gap-3 rounded-2xl border border-dashed text-sm text-muted-foreground hover:bg-muted/50"
+                  className="grid min-h-40 place-content-center gap-3 rounded-2xl border border-dashed text-sm text-muted-foreground hover:bg-muted/50"
                   disabled={nextLot === undefined}
-                  onClick={() => setCreatingAt(nextLot ?? null)}
+                  onClick={() => startCreate(nextLot ?? null)}
                 >
                   <Plus className="mx-auto size-6" />
                   {nextLot === undefined
                     ? '모든 부지를 사용 중이에요'
-                    : '새 프로젝트 시작'}
+                    : '프로젝트 만들기'}
                 </button>
               </div>
               {projects.hasNextPage && (
@@ -210,47 +233,65 @@ function City() {
         )}
       </AsyncState>
       {creatingAt !== null && (
-        <FormDialog
-          title="선택한 부지에 프로젝트 만들기"
-          description={`부지 ${creatingAt + 1}에서 팀의 공간을 시작하세요. 부지와 외관은 이 브라우저에 보관됩니다.`}
-          submitLabel="건물 짓기"
-          onClose={() => setCreatingAt(null)}
-          fields={[
-            { name: 'name', label: '프로젝트 이름', required: true, max: 40 },
-            {
-              name: 'description',
-              label: '프로젝트 소개',
-              type: 'textarea',
-              max: 300,
-            },
-            {
-              name: 'design',
-              label: '건물 디자인',
-              type: 'select',
-              value: 'modern',
-              options: [
-                { value: 'glass', label: '유리 오피스' },
-                { value: 'brick', label: '붉은 벽돌' },
-                { value: 'modern', label: '모던 화이트' },
-                { value: 'tower', label: '다크 타워' },
-                { value: 'wood', label: '목조 스튜디오' },
-              ],
-            },
-          ]}
-          onSubmit={async (values) => {
-            const project = await create.mutateAsync({
-              name: values.name.trim(),
-              description: values.description.trim(),
-            })
-            placeProject(session.data!.id, project.id, {
-              lot: creatingAt,
-              design: values.design as BuildingDesign,
-            })
-            await queryClient.invalidateQueries({ queryKey: ['projects'] })
-            setCreatingAt(null)
-            navigate(`/projects/${project.id}`)
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !create.isPending) setCreatingAt(null)
           }}
-        />
+        >
+          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>프로젝트 만들기</DialogTitle>
+              <DialogDescription>
+                부지 {creatingAt + 1}에 지어요. 부지와 건물 디자인은 이
+                브라우저에 보관돼요.
+              </DialogDescription>
+            </DialogHeader>
+            {/* API 없음: 건물 디자인은 Project에 design 필드가 생기면 생성 요청에 같이 보낸다. */}
+            <BuildingDesignPicker value={design} onChange={setDesign} />
+            <hr />
+            <ActionForm
+              fields={[
+                {
+                  name: 'name',
+                  label: '프로젝트 이름',
+                  required: true,
+                  max: 40,
+                  counter: true,
+                },
+                {
+                  name: 'description',
+                  label: '프로젝트 소개',
+                  type: 'textarea',
+                  max: 300,
+                  counter: true,
+                  placeholder:
+                    '팀원이 이 프로젝트를 한눈에 알 수 있게 한두 문장으로 적어 주세요.',
+                },
+              ]}
+              footer={
+                <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+                  만든 뒤 문서 초안 4종(기획안 · ERD · 요구사항 명세서 · API
+                  명세서)을 올리면 프로젝트가 시작돼요.
+                </p>
+              }
+              submitLabel="프로젝트 만들기"
+              onSubmit={async (values) => {
+                const project = await create.mutateAsync({
+                  name: values.name.trim(),
+                  description: values.description.trim(),
+                })
+                placeProject(session.data!.id, project.id, {
+                  lot: creatingAt,
+                  design,
+                })
+                await queryClient.invalidateQueries({ queryKey: ['projects'] })
+                setCreatingAt(null)
+                navigate(`/projects/${project.id}`)
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </main>
   )

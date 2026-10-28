@@ -1,5 +1,7 @@
-import { Link, useNavigate } from 'react-router'
+import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Bot, Hexagon, UserRound } from 'lucide-react'
 import { authApi, agentsApi, projectsApi } from '@/api/services'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
@@ -7,12 +9,26 @@ import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { formatDate } from '@/lib/formatDate'
+import { cn } from '@/lib/utils'
+
+const avatars = [
+  { value: 'human', label: '사람', icon: UserRound },
+  { value: 'robot', label: '로봇', icon: Bot },
+  { value: 'bee', label: '벌', icon: Hexagon },
+] as const
 
 function Account() {
   const session = useSession()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const location = useLocation()
+  const toast = (location.state as { toast?: string } | null)?.toast
+  const [revoking, setRevoking] = useState<string | null>(null)
+  const [avatar, setAvatar] = useState(session.data?.avatar ?? 'human')
+  const picked = avatars.find((item) => item.value === avatar) ?? avatars[0]
   const mutation = useMutation({
     mutationFn: (action: () => Promise<unknown>) => action(),
     onSuccess: async () => {
@@ -33,153 +49,197 @@ function Account() {
     },
   })
   return (
-    <main className="mx-auto max-w-4xl space-y-7 px-6 py-10">
+    <main className="mx-auto max-w-4xl space-y-6 px-6 py-10">
+      {toast && (
+        <p
+          role="status"
+          className="fixed top-20 right-6 z-30 rounded-xl border bg-card px-4 py-3 text-sm shadow-lg"
+        >
+          {toast}
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">회원 설정</h2>
-        <Button variant="outline" asChild>
-          <Link to="/">나의 도시로</Link>
+        <Button variant="ghost" onClick={() => navigate(-1)}>
+          <ArrowLeft />
+          이전 페이지로
         </Button>
-      </div>
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>프로필</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-5 text-xs text-muted-foreground">
-              {session.data?.email}
-            </p>
-            <ActionForm
-              key={session.data?.id}
-              fields={[
-                {
-                  name: 'name',
-                  label: '표시 이름',
-                  required: true,
-                  max: 40,
-                  value: session.data?.name,
-                },
-                {
-                  name: 'avatar',
-                  label: '아바타',
-                  type: 'select',
-                  value: session.data?.avatar ?? 'human',
-                  options: [
-                    { value: 'human', label: '사람' },
-                    { value: 'robot', label: '로봇' },
-                    { value: 'bee', label: '벌' },
-                  ],
-                },
-              ]}
-              submitLabel="프로필 저장"
-              onSubmit={(values) =>
-                mutation.mutateAsync(() =>
-                  authApi.updateMe({
-                    name: values.name,
-                    avatar: values.avatar,
-                  }),
-                )
-              }
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>비밀번호 변경</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActionForm
-              fields={[
-                {
-                  name: 'current_password',
-                  label: '현재 비밀번호',
-                  type: 'password',
-                  required: true,
-                },
-                {
-                  name: 'new_password',
-                  label: '새 비밀번호',
-                  type: 'password',
-                  min: 8,
-                  max: 128,
-                  required: true,
-                },
-                {
-                  name: 'confirm',
-                  label: '새 비밀번호 확인',
-                  type: 'password',
-                  required: true,
-                  matches: 'new_password',
-                },
-              ]}
-              submitLabel="비밀번호 바꾸기"
-              onSubmit={(values) =>
-                mutation.mutateAsync(() =>
-                  authApi.changePassword({
-                    current_password: values.current_password,
-                    new_password: values.new_password,
-                  }),
-                )
-              }
-            />
-          </CardContent>
-        </Card>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>내 에이전트 토큰</CardTitle>
+          <CardTitle>프로필</CardTitle>
         </CardHeader>
-        <CardContent>
-          <AsyncState query={tokens}>
-            {(data) => (
-              <div className="grid gap-3">
-                {data.tokens.items
-                  .filter((token) => !token.revoked_at)
-                  .map((token) => (
-                    <div
-                      key={token.id}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"
-                    >
-                      <div>
-                        <Link
-                          to={`/projects/${token.project_id}`}
-                          className="text-sm font-semibold underline"
-                        >
-                          {data.projects.items.find(
-                            (project) => project.id === token.project_id,
-                          )?.name ?? '프로젝트'}
-                        </Link>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {token.label || '개인 토큰'} · 발급{' '}
-                          {formatDate(token.created_at)}
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        disabled={mutation.isPending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              '이 토큰을 폐기할까요? 기존 연결은 사용할 수 없게 돼요.',
-                            )
-                          )
-                            mutation.mutate(() =>
-                              agentsApi.revokeToken(token.id),
-                            )
-                        }}
-                      >
-                        폐기
-                      </Button>
-                    </div>
-                  ))}
-                {data.tokens.items.every((token) => token.revoked_at) && (
-                  <p className="text-sm text-muted-foreground">
-                    발급한 토큰이 없어요. 프로젝트의 에이전트 연결에서 발급할 수
-                    있어요.
+        <CardContent className="grid gap-8 md:grid-cols-[200px_1fr]">
+          <div className="grid content-start gap-4">
+            <div
+              aria-label={`미리 보기: ${picked.label}`}
+              className="grid aspect-square place-items-center rounded-2xl bg-muted"
+            >
+              <picked.icon className="size-20 text-primary" />
+            </div>
+            <fieldset className="grid grid-cols-3 gap-2">
+              <legend className="mb-2 text-sm font-medium">아바타</legend>
+              {avatars.map((item) => (
+                <label
+                  key={item.value}
+                  className={cn(
+                    'grid cursor-pointer justify-items-center gap-1 rounded-xl border p-2 text-xs',
+                    avatar === item.value && 'border-primary bg-primary/10',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="avatar"
+                    className="sr-only"
+                    checked={avatar === item.value}
+                    onChange={() => setAvatar(item.value)}
+                  />
+                  <item.icon className="size-5" />
+                  {item.label}
+                </label>
+              ))}
+            </fieldset>
+          </div>
+          <ActionForm
+            key={session.data?.id}
+            fields={[
+              {
+                name: 'name',
+                label: '표시 이름',
+                required: true,
+                max: 40,
+                value: session.data?.name,
+              },
+            ]}
+            footer={
+              <div className="grid gap-2">
+                <Label htmlFor="account-email">이메일 (아이디)</Label>
+                <Input
+                  id="account-email"
+                  value={session.data?.email ?? ''}
+                  readOnly
+                  disabled
+                />
+                {session.data && (
+                  <p className="text-xs text-muted-foreground">
+                    가입일 {formatDate(session.data.created_at)}
                   </p>
                 )}
               </div>
-            )}
+            }
+            submitLabel="프로필 저장"
+            onSubmit={(values) =>
+              mutation.mutateAsync(() =>
+                authApi.updateMe({ name: values.name, avatar }),
+              )
+            }
+          />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>비밀번호 변경</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            현재 비밀번호를 확인한 뒤 새 비밀번호로 바꿀 수 있어요.
+          </p>
+          <Button variant="outline" asChild>
+            <Link to="/account/password">비밀번호 변경</Link>
+          </Button>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>내 에이전트 토큰</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            프로젝트마다 따로 발급하는 개인 토큰이에요. 내 컴퓨터의 Claude
+            Code가 그 프로젝트에 접속할 때 써요. 새 토큰은 각 프로젝트의 설정 ›
+            에이전트에서 발급해요.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <AsyncState query={tokens}>
+            {(data) => {
+              const active = data.tokens.items.filter(
+                (token) => !token.revoked_at,
+              )
+              return active.length ? (
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr className="border-b">
+                      <th className="py-2 font-medium">프로젝트</th>
+                      <th className="py-2 font-medium">토큰 이름</th>
+                      <th className="py-2 font-medium">발급일</th>
+                      <th className="py-2 font-medium">최근 사용</th>
+                      <th className="py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {active.map((token) => (
+                      <tr key={token.id} className="border-b last:border-0">
+                        <td className="py-3">
+                          <Link
+                            to={`/projects/${token.project_id}`}
+                            className="font-semibold underline"
+                          >
+                            {data.projects.items.find(
+                              (project) => project.id === token.project_id,
+                            )?.name ?? '프로젝트'}
+                          </Link>
+                        </td>
+                        <td>{token.label || '개인 토큰'}</td>
+                        <td>{formatDate(token.created_at)}</td>
+                        <td className="text-muted-foreground">
+                          {token.last_used_at
+                            ? formatDate(token.last_used_at)
+                            : '기록 없음'}
+                        </td>
+                        <td className="text-right">
+                          {revoking === token.id ? (
+                            <span className="inline-flex items-center gap-2 text-xs">
+                              연결이 바로 끊겨요.
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={mutation.isPending}
+                                onClick={() =>
+                                  mutation.mutate(
+                                    () => agentsApi.revokeToken(token.id),
+                                    { onSettled: () => setRevoking(null) },
+                                  )
+                                }
+                              >
+                                폐기하기
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRevoking(null)}
+                              >
+                                취소
+                              </Button>
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setRevoking(token.id)}
+                            >
+                              폐기
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  발급한 토큰이 없어요.
+                </p>
+              )
+            }}
           </AsyncState>
         </CardContent>
       </Card>
@@ -187,30 +247,14 @@ function Account() {
         <CardHeader>
           <CardTitle>회원 탈퇴</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="mb-5 text-sm leading-7 text-muted-foreground">
-            프로젝트 팀장을 위임하고 참여 중인 프로젝트에서 나간 뒤 탈퇴할 수
-            있어요. 작업과 문서 이력은 보존 정책에 따라 처리돼요.
+        <CardContent className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            팀원이 있는 팀 프로젝트는 팀장을 위임하거나 삭제한 뒤 탈퇴할 수
+            있어요.
           </p>
-          <ActionForm
-            fields={[
-              {
-                name: 'password',
-                label: '탈퇴 확인 비밀번호',
-                type: 'password',
-                required: true,
-              },
-            ]}
-            submitLabel="회원 탈퇴"
-            onSubmit={async (values) => {
-              if (!window.confirm('정말 회원 탈퇴할까요?')) return
-              await mutation.mutateAsync(() =>
-                authApi.withdraw({ password: values.password }),
-              )
-              queryClient.clear()
-              navigate('/login')
-            }}
-          />
+          <Button variant="outline" className="text-destructive" asChild>
+            <Link to="/account/withdraw">회원 탈퇴</Link>
+          </Button>
         </CardContent>
       </Card>
     </main>

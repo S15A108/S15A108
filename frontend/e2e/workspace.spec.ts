@@ -5,7 +5,7 @@ test.setTimeout(90_000)
 
 async function login(page: Page) {
   await page.goto('/login')
-  await page.getByRole('button', { name: '로그인하기 →' }).click()
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
   await expect(page.getByRole('heading', { name: /님의 도시/ })).toBeVisible()
 }
 
@@ -34,13 +34,18 @@ test('선택한 부지의 프로젝트와 외관이 새로고침 뒤에도 유�
   })
   await login(page)
   await expect(page.locator('canvas')).toBeVisible()
-  await page.getByRole('button', { name: '건물 짓기', exact: true }).click()
+  await page
+    .getByRole('button', { name: '프로젝트 만들기', exact: true })
+    .first()
+    .click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('부지 3')
   await dialog.getByLabel('프로젝트 이름').fill('부지 이식 확인')
   await dialog.getByLabel('프로젝트 소개').fill('도시에서 만든 목 프로젝트')
-  await dialog.getByLabel('건물 디자인').selectOption('wood')
-  await dialog.getByRole('button', { name: '건물 짓기', exact: true }).click()
+  await dialog.getByRole('radio', { name: '목조 스튜디오' }).check()
+  await dialog
+    .getByRole('button', { name: '프로젝트 만들기', exact: true })
+    .click()
   await expect(
     page.getByRole('heading', { name: '부지 이식 확인', exact: true }),
   ).toBeVisible()

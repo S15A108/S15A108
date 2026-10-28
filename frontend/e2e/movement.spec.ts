@@ -5,7 +5,7 @@ test.setTimeout(90_000)
 
 async function office(page: Page, projectId: string) {
   await page.goto('/login')
-  await page.getByRole('button', { name: '로그인하기 →' }).click()
+  await page.getByRole('button', { name: '로그인', exact: true }).click()
   await expect(page.getByRole('heading', { name: /님의 도시/ })).toBeVisible()
   await page.goto(`/projects/${projectId}`)
   const canvas = page.locator('canvas')

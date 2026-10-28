@@ -59,3 +59,9 @@ export const statusLabel = (value: unknown) => {
   const key = text(value, '')
   return statusLabels[key] ?? key
 }
+
+// 받침이 있으면 '을', 없으면 '를'. 한글이 아니면 받침 없음으로 본다.
+export const objectParticle = (word: string) => {
+  const code = word.trim().charCodeAt(word.trim().length - 1) - 0xac00
+  return code >= 0 && code <= 11171 && code % 28 !== 0 ? '을' : '를'
+}
