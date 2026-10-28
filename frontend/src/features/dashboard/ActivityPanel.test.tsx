@@ -18,7 +18,7 @@ vi.mock('@/api/services/dashboard', () => ({
 vi.mock('@/api/services/members', () => ({ membersApi: { list: vi.fn() } }))
 beforeEach(() => {
   vi.clearAllMocks()
-  useWorkspaceStore.setState({ pane: 'activity', focusId: null })
+  useWorkspaceStore.setState({ pane: 'dashboard', focusId: null })
   vi.mocked(dashboardApi.usage).mockResolvedValue({
     from: '2026-10-20T00:00:00Z',
     to: '2026-10-23T00:00:00Z',

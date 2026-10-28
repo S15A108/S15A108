@@ -5,21 +5,13 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import {
-  Copy,
-  MailPlus,
-  Pencil,
-  Settings,
-  ShieldCheck,
-  UserMinus,
-  Users,
-} from 'lucide-react'
+import { Copy, Ellipsis, MailPlus, Pencil, TriangleAlert } from 'lucide-react'
 import type { Member } from '@/api/contracts/common'
 import { membersApi, projectsApi } from '@/api/services'
+import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
 import { FormDialog } from '@/components/FormDialog'
-import { StatusPill } from '@/components/StatusPill'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -28,30 +20,48 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useSession } from '@/features/auth/useSession'
+import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
+import { projectPlacements } from '@/features/projects/placements'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { formatDate } from '@/lib/formatDate'
+import { placementKey, useWorkspaceStore } from '@/stores/workspaceStore'
+import type { BuildingDesign } from '@/stores/workspaceStore'
 
 type DialogAction =
-  | 'invite'
-  | 'project'
-  | 'delete'
-  | 'leave'
-  | { action: 'edit' | 'remove'; member: Member }
-  | 'transfer'
+  'invite' | { action: 'edit' | 'remove' | 'transfer'; member: Member }
+
+export type TeamView = 'team' | 'project' | 'remove'
 
 export function TeamPanel({
   projectId,
   isLeader,
+  view = 'team',
+  onViewChange,
 }: {
   projectId: string
   isLeader: boolean
+  view?: TeamView
+  onViewChange?: (view: TeamView) => void
 }) {
   const session = useSession()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const action = useProjectAction(projectId)
+  const placements = useWorkspaceStore((state) => state.placements)
+  const placeProject = useWorkspaceStore((state) => state.placeProject)
+  const accountId = session.data?.id ?? ''
+  const [design, setDesign] = useState<BuildingDesign>(
+    placements[placementKey(accountId, projectId)]?.design ?? 'modern',
+  )
   const [dialog, setDialog] = useState<DialogAction | null>(null)
   const [inviteUrl, setInviteUrl] = useState('')
   const [copyMessage, setCopyMessage] = useState('')
@@ -73,7 +83,7 @@ export function TeamPanel({
     queryFn: ({ pageParam }) =>
       membersApi.invitations(projectId, { cursor: pageParam }),
     getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
-    enabled: isLeader,
+    enabled: isLeader && view === 'team',
   })
   const people = members.data?.pages.flatMap((page) => page.items) ?? []
   const otherMembers = people.filter(
@@ -86,19 +96,28 @@ export function TeamPanel({
   const perform = (operation: () => Promise<unknown>, message: string) => {
     void action.run(operation, message).catch(() => undefined)
   }
+  const title =
+    view === 'project'
+      ? '프로젝트 정보'
+      : view === 'remove'
+        ? isLeader
+          ? '프로젝트 제거'
+          : '프로젝트 나가기'
+        : '팀'
   return (
     <section className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="mb-2 text-xs font-semibold tracking-widest text-primary">
-            PEOPLE & PROJECT
-          </p>
-          <h2 className="text-2xl font-semibold">함께 일하는 사람들</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            인간 팀장과 팀원의 역할, 담당 영역, 프로젝트 참여를 관리해요.
-          </p>
+          <h2 className="text-xl font-bold">{title}</h2>
+          {view === 'team' && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isLeader
+                ? '권한은 인간 팀장과 팀원 두 가지예요. 역할 수정, 팀장 위임, 추방은 팀원 줄의 ⋯에서 해요.'
+                : '팀 구성은 보기만 할 수 있어요. 바꾸려면 인간 팀장에게 요청해 주세요.'}
+            </p>
+          )}
         </div>
-        {isLeader && (
+        {view === 'team' && isLeader && (
           <Button
             onClick={() => {
               setInviteUrl('')
@@ -123,11 +142,12 @@ export function TeamPanel({
           {action.error}
         </p>
       )}
-      {inviteUrl && (
+      {view === 'team' && inviteUrl && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">초대 링크가 준비됐어요</CardTitle>
             <CardDescription>
+              {/* API 없음: 초대 메일 발송이 생기면 링크 대신 '초대 메일을 보냈어요'로 바꾼다. */}
               초대한 이메일의 팀원에게 이 링크를 전달해 주세요.
             </CardDescription>
           </CardHeader>
@@ -161,254 +181,342 @@ export function TeamPanel({
           </CardContent>
         </Card>
       )}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Users className="size-5" />
-            팀원
-          </CardTitle>
-          <CardDescription>
-            표시 역할과 담당 영역은 권한을 바꾸지 않아요. 권한은 인간 팀장·팀원
-            두 종류예요.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AsyncState query={members}>
-            {(data) => (
-              <>
-                <div className="divide-y">
-                  {data.pages
-                    .flatMap((page) => page.items)
-                    .map((member) => (
-                      <article
+      {view === 'team' && (
+        <AsyncState query={members}>
+          {(data) => (
+            <>
+              <ul className="divide-y border-y">
+                {data.pages
+                  .flatMap((page) => page.items)
+                  .map((member) => {
+                    const mine = member.account_id === session.data?.id
+                    return (
+                      <li
                         key={member.id}
-                        className="flex flex-wrap items-center justify-between gap-4 py-4"
+                        className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] items-center gap-4 px-1 py-3.5"
                       >
-                        <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex min-w-0 items-center gap-2.5">
                           <span
-                            className="grid size-10 shrink-0 place-items-center rounded-full text-sm font-semibold"
+                            aria-hidden="true"
+                            className="grid size-8 shrink-0 place-items-center rounded-full text-xs font-bold"
                             style={{
                               backgroundColor: `${member.color ?? '#e5b743'}25`,
                               color: member.color ?? '#a98419',
                             }}
                           >
-                            {member.name.slice(0, 2)}
+                            {member.name.slice(0, 1)}
                           </span>
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-sm font-semibold">
-                                {member.name}
-                                {member.account_id === session.data?.id
-                                  ? ' · 나'
-                                  : ''}
-                              </h3>
-                              <StatusPill value={member.role} />
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {member.role_label ?? '표시 역할 미등록'} ·{' '}
-                              {member.domain ?? '담당 영역 미등록'}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              에이전트{' '}
-                              {member.agent_connected
-                                ? '최근 외부 연결 확인'
-                                : '최근 연결 미확인'}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {(isLeader ||
-                            member.account_id === session.data?.id) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={action.busy}
-                              onClick={() =>
-                                setDialog({ action: 'edit', member })
-                              }
-                            >
-                              <Pencil />
-                              역할·담당 영역
-                            </Button>
+                          <span className="grid">
+                            <strong className="text-sm font-semibold">
+                              {member.name}
+                              {mine ? ' · 나' : ''}
+                            </strong>
+                            <span className="text-xs text-muted-foreground">
+                              {member.role === 'LEADER' ? '인간 팀장' : '팀원'}
+                              {member.role_label
+                                ? ` · ${member.role_label}`
+                                : ''}
+                            </span>
+                          </span>
+                        </span>
+                        <span
+                          className={
+                            member.domain
+                              ? 'text-sm'
+                              : 'text-sm text-muted-foreground'
+                          }
+                        >
+                          {member.domain ?? '담당 영역 미등록'}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-xs">
+                          <span
+                            aria-hidden="true"
+                            className={`size-1.5 rounded-full ${member.agent_connected ? 'bg-green-600' : 'bg-primary'}`}
+                          />
+                          {member.agent_connected
+                            ? '에이전트 연결됨'
+                            : '에이전트 연결 미확인'}
+                        </span>
+                        <span className="flex justify-end">
+                          {isLeader && !mine && member.role !== 'LEADER' ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  size="icon-sm"
+                                  aria-label={`${member.name} 더보기`}
+                                  disabled={action.busy}
+                                >
+                                  <Ellipsis />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    setDialog({ action: 'edit', member })
+                                  }
+                                >
+                                  역할 수정
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    setDialog({ action: 'transfer', member })
+                                  }
+                                >
+                                  팀장으로 위임
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onSelect={() =>
+                                    setDialog({ action: 'remove', member })
+                                  }
+                                >
+                                  추방
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : (
+                            (isLeader || mine) && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={action.busy}
+                                onClick={() =>
+                                  setDialog({ action: 'edit', member })
+                                }
+                              >
+                                <Pencil />
+                                역할·담당 영역
+                              </Button>
+                            )
                           )}
-                          {isLeader && member.role !== 'LEADER' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={action.busy}
-                              onClick={() =>
-                                setDialog({ action: 'remove', member })
-                              }
-                            >
-                              <UserMinus />
-                              제외
-                            </Button>
-                          )}
-                        </div>
-                      </article>
-                    ))}
-                </div>
-                {members.hasNextPage && (
+                        </span>
+                      </li>
+                    )
+                  })}
+              </ul>
+              {members.hasNextPage && (
+                <Button
+                  variant="outline"
+                  disabled={members.isFetchingNextPage}
+                  onClick={() => void members.fetchNextPage()}
+                >
+                  팀원 더 보기
+                </Button>
+              )}
+            </>
+          )}
+        </AsyncState>
+      )}
+      {view === 'team' && isLeader && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold">초대 대기</h3>
+          <AsyncState query={invitations}>
+            {(data) => (
+              <>
+                {data.pages.flatMap((page) => page.items).length ? (
+                  <ul className="divide-y">
+                    {data.pages
+                      .flatMap((page) => page.items)
+                      .map((invitation) => (
+                        <li
+                          key={invitation.id}
+                          className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
+                        >
+                          <span>
+                            <b className="font-medium">
+                              {invitation.invited_email ?? '초대 링크'}
+                            </b>
+                            <small className="mt-1 block text-muted-foreground">
+                              {invitation.accepted_at
+                                ? '수락됨'
+                                : invitation.revoked_at
+                                  ? '취소됨'
+                                  : Date.parse(invitation.expires_at) < viewTime
+                                    ? '만료됨'
+                                    : `만료 ${formatDate(invitation.expires_at)}`}
+                            </small>
+                          </span>
+                          {/* API 없음: 초대 다시 보내기. 지금은 취소만 있다. */}
+                          {!invitation.revoked_at &&
+                            !invitation.accepted_at && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={action.busy}
+                                onClick={() =>
+                                  perform(
+                                    () =>
+                                      membersApi.revokeInvitation(
+                                        projectId,
+                                        invitation.id,
+                                      ),
+                                    '초대를 취소했어요.',
+                                  )
+                                }
+                              >
+                                초대 취소
+                              </Button>
+                            )}
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <EmptyState>보낸 초대가 없어요.</EmptyState>
+                )}
+                {invitations.hasNextPage && (
                   <Button
                     variant="outline"
-                    disabled={members.isFetchingNextPage}
-                    onClick={() => void members.fetchNextPage()}
+                    onClick={() => void invitations.fetchNextPage()}
                   >
-                    팀원 더 보기
+                    초대 더 보기
                   </Button>
                 )}
               </>
             )}
           </AsyncState>
-        </CardContent>
-      </Card>
-      {isLeader && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">초대 현황</CardTitle>
-            <CardDescription>
-              만료되거나 폐기된 링크는 사용할 수 없어요.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AsyncState query={invitations}>
-              {(data) => (
-                <>
-                  {data.pages.flatMap((page) => page.items).length ? (
-                    <ul className="divide-y">
-                      {data.pages
-                        .flatMap((page) => page.items)
-                        .map((invitation) => (
-                          <li
-                            key={invitation.id}
-                            className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
-                          >
-                            <span>
-                              <b className="font-medium">
-                                {invitation.invited_email ?? '초대 링크'}
-                              </b>
-                              <small className="mt-1 block text-muted-foreground">
-                                {invitation.accepted_at
-                                  ? '수락됨'
-                                  : invitation.revoked_at
-                                    ? '폐기됨'
-                                    : Date.parse(invitation.expires_at) <
-                                        viewTime
-                                      ? '만료됨'
-                                      : `만료 ${formatDate(invitation.expires_at)}`}
-                              </small>
-                            </span>
-                            {!invitation.revoked_at &&
-                              !invitation.accepted_at && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={action.busy}
-                                  onClick={() =>
-                                    perform(
-                                      () =>
-                                        membersApi.revokeInvitation(
-                                          projectId,
-                                          invitation.id,
-                                        ),
-                                      '초대를 폐기했어요.',
-                                    )
-                                  }
-                                >
-                                  초대 폐기
-                                </Button>
-                              )}
-                          </li>
-                        ))}
-                    </ul>
-                  ) : (
-                    <EmptyState>보낸 초대가 없어요.</EmptyState>
-                  )}
-                  {invitations.hasNextPage && (
-                    <Button
-                      variant="outline"
-                      onClick={() => void invitations.fetchNextPage()}
-                    >
-                      초대 더 보기
-                    </Button>
-                  )}
-                </>
-              )}
-            </AsyncState>
-          </CardContent>
-        </Card>
+        </div>
       )}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Settings className="size-5" />
-            프로젝트 관리
-          </CardTitle>
-          <CardDescription>
-            이름·소개, 인간 팀장 위임과 프로젝트 참여를 관리해요.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AsyncState query={project}>
-            {(data) => (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-medium">{data.name}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {data.description || '소개가 없어요.'}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {isLeader ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        disabled={action.busy}
-                        onClick={() => setDialog('project')}
-                      >
-                        <Pencil />
-                        프로젝트 정보
-                      </Button>
-                      <Button
-                        variant="outline"
-                        disabled={action.busy || !otherMembers.length}
-                        onClick={() => setDialog('transfer')}
-                      >
-                        <ShieldCheck />
-                        팀장 위임
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        disabled={action.busy}
-                        onClick={() => setDialog('delete')}
-                      >
-                        프로젝트 삭제
-                      </Button>
-                    </>
-                  ) : (
+      {view === 'project' && (
+        <AsyncState query={project}>
+          {(data) => (
+            <div className="space-y-6">
+              {/* API 없음: 건물 디자인은 이 브라우저에만 저장된다. Project에 design 필드가 생기면 수정 요청에 넣는다. */}
+              <BuildingDesignPicker value={design} onChange={setDesign} />
+              <ActionForm
+                fields={[
+                  {
+                    name: 'name',
+                    label: '프로젝트 이름',
+                    required: true,
+                    max: 40,
+                    counter: true,
+                    value: data.name,
+                  },
+                  {
+                    name: 'description',
+                    label: '프로젝트 소개',
+                    type: 'textarea',
+                    max: 300,
+                    counter: true,
+                    value: data.description,
+                  },
+                ]}
+                submitLabel="저장"
+                onSubmit={async (values) => {
+                  await action.run(
+                    () =>
+                      projectsApi.update(projectId, {
+                        name: values.name,
+                        description: values.description,
+                      }),
+                    '프로젝트 정보를 저장했어요.',
+                  )
+                  placeProject(accountId, projectId, {
+                    lot:
+                      projectPlacements([projectId], accountId, placements)[0]
+                        .lot ?? 0,
+                    design,
+                  })
+                  await queryClient.invalidateQueries({
+                    queryKey: ['projects'],
+                  })
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 p-4">
+                <span className="text-sm">
+                  <strong className="block">프로젝트 삭제</strong>
+                  <span className="text-muted-foreground">
+                    팀원이 있으면 팀장을 먼저 위임해야 해요.
+                  </span>
+                </span>
+                <Button
+                  variant="destructive"
+                  onClick={() => onViewChange?.('remove')}
+                >
+                  프로젝트 삭제
+                </Button>
+              </div>
+            </div>
+          )}
+        </AsyncState>
+      )}
+      {view === 'remove' && (
+        <AsyncState query={project}>
+          {(data) =>
+            isLeader && otherMembers.length > 0 ? (
+              // 서버(PRJ-A05)는 아직 팀원이 있어도 지운다. 막는 응답(409)이 생기기 전까지 화면에서 먼저 막는다.
+              <div className="space-y-4 rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+                <p className="flex items-center gap-2 font-semibold text-destructive">
+                  <TriangleAlert className="size-4" />
+                  팀원이 있어서 바로 제거할 수 없어요
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  프로젝트는 남은 팀원에게 남아요. 아래 순서로 정리해 주세요.
+                </p>
+                <ol className="grid gap-3 text-sm">
+                  <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
+                    <span>1. 팀원 중 한 명에게 팀장 위임</span>
                     <Button
                       variant="outline"
-                      disabled={action.busy}
-                      onClick={() => setDialog('leave')}
+                      size="sm"
+                      onClick={() => onViewChange?.('team')}
                     >
-                      프로젝트 나가기
+                      팀에서 위임하기
                     </Button>
-                  )}
-                </div>
-                {isLeader && !otherMembers.length && (
-                  <p className="text-xs text-muted-foreground">
-                    팀원을 초대하면 인간 팀장을 위임할 수 있어요.
-                  </p>
-                )}
+                  </li>
+                  <li className="rounded-lg border bg-card p-3 text-muted-foreground">
+                    2. 위임한 뒤 프로젝트 나가기
+                  </li>
+                </ol>
               </div>
-            )}
-          </AsyncState>
-        </CardContent>
-      </Card>
+            ) : (
+              <div className="space-y-4">
+                <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                  {isLeader
+                    ? '혼자 쓰는 프로젝트예요. 제거하면 문서와 작업에 다시 들어올 수 없어요.'
+                    : '나가면 문서·작업을 볼 수 없고 이 프로젝트 토큰도 바로 막혀요. 다시 들어오려면 새 초대가 필요해요.'}
+                </p>
+                <ActionForm
+                  fields={[
+                    {
+                      name: 'confirm_name',
+                      label: '프로젝트 이름 입력',
+                      required: true,
+                      placeholder: data.name,
+                      check: (value) =>
+                        value === data.name
+                          ? undefined
+                          : '프로젝트 이름이 맞지 않아요.',
+                    },
+                  ]}
+                  destructive
+                  submitLabel={isLeader ? '프로젝트 제거' : '프로젝트 나가기'}
+                  onSubmit={async (values) => {
+                    await action.run(
+                      () =>
+                        isLeader
+                          ? projectsApi.remove(projectId, {
+                              confirm_name: values.confirm_name,
+                            })
+                          : membersApi.leave(projectId, {}),
+                      isLeader
+                        ? '프로젝트를 제거했어요.'
+                        : '프로젝트에서 나갔어요.',
+                    )
+                    await leaveProject()
+                  }}
+                />
+              </div>
+            )
+          }
+        </AsyncState>
+      )}
       {dialog === 'invite' && (
         <FormDialog
           title="팀원 초대"
-          description="초대한 이메일로 로그인한 사용자가 참여할 수 있어요."
+          description="초대한 이메일로 로그인한 사용자가 참여할 수 있어요. 7일 뒤 만료돼요."
           fields={[
             {
               name: 'email',
@@ -430,62 +538,27 @@ export function TeamPanel({
           }}
         />
       )}
-      {dialog === 'project' && project.data && (
+      {typeof dialog === 'object' && dialog?.action === 'transfer' && (
         <FormDialog
-          title="프로젝트 정보 수정"
+          title="팀장으로 위임"
+          description={`${dialog.member.name}님이 인간 팀장이 되고, 나는 팀원이 돼요. 승인·발행과 프로젝트 설정 권한이 넘어가요.`}
           fields={[
             {
-              name: 'name',
-              label: '프로젝트 이름',
+              name: 'confirm',
+              label: "확인을 위해 '위임'을 입력",
               required: true,
-              max: 80,
-              value: project.data.name,
-            },
-            {
-              name: 'description',
-              label: '프로젝트 소개',
-              type: 'textarea',
-              value: project.data.description,
+              check: (value) =>
+                value === '위임' ? undefined : "'위임'을 입력해 주세요.",
             },
           ]}
+          submitLabel="팀장 넘기기"
+          destructive
           onClose={() => setDialog(null)}
-          onSubmit={async (values) => {
-            await action.run(
-              () =>
-                projectsApi.update(projectId, {
-                  name: values.name,
-                  description: values.description,
-                }),
-              '프로젝트 정보를 저장했어요.',
-            )
-            await queryClient.invalidateQueries({ queryKey: ['projects'] })
-            setDialog(null)
-          }}
-        />
-      )}
-      {dialog === 'transfer' && (
-        <FormDialog
-          title="인간 팀장 위임"
-          description="선택한 팀원이 인간 팀장이 되고, 나는 팀원이 됩니다."
-          fields={[
-            {
-              name: 'target_member_id',
-              label: '새 인간 팀장',
-              type: 'select',
-              required: true,
-              options: otherMembers.map((member) => ({
-                value: member.id,
-                label: member.name,
-              })),
-            },
-          ]}
-          submitLabel="팀장 위임"
-          onClose={() => setDialog(null)}
-          onSubmit={async (values) => {
+          onSubmit={async () => {
             await action.run(
               () =>
                 membersApi.transfer(projectId, {
-                  target_member_id: values.target_member_id,
+                  target_member_id: dialog.member.id,
                 }),
               '인간 팀장을 위임했어요.',
             )
@@ -494,51 +567,9 @@ export function TeamPanel({
           }}
         />
       )}
-      {dialog === 'delete' && project.data && (
-        <FormDialog
-          title="프로젝트 삭제"
-          description="프로젝트 이름을 정확하게 입력해 삭제하세요. 참여 권한은 해제되고 문서와 작업의 기록은 정책에 따라 보관됩니다."
-          fields={[
-            {
-              name: 'confirm_name',
-              label: '삭제할 프로젝트 이름',
-              required: true,
-              placeholder: project.data.name,
-            },
-          ]}
-          submitLabel="프로젝트 삭제"
-          onClose={() => setDialog(null)}
-          onSubmit={async (values) => {
-            await action.run(
-              () =>
-                projectsApi.remove(projectId, {
-                  confirm_name: values.confirm_name,
-                }),
-              '프로젝트를 삭제했어요.',
-            )
-            await leaveProject()
-          }}
-        />
-      )}
-      {dialog === 'leave' && (
-        <FormDialog
-          title="프로젝트 나가기"
-          description="프로젝트 접근 권한과 에이전트 토큰이 해제돼요. 작성한 기록은 남습니다."
-          fields={[]}
-          submitLabel="프로젝트 나가기"
-          onClose={() => setDialog(null)}
-          onSubmit={async () => {
-            await action.run(
-              () => membersApi.leave(projectId, {}),
-              '프로젝트에서 나갔어요.',
-            )
-            await leaveProject()
-          }}
-        />
-      )}
       {typeof dialog === 'object' && dialog?.action === 'edit' && (
         <FormDialog
-          title={`${dialog.member.name} 역할·담당 영역`}
+          title={`${dialog.member.name} 역할 수정`}
           fields={[
             {
               name: 'role_label',
@@ -550,8 +581,8 @@ export function TeamPanel({
             {
               name: 'color',
               label: '표시 색',
+              type: 'color',
               value: dialog.member.color ?? '#e5b743',
-              placeholder: '#e5b743',
             },
           ]}
           onClose={() => setDialog(null)}
@@ -566,8 +597,8 @@ export function TeamPanel({
       )}
       {typeof dialog === 'object' && dialog?.action === 'remove' && (
         <FormDialog
-          title={`${dialog.member.name} 프로젝트에서 제외`}
-          description="프로젝트 접근과 토큰이 해제됩니다. 진행 작업을 넘겨받을 동료를 선택하세요."
+          title={`${dialog.member.name} 추방`}
+          description="프로젝트 접근과 토큰이 바로 해제돼요. 진행 중인 작업을 넘겨받을 동료를 골라 주세요."
           fields={[
             {
               name: 'reassign_to_member_id',
@@ -578,7 +609,8 @@ export function TeamPanel({
                 .map((member) => ({ value: member.id, label: member.name })),
             },
           ]}
-          submitLabel="프로젝트에서 제외"
+          submitLabel="추방"
+          destructive
           onClose={() => setDialog(null)}
           onSubmit={async (values) => {
             await action.run(
@@ -587,7 +619,7 @@ export function TeamPanel({
                   reassign_to_member_id:
                     values.reassign_to_member_id || undefined,
                 }),
-              '팀원을 프로젝트에서 제외했어요.',
+              '팀원을 추방했어요.',
             )
             setDialog(null)
           }}

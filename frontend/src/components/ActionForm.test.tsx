@@ -72,4 +72,46 @@ describe('공용 입력 폼', () => {
     await userEvent.click(screen.getByRole('button', { name: '저장' }))
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(2))
   })
+  it('빈 칸은 조사를 맞춘 안내와 빨간 테두리를 보여 준다', async () => {
+    render(
+      <ActionForm
+        fields={[{ name: 'email', label: '이메일', required: true }]}
+        onSubmit={vi.fn()}
+        submitLabel="저장"
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: '저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '이메일을 입력해 주세요.',
+    )
+    expect(screen.getByLabelText(/이메일/)).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    )
+  })
+  it('추가 규칙에 맞지 않으면 그 문구를 보여 주고 보기 버튼으로 값을 드러낸다', async () => {
+    const submit = vi.fn()
+    render(
+      <ActionForm
+        fields={[
+          {
+            name: 'password',
+            label: '비밀번호',
+            type: 'password',
+            check: (value) => (value.includes('!') ? undefined : '특수문자'),
+          },
+        ]}
+        onSubmit={submit}
+        submitLabel="저장"
+      />,
+    )
+    const input = screen.getByLabelText('비밀번호', { selector: 'input' })
+    await userEvent.type(input, 'plain')
+    await userEvent.click(screen.getByRole('button', { name: '저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('특수문자')
+    expect(submit).not.toHaveBeenCalled()
+    expect(input).toHaveAttribute('type', 'password')
+    await userEvent.click(screen.getByRole('button', { name: '비밀번호 보기' }))
+    expect(input).toHaveAttribute('type', 'text')
+  })
 })

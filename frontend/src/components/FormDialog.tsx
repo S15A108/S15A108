@@ -16,6 +16,7 @@ export function FormDialog({
   onSubmit,
   onClose,
   submitLabel = '저장',
+  destructive,
 }: {
   title: string
   description?: string
@@ -23,6 +24,7 @@ export function FormDialog({
   onSubmit: (values: Record<string, string>) => Promise<unknown>
   onClose: () => void
   submitLabel?: string
+  destructive?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   return (
@@ -52,6 +54,7 @@ export function FormDialog({
           onSubmit={onSubmit}
           submitLabel={submitLabel}
           onBusyChange={setBusy}
+          destructive={destructive}
         />
       </DialogContent>
     </Dialog>

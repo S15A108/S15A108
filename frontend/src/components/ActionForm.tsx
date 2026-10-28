@@ -15,7 +15,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 export interface FormField {
   name: string
   label: string
-  type?: 'email' | 'password' | 'textarea' | 'select' | 'text'
+  type?: 'email' | 'password' | 'textarea' | 'select' | 'text' | 'color'
   required?: boolean
   min?: number
   max?: number

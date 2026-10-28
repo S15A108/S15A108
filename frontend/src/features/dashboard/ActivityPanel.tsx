@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Activity, Network, Wallet } from 'lucide-react'
+import { Activity, Wallet } from 'lucide-react'
 import { dashboardApi } from '@/api/services/dashboard'
 import { membersApi } from '@/api/services/members'
 import type { RelationNode, UsageBucket } from '@/api/contracts/common'
@@ -68,11 +68,14 @@ const NODE_LABELS: Record<RelationNode['type'], string> = {
   CHANGE_PROPOSAL: '변경 요청',
 }
 
+// 단축 바 5번(설계 관계)과 6번(대시보드)이 같이 쓴다.
 export function ActivityPanel({
   projectId,
+  view = 'dashboard',
 }: {
   projectId: string
   isLeader?: boolean
+  view?: 'dashboard' | 'relations'
 }) {
   const openPane = useWorkspaceStore((state) => state.openPane)
   const [range, setRange] = useState<DateRange>(() => ({
@@ -100,6 +103,7 @@ export function ActivityPanel({
   const relations = useQuery({
     queryKey: ['projects', projectId, 'relations'],
     queryFn: () => dashboardApi.relations(projectId),
+    enabled: view === 'relations',
   })
   const activities = useQuery({
     queryKey: ['projects', projectId, 'activities', cursor],
@@ -122,18 +126,55 @@ export function ActivityPanel({
       ? (members.data?.items.find((member) => member.account_id === accountId)
           ?.name ?? `회원 #${accountId}`)
       : '시스템'
+  if (view === 'relations')
+    return (
+      <div className="grid gap-6">
+        <header>
+          <h2 className="text-xl font-bold">작업·설계 관계</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            작업을 기준으로 설계 항목, 검증, 변경 제안의 관계를 그려요. 실선은
+            확인된 관계예요.
+          </p>
+        </header>
+        <AsyncState query={relations}>
+          {(data) =>
+            data.nodes.length ? (
+              <RelationGraph data={data} />
+            ) : (
+              <EmptyState>
+                아직 작업이 없어요. 기준 v1이 생긴 뒤 작업 계획을 등록하면
+                여기에 관계가 그려져요.
+              </EmptyState>
+            )
+          }
+        </AsyncState>
+      </div>
+    )
   return (
     <div className="grid gap-6">
       <header>
-        <p className="text-xs font-medium tracking-widest text-muted-foreground">
-          PROJECT PULSE
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold">활동·비용</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          팀의 작업 흐름과 설계 관계, 프로젝트에 기록된 사용량을 확인해요.
-        </p>
+        <h2 className="text-xl font-bold">대시보드</h2>
+        {/* 수정안은 한눈에 보기 탭과 날짜별 호출 그래프를 둔다. 날짜별·에이전트별 집계 API가 생기면 탭으로 나눈다. */}
+        <nav
+          aria-label="대시보드 영역"
+          className="mt-3 flex flex-wrap gap-1 text-sm"
+        >
+          {[
+            ['#dashboard-agents', '에이전트 현황'],
+            ['#dashboard-timeline', '활동 타임라인'],
+            ['#dashboard-usage', '사용량·비용'],
+          ].map(([href, label]) => (
+            <a
+              key={href}
+              href={href}
+              className="rounded-full border px-3 py-1 hover:bg-muted"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
       </header>
-      <Card>
+      <Card id="dashboard-usage">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Wallet className="size-4" />
@@ -236,9 +277,9 @@ export function ActivityPanel({
           </AsyncState>
         </CardContent>
       </Card>
-      <Card>
+      <Card id="dashboard-agents">
         <CardHeader>
-          <CardTitle className="text-base">에이전트 작업 현황</CardTitle>
+          <CardTitle className="text-base">에이전트 현황</CardTitle>
           <p className="text-xs leading-5 text-muted-foreground">
             연결 여부, 작업 상태, 계획 검증 결과를 각각 확인해요.
           </p>
@@ -361,26 +402,7 @@ export function ActivityPanel({
           )}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Network className="size-4" />
-            작업·설계 관계
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AsyncState query={relations}>
-            {(data) =>
-              data.nodes.length ? (
-                <RelationGraph data={data} />
-              ) : (
-                <EmptyState>등록된 작업과 설계 관계가 없어요.</EmptyState>
-              )
-            }
-          </AsyncState>
-        </CardContent>
-      </Card>
-      <Card>
+      <Card id="dashboard-timeline">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="size-4" />
@@ -436,7 +458,7 @@ export function ActivityPanel({
                             <Button
                               variant="link"
                               className="h-auto p-0 text-xs"
-                              onClick={() => openPane('planning')}
+                              onClick={() => openPane('documents')}
                             >
                               기준 설계 #{item.baseline_id}
                             </Button>

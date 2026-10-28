@@ -76,9 +76,22 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       tasksApi.list(projectId, { cursor: pageParam, limit: 50 }),
     getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
   })
+  const members = useQuery({
+    queryKey: ['projects', projectId, 'members'],
+    queryFn: () => membersApi.list(projectId, { limit: 100 }),
+  })
+  const memberId = members.data?.items.find(
+    (member) => member.account_id === session.data?.id,
+  )?.id
+  const [tab, setTab] = useState<'mine' | 'team'>('mine')
   const entries = tasks.data?.pages.flatMap((page) => page.items) ?? []
+  // ponytail: 불러온 목록을 화면에서 거른다. 목록이 길어지면 assignee_member_id 파라미터로 옮긴다.
+  const shown =
+    tab === 'mine'
+      ? entries.filter((entry) => entry.assignee_member_id === memberId)
+      : entries
   const selectedId =
-    selected?.focus === focusId ? selected.id : (focusId ?? entries[0]?.id)
+    selected?.focus === focusId ? selected.id : (focusId ?? shown[0]?.id)
   const detail = useQuery({
     queryKey: ['projects', projectId, 'task', selectedId],
     queryFn: () => tasksApi.get(projectId, selectedId!),
@@ -90,10 +103,6 @@ export function TasksPanel({ projectId, isLeader }: Props) {
         : false,
   })
   const task = detail.data
-  const members = useQuery({
-    queryKey: ['projects', projectId, 'members'],
-    queryFn: () => membersApi.list(projectId, { limit: 100 }),
-  })
   const approved = useInfiniteQuery({
     queryKey: ['projects', projectId, 'approved-design-items'],
     initialPageParam: undefined as string | undefined,
@@ -139,9 +148,6 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       ),
     enabled: !!task?.current_plan_revision.plan.context_packet_id,
   })
-  const memberId = members.data?.items.find(
-    (member) => member.account_id === session.data?.id,
-  )?.id
   const isOwner = !!task && memberId === task.assignee_member_id
   const active = !!task && !['COMPLETED', 'CANCELLED'].includes(task.status)
   const result = validation.data ?? task?.validation
@@ -177,12 +183,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
     <section className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="mb-2 text-xs font-semibold tracking-[.18em] text-primary">
-            PLAN BEFORE IMPLEMENTATION
-          </p>
-          <h2 className="text-2xl font-semibold tracking-tight">
-            작업을 시작하기 전에, 설계부터
-          </h2>
+          <h2 className="text-xl font-bold">작업 현황</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             계획과 승인 설계를 대조하고 필요한 합의를 마친 뒤 시작하세요. 계획
             검증은 실제 코드 품질이나 테스트 통과를 뜻하지 않아요.
@@ -214,14 +215,35 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       <div className="grid gap-6 lg:grid-cols-[.65fr_1.35fr]">
         <Card>
           <CardHeader>
-            <CardTitle>팀의 작업 계획</CardTitle>
+            <CardTitle className="flex gap-1" role="tablist">
+              {(
+                [
+                  ['mine', '내 작업'],
+                  ['team', '팀 전체'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === value}
+                  onClick={() => {
+                    setTab(value)
+                    setSelected(null)
+                  }}
+                  className={`rounded-full px-3 py-1 text-sm ${tab === value ? 'bg-foreground text-background' : 'bg-muted'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <AsyncState query={tasks}>
               {() => (
                 <div className="space-y-2">
-                  {entries.length ? (
-                    entries.map((entry) => (
+                  {shown.length ? (
+                    shown.map((entry) => (
                       <button
                         key={entry.id}
                         type="button"
@@ -232,6 +254,15 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                       >
                         <span className="block text-xs text-muted-foreground">
                           {entry.key}
+                          {tab === 'team' &&
+                            ` · ${
+                              entry.assignee_member_id === memberId
+                                ? '나'
+                                : (members.data?.items.find(
+                                    (member) =>
+                                      member.id === entry.assignee_member_id,
+                                  )?.name ?? '담당자 미정')
+                            }`}
                         </span>
                         <strong className="my-2 block text-sm font-medium">
                           {entry.current_plan_revision.plan.title}
@@ -244,7 +275,9 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                     ))
                   ) : (
                     <EmptyState>
-                      맡을 작업의 목표와 범위부터 등록해 보세요.
+                      {tab === 'mine'
+                        ? '아직 맡은 작업이 없어요. 첫 작업 계획을 등록하거나 팀 전체를 보세요.'
+                        : '맡을 작업의 목표와 범위부터 등록해 보세요.'}
                     </EmptyState>
                   )}
                   {tasks.hasNextPage && (

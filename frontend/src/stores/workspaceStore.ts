@@ -1,20 +1,20 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+// 단축 바 1~6(documents, changes, meetings, tasks, relations, dashboard)과 가운데 비비(chat),
+// 톱니(settings), 지난 알림(inbox). planning·context는 단축 바에서 뺐지만 문서함·작업에서 아직 연다.
 export type WorkspacePane =
-  | 'overview'
   | 'documents'
   | 'planning'
   | 'changes'
   | 'tasks'
   | 'meetings'
-  | 'team'
-  | 'agents'
-  | 'activity'
+  | 'relations'
+  | 'dashboard'
+  | 'settings'
   | 'inbox'
   | 'chat'
   | 'context'
-  | 'git'
 export type BuildingDesign = 'glass' | 'brick' | 'modern' | 'tower' | 'wood'
 type Placement = { lot: number; design: BuildingDesign }
 interface WorkspaceState {

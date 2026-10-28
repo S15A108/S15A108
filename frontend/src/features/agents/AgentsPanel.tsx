@@ -15,6 +15,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
   const action = useProjectAction(projectId)
   const [fresh, setFresh] = useState<IssueTokenResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [revoking, setRevoking] = useState<string | null>(null)
   const query = useQuery({
     queryKey: ['projects', projectId, 'agent-settings'],
     queryFn: async () => {
@@ -30,7 +31,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-xl font-bold">개인 에이전트 연결</h3>
+        <h3 className="text-xl font-bold">내 에이전트</h3>
         <p className="mt-2 text-sm leading-7 text-muted-foreground">
           프로젝트별 개인 토큰으로 로컬 Claude Code를 연결하세요. 실제 연결과
           작업 상태는 외부 호출의 보고를 기준으로 표시해요.
@@ -118,29 +119,51 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                             {formatDate(token.last_used_at)}
                           </p>
                         </div>
-                        <Button
-                          variant="outline"
-                          disabled={action.busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                '토큰을 폐기하면 이 토큰의 MCP 호출이 거부돼요. 폐기할까요?',
-                              )
-                            )
-                              void action
-                                .run(
-                                  () => agentsApi.revokeToken(token.id),
-                                  '토큰을 폐기했어요.',
-                                )
-                                .then(() => {
-                                  if (fresh?.token_info.id === token.id)
-                                    setFresh(null)
-                                })
-                                .catch(() => undefined)
-                          }}
-                        >
-                          폐기
-                        </Button>
+                        {revoking === token.id ? (
+                          <div className="grid w-full gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs">
+                            <p>
+                              폐기하면 이 토큰의 연결이 바로 끊기고 되돌릴 수
+                              없어요. 지금까지의 기록은 남아요.
+                            </p>
+                            <span className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                disabled={action.busy}
+                                onClick={() =>
+                                  void action
+                                    .run(
+                                      () => agentsApi.revokeToken(token.id),
+                                      '토큰을 폐기했어요.',
+                                    )
+                                    .then(() => {
+                                      setRevoking(null)
+                                      if (fresh?.token_info.id === token.id)
+                                        setFresh(null)
+                                    })
+                                    .catch(() => undefined)
+                                }
+                              >
+                                폐기하기
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setRevoking(null)}
+                              >
+                                취소
+                              </Button>
+                            </span>
+                          </div>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            disabled={action.busy}
+                            onClick={() => setRevoking(token.id)}
+                          >
+                            폐기
+                          </Button>
+                        )}
                       </li>
                     ))}
                 </ul>

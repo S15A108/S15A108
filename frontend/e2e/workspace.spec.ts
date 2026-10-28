@@ -42,7 +42,7 @@ test('선택한 부지의 프로젝트와 외관이 새로고침 뒤에도 유�
   await expect(dialog).toContainText('부지 3')
   await dialog.getByLabel('프로젝트 이름').fill('부지 이식 확인')
   await dialog.getByLabel('프로젝트 소개').fill('도시에서 만든 목 프로젝트')
-  await dialog.getByRole('radio', { name: '목조 스튜디오' }).check()
+  await dialog.getByText('목조 스튜디오').click()
   await dialog
     .getByRole('button', { name: '프로젝트 만들기', exact: true })
     .click()
@@ -91,7 +91,7 @@ test('문서와 작업 검증, 비비의 근거 응답을 같은 사무실에서
   await dialog.getByRole('button', { name: '검색', exact: true }).click()
   await expect(dialog.getByRole('heading', { name: '검색 결과' })).toBeVisible()
   await dialog.getByRole('button', { name: '닫기', exact: true }).click()
-  await page.getByRole('button', { name: '작업 검증', exact: true }).click()
+  await page.getByRole('button', { name: '작업 현황', exact: true }).click()
   dialog = page.getByRole('dialog')
   await expect(
     dialog.getByText('설계와 계획의 검증 결과', { exact: true }),
