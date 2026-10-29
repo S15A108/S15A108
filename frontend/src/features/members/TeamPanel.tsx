@@ -277,7 +277,7 @@ export function TeamPanel({
       )}
       {view === 'team' && isLeader && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">초대 대기</h3>
+          <h3 className="text-sm font-semibold">초대 중</h3>
           <AsyncState query={invitations}>
             {(data) => (
               <>
@@ -294,6 +294,12 @@ export function TeamPanel({
                             <b className="font-medium">
                               {invitation.invited_email ?? '초대 링크'}
                             </b>
+                            {!invitation.accepted_at &&
+                              !invitation.revoked_at && (
+                                <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold">
+                                  초대 중
+                                </span>
+                              )}
                             <small className="mt-1 block text-muted-foreground">
                               {fresh.some((item) => item.id === invitation.id)
                                 ? '방금 초대 · '
@@ -303,7 +309,7 @@ export function TeamPanel({
                                 ? `참여함 · ${formatDate(invitation.accepted_at)}`
                                 : invitation.revoked_at
                                   ? '취소됨'
-                                  : '초대 중 · 이 이메일로 로그인하거나 가입하면 팀원이 돼요'}
+                                  : '같은 이메일로 로그인하거나 가입하면 팀원이 돼요'}
                             </small>
                           </span>
                           {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
@@ -536,7 +542,7 @@ export function TeamPanel({
       {dialog === 'invite' && (
         <FormDialog
           title="팀원 초대"
-          description="초대한 이메일로 로그인하거나 가입하면 그때 팀원이 돼요. 만료는 없고, 잘못 보냈으면 초대 대기에서 취소해요."
+          description="받은 사람이 같은 이메일로 로그인하거나 가입하면 팀원이 돼요. 들어오기 전까지는 '초대 중'으로 보여요."
           fields={[
             {
               name: 'email',
