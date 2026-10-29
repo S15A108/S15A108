@@ -8,6 +8,8 @@ import { dashboardApi } from '@/api/services/dashboard'
 import { membersApi } from '@/api/services/members'
 import type { RelationNode, UsageBucket } from '@/api/contracts/common'
 import type { RelationsResponse } from './schemas'
+import { DashboardOverview } from './DashboardOverview'
+import { FEATURE_LABELS } from './labels'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
 import { StatusPill } from '@/components/StatusPill'
@@ -45,16 +47,6 @@ const dateRangeSchema = z
     message: '종료일은 시작일 이후여야 해요.',
   })
 type DateRange = z.infer<typeof dateRangeSchema>
-const FEATURE_LABELS: Record<string, string> = {
-  DOCUMENT_PARSE: '문서 분석',
-  TASK_VALIDATION: '작업 검증',
-  CHANGE_IMPACT: '변경 영향 분석',
-  EMBEDDING: '검색 색인',
-  BEE_CHAT: '비비 대화',
-  BEE_DRAFT: '비비 초안',
-  TASK_ASSIGNMENT: '작업 배정 추천',
-  MEETING_ANALYSIS: '회의 분석',
-}
 const NODE_TYPES = [
   'TASK',
   'DESIGN_ITEM',
@@ -152,16 +144,17 @@ export function ActivityPanel({
     )
   return (
     <div className="grid gap-6">
-      <header>
-        <h2 className="text-xl font-bold">대시보드</h2>
-        {/* 수정안은 한눈에 보기 탭과 날짜별 호출 그래프를 둔다. 날짜별·에이전트별 집계 API가 생기면 탭으로 나눈다. */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <h2 className="sr-only">대시보드</h2>
+        {/* 수정안은 영역마다 탭으로 나눈다. 지금은 한 화면에 두고 영역 칩으로 이동한다. 기간 선택은 한 곳에서 모든 숫자에 쓴다. */}
         <nav
           aria-label="대시보드 영역"
-          className="mt-3 flex flex-wrap gap-1 text-sm"
+          className="flex flex-wrap gap-1 text-sm"
         >
           {[
-            ['#dashboard-agents', '에이전트 현황'],
+            ['#dashboard-overview', '한눈에 보기'],
             ['#dashboard-timeline', '활동 타임라인'],
+            ['#dashboard-agents', '에이전트 현황'],
             ['#dashboard-usage', '사용량·비용'],
           ].map(([href, label]) => (
             <a
@@ -173,107 +166,133 @@ export function ActivityPanel({
             </a>
           ))}
         </nav>
+        <form
+          aria-label="기간"
+          className="flex flex-wrap items-end gap-3"
+          noValidate
+          onSubmit={handleSubmit((values) => setRange(values))}
+        >
+          <div className="grid gap-2">
+            <Label htmlFor="usage-from">시작일 (한국시간)</Label>
+            <Input id="usage-from" type="date" {...register('from')} />
+            {errors.from && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.from.message}
+              </p>
+            )}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="usage-to">종료일 (한국시간)</Label>
+            <Input id="usage-to" type="date" {...register('to')} />
+            {errors.to && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.to.message}
+              </p>
+            )}
+          </div>
+          <Button type="submit" variant="outline">
+            기간 적용
+          </Button>
+        </form>
       </header>
-      <Card id="dashboard-usage">
+      <DashboardOverview
+        projectId={projectId}
+        usage={usage}
+        activities={activities}
+        work={work}
+        members={members.data?.items ?? []}
+        actorName={actorName}
+      />
+      <Card id="dashboard-timeline">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Wallet className="size-4" />
-            기간별 사용량
+            <Activity className="size-4" />
+            활동 타임라인
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-5">
-          <form
-            className="flex flex-wrap items-end gap-3"
-            noValidate
-            onSubmit={handleSubmit((values) => setRange(values))}
-          >
-            <div className="grid gap-2">
-              <Label htmlFor="usage-from">시작일 (한국시간)</Label>
-              <Input id="usage-from" type="date" {...register('from')} />
-              {errors.from && (
-                <p role="alert" className="text-xs text-destructive">
-                  {errors.from.message}
-                </p>
-              )}
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="usage-to">종료일 (한국시간)</Label>
-              <Input id="usage-to" type="date" {...register('to')} />
-              {errors.to && (
-                <p role="alert" className="text-xs text-destructive">
-                  {errors.to.message}
-                </p>
-              )}
-            </div>
-            <Button type="submit" variant="outline">
-              기간 적용
-            </Button>
-          </form>
-          <AsyncState query={usage}>
-            {(data) => (
-              <>
-                <dl className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-                  {[
-                    {
-                      label: '입력 토큰',
-                      value: data.input_tokens.toLocaleString('ko-KR'),
-                    },
-                    {
-                      label: '출력 토큰',
-                      value: data.output_tokens.toLocaleString('ko-KR'),
-                    },
-                    {
-                      label: '호출 횟수',
-                      value: data.call_count.toLocaleString('ko-KR'),
-                    },
-                    {
-                      label: '예상 비용',
-                      value:
-                        data.estimated_cost_amount === undefined
-                          ? '미보고'
-                          : `${data.estimated_cost_amount} ${data.currency ?? ''}`.trim(),
-                    },
-                  ].map((metric) => (
-                    <div
-                      key={metric.label}
-                      className="rounded-xl border bg-muted/30 p-4"
+        <CardContent>
+          <AsyncState query={activities}>
+            {(data) =>
+              data.items.length ? (
+                <>
+                  <ol className="grid gap-5 border-l pl-5">
+                    {data.items.map((item) => (
+                      <li key={item.id} className="relative">
+                        <span className="absolute top-1.5 -left-[1.53rem] size-2 rounded-full bg-primary" />
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <strong className="text-sm font-medium">
+                            {actorName(item.actor_account_id)} ·{' '}
+                            {statusLabel(item.type)}
+                          </strong>
+                          <time
+                            className="text-xs text-muted-foreground"
+                            dateTime={item.created_at}
+                          >
+                            {stamp(item.created_at)}
+                          </time>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">
+                          {item.result}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-3">
+                          {item.task_id && (
+                            <Button
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => openPane('tasks', item.task_id)}
+                            >
+                              작업 #{item.task_id}
+                            </Button>
+                          )}
+                          {item.change_proposal_id && (
+                            <Button
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() =>
+                                openPane('changes', item.change_proposal_id)
+                              }
+                            >
+                              변경 요청 #{item.change_proposal_id}
+                            </Button>
+                          )}
+                          {item.baseline_id && (
+                            <Button
+                              variant="link"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => openPane('documents')}
+                            >
+                              기준 설계 #{item.baseline_id}
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  {data.has_more && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-5"
+                      onClick={() => setCursor(data.next_cursor)}
                     >
-                      <dt className="text-xs text-muted-foreground">
-                        {metric.label}
-                      </dt>
-                      <dd className="mt-2 font-mono text-xl font-semibold">
-                        {metric.value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  BEEZ에 기록된 호출을 집계한 값이에요. 외부 에이전트의 개인
-                  사용량과 실제 청구액은 포함하지 않아요.
-                </p>
-                <UsageTable
-                  title="기능별 사용량"
-                  rows={data.by_feature}
-                  currency={data.currency}
-                  label={(key) => FEATURE_LABELS[key] ?? key}
-                />
-                <div className="grid gap-5 xl:grid-cols-2">
-                  <UsageTable
-                    title="작업별 사용량"
-                    rows={data.by_task}
-                    currency={data.currency}
-                    label={(key) => `작업 #${key}`}
-                    onSelect={(id) => openPane('tasks', id)}
-                  />
-                  <UsageTable
-                    title="검증별 사용량"
-                    rows={data.by_validation}
-                    currency={data.currency}
-                    label={(key) => `검증 #${key}`}
-                  />
-                </div>
-              </>
-            )}
+                      다음 활동
+                    </Button>
+                  )}
+                  {cursor && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-5"
+                      onClick={() => setCursor(undefined)}
+                    >
+                      최신 활동
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <EmptyState>아직 기록된 프로젝트 활동이 없어요.</EmptyState>
+              )
+            }
           </AsyncState>
         </CardContent>
       </Card>
@@ -402,96 +421,79 @@ export function ActivityPanel({
           )}
         </CardContent>
       </Card>
-      <Card id="dashboard-timeline">
+      <Card id="dashboard-usage">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="size-4" />
-            활동 타임라인
+            <Wallet className="size-4" />
+            기간별 사용량
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <AsyncState query={activities}>
-            {(data) =>
-              data.items.length ? (
-                <>
-                  <ol className="grid gap-5 border-l pl-5">
-                    {data.items.map((item) => (
-                      <li key={item.id} className="relative">
-                        <span className="absolute top-1.5 -left-[1.53rem] size-2 rounded-full bg-primary" />
-                        <div className="flex flex-wrap justify-between gap-2">
-                          <strong className="text-sm font-medium">
-                            {actorName(item.actor_account_id)} ·{' '}
-                            {statusLabel(item.type)}
-                          </strong>
-                          <time
-                            className="text-xs text-muted-foreground"
-                            dateTime={item.created_at}
-                          >
-                            {stamp(item.created_at)}
-                          </time>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">
-                          {item.result}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-3">
-                          {item.task_id && (
-                            <Button
-                              variant="link"
-                              className="h-auto p-0 text-xs"
-                              onClick={() => openPane('tasks', item.task_id)}
-                            >
-                              작업 #{item.task_id}
-                            </Button>
-                          )}
-                          {item.change_proposal_id && (
-                            <Button
-                              variant="link"
-                              className="h-auto p-0 text-xs"
-                              onClick={() =>
-                                openPane('changes', item.change_proposal_id)
-                              }
-                            >
-                              변경 요청 #{item.change_proposal_id}
-                            </Button>
-                          )}
-                          {item.baseline_id && (
-                            <Button
-                              variant="link"
-                              className="h-auto p-0 text-xs"
-                              onClick={() => openPane('documents')}
-                            >
-                              기준 설계 #{item.baseline_id}
-                            </Button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                  {data.has_more && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-5"
-                      onClick={() => setCursor(data.next_cursor)}
+        <CardContent className="grid gap-5">
+          <AsyncState query={usage}>
+            {(data) => (
+              <>
+                <dl className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  {[
+                    {
+                      label: '입력 토큰',
+                      value: data.input_tokens.toLocaleString('ko-KR'),
+                    },
+                    {
+                      label: '출력 토큰',
+                      value: data.output_tokens.toLocaleString('ko-KR'),
+                    },
+                    {
+                      label: '호출 횟수',
+                      value: data.call_count.toLocaleString('ko-KR'),
+                    },
+                    {
+                      label: '예상 비용',
+                      value:
+                        data.estimated_cost_amount === undefined
+                          ? '미보고'
+                          : `${data.estimated_cost_amount} ${data.currency ?? ''}`.trim(),
+                    },
+                  ].map((metric) => (
+                    <div
+                      key={metric.label}
+                      className="rounded-xl border bg-muted/30 p-4"
                     >
-                      다음 활동
-                    </Button>
-                  )}
-                  {cursor && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-5"
-                      onClick={() => setCursor(undefined)}
-                    >
-                      최신 활동
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <EmptyState>아직 기록된 프로젝트 활동이 없어요.</EmptyState>
-              )
-            }
+                      <dt className="text-xs text-muted-foreground">
+                        {metric.label}
+                      </dt>
+                      <dd className="mt-2 font-mono text-xl font-semibold">
+                        {metric.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  BEEZ에 기록된 호출을 집계한 값이에요. 외부 에이전트의 개인
+                  사용량과 실제 청구액은 포함하지 않아요.
+                </p>
+                <UsageTable
+                  title="기능별 사용량"
+                  rows={data.by_feature}
+                  currency={data.currency}
+                  label={(key) => FEATURE_LABELS[key] ?? key}
+                />
+                <div className="grid gap-5 xl:grid-cols-2">
+                  <UsageTable
+                    title="작업별 사용량"
+                    rows={data.by_task}
+                    currency={data.currency}
+                    label={(key) => `작업 #${key}`}
+                    onSelect={(id) => openPane('tasks', id)}
+                  />
+                  <UsageTable
+                    title="검증별 사용량"
+                    rows={data.by_validation}
+                    currency={data.currency}
+                    label={(key) => `검증 #${key}`}
+                  />
+                </div>
+              </>
+            )}
           </AsyncState>
         </CardContent>
       </Card>
