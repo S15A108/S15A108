@@ -122,6 +122,20 @@ export function collaborationRoutes(
       }
       return { data: meeting! }
     }
+    case 'MTG-A14': {
+      // PR #54: 팀장만, 팀장 자신은 409, 끝난 회의 409, 참여자가 아니어도 204(멱등)
+      if (context.member?.role !== 'LEADER')
+        fail(403, 'forbidden', '팀장만 참여자를 뺄 수 있어요.')
+      if (meeting!.status === 'CLOSED')
+        fail(409, 'meeting_closed', '끝난 회의예요.')
+      const target = findById(project.members, params.member_id)
+      if (target.role === 'LEADER')
+        fail(409, 'leader_not_removable', '팀장은 회의에서 뺄 수 없어요.')
+      meeting!.participants = meeting!.participants.filter(
+        (item) => item.member_id !== target.id,
+      )
+      return { status: 204 }
+    }
     case 'MTG-A05': {
       const participant =
         meeting!.participants.find(

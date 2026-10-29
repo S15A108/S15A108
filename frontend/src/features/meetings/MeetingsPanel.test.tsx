@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
 import { beforeEach, afterEach, expect, it } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
@@ -88,25 +88,28 @@ it('팀원은 대화만 하고 검토 요청은 팀장만 할 수 있다고 안�
   expect(screen.getByText('팀장만 요청할 수 있어요')).toBeInTheDocument()
 })
 
-it('참여자는 관련자 추가로 아직 없는 팀원을 골라 회의에 부른다', async () => {
+// PNL-06 수정안 10-29: GitHub 리뷰어처럼 '관련자'에서 찾아 체크하면 바로 부르고, 빼기(×)는 팀장만(MTG-A14).
+it('관련자 창에서 이름을 찾아 체크하면 바로 부르고, 팀장은 칩의 ×로 뺀다', async () => {
   const user = userEvent.setup()
   renderPanel(true)
   await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
-  await user.click(screen.getByRole('button', { name: '+ 관련자 추가' }))
-  const form = await screen.findByRole('form', { name: '관련자 추가' })
-  expect(
-    within(form).getByText(/이미 참여 중: 이팀장, 김동료, 최팀원/),
-  ).toBeInTheDocument()
-  await user.click(within(form).getByRole('button', { name: '추가하기' }))
-  expect(
-    await within(form).findByText('부를 팀원을 골라 주세요.'),
-  ).toBeInTheDocument()
-  await user.click(within(form).getByRole('checkbox', { name: /박팀원/ }))
-  await user.click(within(form).getByRole('button', { name: '1명 추가하기' }))
+  await user.click(screen.getByRole('button', { name: '관련자' }))
+  expect(await screen.findByRole('checkbox', { name: /이팀장/ })).toBeDisabled()
+  await user.type(screen.getByLabelText('이름 찾기'), '박')
+  await user.click(screen.getByRole('checkbox', { name: /박팀원/ }))
   expect(await screen.findByRole('status')).toHaveTextContent(
     '관련자를 추가했어요.',
   )
-  expect(await screen.findByText('박팀원')).toBeInTheDocument()
+  await user.keyboard('{Escape}')
+  await user.click(await screen.findByRole('button', { name: '박팀원 빼기' }))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: '박팀원 빼기' }),
+    ).not.toBeInTheDocument(),
+  )
+  expect(
+    screen.queryByRole('button', { name: '이팀장 빼기' }),
+  ).not.toBeInTheDocument()
 })
 
 // 10-29 수정안: 진행 중/끝난 회의, 안건 고정, 단계 표시, 끝난 회의는 읽기만
