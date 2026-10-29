@@ -14,13 +14,6 @@ import { EmptyState } from '@/components/EmptyState'
 import { FormDialog } from '@/components/FormDialog'
 import { Button } from '@/components/ui/button'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -28,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Toast } from '@/components/Toast'
 import { useSession } from '@/features/auth/useSession'
 import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { projectPlacements } from '@/features/projects/placements'
@@ -63,7 +57,7 @@ export function TeamPanel({
     placements[placementKey(accountId, projectId)]?.design ?? 'modern',
   )
   const [dialog, setDialog] = useState<DialogAction | null>(null)
-  const [inviteUrl, setInviteUrl] = useState('')
+  const [fresh, setFresh] = useState<{ id: string; url: string } | null>(null)
   const [copyMessage, setCopyMessage] = useState('')
   const [viewTime] = useState(() => Date.now())
   const project = useQuery({
@@ -119,22 +113,15 @@ export function TeamPanel({
           )}
         </div>
         {view === 'team' && isLeader && (
-          <Button
-            onClick={() => {
-              setInviteUrl('')
-              setDialog('invite')
-            }}
-          >
+          <Button onClick={() => setDialog('invite')}>
             <MailPlus />
             팀원 초대
           </Button>
         )}
       </header>
-      {action.message && (
-        <p role="status" className="rounded-lg bg-primary/5 p-3 text-sm">
-          {action.message}
-        </p>
-      )}
+      {/* 결과는 화면 안 글 대신 오른쪽 위 토스트로 잠깐 보여 준다. */}
+      {action.message && <Toast>{action.message}</Toast>}
+      {copyMessage && <Toast key={copyMessage}>{copyMessage}</Toast>}
       {action.error && (
         <p
           role="alert"
@@ -142,45 +129,6 @@ export function TeamPanel({
         >
           {action.error}
         </p>
-      )}
-      {view === 'team' && inviteUrl && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">초대 링크가 준비됐어요</CardTitle>
-            <CardDescription>
-              {/* API 없음: 초대 메일 발송이 생기면 링크 대신 '초대 메일을 보냈어요'로 바꾼다. */}
-              초대한 이메일의 팀원에게 이 링크를 전달해 주세요.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Input
-              aria-label="팀원 초대 링크"
-              readOnly
-              value={inviteUrl}
-              className="min-w-48 flex-1"
-              onFocus={(event) => event.currentTarget.select()}
-            />
-            <Button
-              variant="outline"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(inviteUrl)
-                  .then(() => setCopyMessage('초대 링크를 복사했어요.'))
-                  .catch(() =>
-                    setCopyMessage('링크를 선택해 직접 복사해 주세요.'),
-                  )
-              }
-            >
-              <Copy />
-              복사
-            </Button>
-            {copyMessage && (
-              <p role="status" className="w-full text-sm text-muted-foreground">
-                {copyMessage}
-              </p>
-            )}
-          </CardContent>
-        </Card>
       )}
       {view === 'team' && (
         <AsyncState query={members}>
@@ -330,6 +278,9 @@ export function TeamPanel({
                               {invitation.invited_email ?? '초대 링크'}
                             </b>
                             <small className="mt-1 block text-muted-foreground">
+                              {fresh?.id === invitation.id
+                                ? '팀원 · 방금 초대 · '
+                                : ''}
                               {invitation.accepted_at
                                 ? '수락됨'
                                 : invitation.revoked_at
@@ -339,7 +290,51 @@ export function TeamPanel({
                                     : `만료 ${formatDate(invitation.expires_at)}`}
                             </small>
                           </span>
-                          {/* API 없음: 초대 다시 보내기. 지금은 취소만 있다. */}
+                          {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
+                          {fresh?.id === invitation.id && (
+                            <span className="flex w-full gap-2">
+                              <Input
+                                aria-label="팀원 초대 링크"
+                                readOnly
+                                value={fresh.url}
+                                className="min-w-48 flex-1"
+                                onFocus={(event) =>
+                                  event.currentTarget.select()
+                                }
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void navigator.clipboard
+                                    .writeText(fresh.url)
+                                    .then(() =>
+                                      setCopyMessage('초대 링크를 복사했어요.'),
+                                    )
+                                    .catch(() =>
+                                      setCopyMessage(
+                                        '링크를 선택해 직접 복사해 주세요.',
+                                      ),
+                                    )
+                                }
+                              >
+                                <Copy />
+                                복사
+                              </Button>
+                            </span>
+                          )}
+                          {!invitation.revoked_at &&
+                            !invitation.accepted_at && (
+                              // API 없음: 초대 메일 다시 보내기
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled
+                                title="메일 발송이 준비되면 열려요"
+                              >
+                                메일 다시 보내기
+                              </Button>
+                            )}
                           {!invitation.revoked_at &&
                             !invitation.accepted_at && (
                               <Button
@@ -533,7 +528,7 @@ export function TeamPanel({
               const result = await membersApi.createInvitation(projectId, {
                 email: values.email,
               })
-              setInviteUrl(result.invite_url)
+              setFresh({ id: result.invitation.id, url: result.invite_url })
             }, '초대 링크를 만들었어요.')
             setDialog(null)
           }}
