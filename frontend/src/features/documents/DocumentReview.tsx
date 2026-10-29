@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, LoaderCircle } from 'lucide-react'
+import { getApiErrorCode, getApiErrorMessage } from '@/api/error'
 import { documentsApi } from '@/api/services/documents'
 import { membersApi } from '@/api/services/members'
 import type { DocumentBeeReview } from '@/api/contracts/common'
@@ -17,6 +18,13 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { reviewStage } from './reviewStage'
 
 const STEPS = ['파일 등록', '비비 검토', '수정 제안 반영', '팀장 승인'] as const
+const REVIEW_STEPS = [
+  '문서 읽기',
+  '승인된 API 명세서와 비교',
+  'ERD와 맞춰 보기',
+  '요구사항과 비교',
+  '수정 제안 정리',
+]
 
 // 공용 문서함 · 문서별 검토 흐름(PNL-02-m): 비비 검토 → 수정 제안 반영 → 최종본 확인 → 팀장 승인·반려.
 export function DocumentReview({
@@ -42,10 +50,43 @@ export function DocumentReview({
   const action = useProjectAction(projectId)
   const [editing, setEditing] = useState(false)
   const [rejecting, setRejecting] = useState(false)
+  const client = useQueryClient()
+  // 비비 검토(DOC-A16): 기준 v1 전에는 올리거나 고친 직후 화면이 바로 부른다. 누르는 버튼은 없고 실패했을 때만 다시 검토한다.
+  const bee = useMutation({
+    mutationFn: (revision: number) =>
+      documentsApi.requestBeeReview(projectId, documentId, {
+        expected_revision: revision,
+      }),
+    onSettled: () =>
+      client.invalidateQueries({ queryKey: ['projects', projectId] }),
+  })
+  const running = getApiErrorCode(bee.error) === 'review_in_progress'
   const copy = useQuery({
     queryKey: ['projects', projectId, 'working-copy', documentId],
     queryFn: () => documentsApi.workingCopy(projectId, documentId),
+    // 다른 창에서 이미 검토 중이면 끝날 때까지 다시 읽는다.
+    refetchInterval: running ? 3000 : false,
   })
+  const current = copy.data
+  const currentStage = current && reviewStage(current)
+  const reviewKey =
+    current &&
+    !locked &&
+    current.owner_account_id === session.data?.id &&
+    currentStage?.step === 1 &&
+    current.status !== 'SUBMITTED'
+      ? `${projectId}:${documentId}:${current.revision}`
+      : null
+  // 같은 작성 리비전으로 두 번 부르지 않는다(다시 그리기). 창을 다시 열거나 새로고침해
+  // 이미 검토 중이면 서버가 review_in_progress로 알려 주고, 끝났으면 1단계가 아니라 부르지 않는다.
+  const started = useRef(new Set<string>())
+  const startReview = bee.mutate
+  useEffect(() => {
+    if (!reviewKey || started.current.has(reviewKey)) return
+    started.current.add(reviewKey)
+    startReview(Number(reviewKey.split(':')[2]))
+  }, [reviewKey, startReview])
+  const failed = !!bee.error && !running
   const members = useQuery({
     queryKey: ['projects', projectId, 'members'],
     queryFn: () => membersApi.list(projectId),
@@ -154,32 +195,47 @@ export function DocumentReview({
                   <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap">
                     {data.content}
                   </pre>
-                  {owner ? (
-                    <Button
-                      className="justify-self-start"
-                      disabled={action.busy}
-                      onClick={() =>
-                        run(
-                          () =>
-                            documentsApi.requestBeeReview(
-                              projectId,
-                              documentId,
-                              {
-                                expected_revision: data.revision,
-                              },
-                            ),
-                          '비비가 검토를 마쳤어요.',
-                        )
-                      }
+                  {owner && failed ? (
+                    <div
+                      role="alert"
+                      className="grid gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm"
                     >
-                      <Sparkles />
-                      {action.busy
-                        ? '비비가 문서를 검토하고 있어요…'
-                        : '비비에게 검토 요청'}
-                    </Button>
+                      <strong>비비 검토를 마치지 못했어요</strong>
+                      <span>{getApiErrorMessage(bee.error)}</span>
+                      <Button
+                        variant="outline"
+                        className="justify-self-start"
+                        disabled={bee.isPending}
+                        onClick={() => bee.mutate(data.revision)}
+                      >
+                        다시 검토하기
+                      </Button>
+                    </div>
+                  ) : owner ? (
+                    <div
+                      role="status"
+                      className="grid gap-2 rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm"
+                    >
+                      <strong className="flex items-center gap-2">
+                        <LoaderCircle className="size-4 animate-spin" />
+                        {data.status === 'REJECTED'
+                          ? '비비가 반려 사유를 보고 다시 검토하고 있어요'
+                          : '비비가 문서를 검토하고 있어요'}
+                      </strong>
+                      {/* API 없음: 단계별 진행 상태(steps)는 검토 결과와 함께 와서 진행 중에는 순서만 보여 준다(DOC-A16, Q19). */}
+                      <ol className="list-decimal pl-5 text-xs leading-5 text-muted-foreground">
+                        {REVIEW_STEPS.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ol>
+                      <span className="text-xs text-muted-foreground">
+                        창을 닫아도 검토는 이어져요.
+                      </span>
+                    </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      올린 사람이 비비 검토를 받으면 이어서 볼 수 있어요.
+                      올린 문서는 비비가 바로 검토해요. 검토가 끝나면 여기서
+                      수정 제안을 볼 수 있어요.
                     </p>
                   )}
                 </div>
@@ -239,7 +295,7 @@ export function DocumentReview({
                                   file_name: data.file_name,
                                 },
                               ),
-                            '고친 내용을 저장했어요. 비비 검토를 다시 받아 주세요.',
+                            '고친 내용을 저장했어요. 비비가 다시 검토해요.',
                           )
                           setEditing(false)
                         }}
@@ -414,6 +470,19 @@ function Suggestions({
             승인본이 없어 비교하지 못한 문서:{' '}
             {review.unavailable_references.map(statusLabel).join(', ')}
           </p>
+        )}
+        {review.steps && review.steps.length > 0 && (
+          <ol
+            aria-label="비비 검토 단계"
+            className="mt-2 grid gap-0.5 text-xs text-muted-foreground"
+          >
+            {review.steps.map((step, index) => (
+              <li key={step.label}>
+                {index + 1}단계 / {review.steps!.length}단계 · {step.label}
+                {step.result && ` · ${step.result}`}
+              </li>
+            ))}
+          </ol>
         )}
       </div>
       <ol className="grid gap-2">

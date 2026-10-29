@@ -291,7 +291,7 @@ export function DocumentsPanel({
                             ? (['amber', stage.label] as const)
                             : ([
                                 'blue',
-                                stage?.label ?? '비비 검토 전',
+                                stage?.label ?? '비비 검토 중',
                               ] as const)
                   const next = approved
                     ? '현재 문서로 들어갔어요'
@@ -305,7 +305,7 @@ export function DocumentsPanel({
                           ? '비비 제안을 확인하고 반영해 주세요'
                           : stage?.step === 3
                             ? '최종본을 확인하고 검토를 요청해요'
-                            : '비비 검토를 받아 주세요'
+                            : '비비가 검토하고 있어요'
                   const file =
                     document?.latest_draft?.file_name ??
                     document?.approved_version?.file_name

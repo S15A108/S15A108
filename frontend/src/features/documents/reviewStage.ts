@@ -12,7 +12,8 @@ export function reviewStage(copy: DocumentWorkingCopy) {
   if (!review)
     return {
       step: 1,
-      label: copy.status === 'REJECTED' ? '반려됨' : '비비 검토 전',
+      // 올리거나 고치면 비비 검토가 자동으로 시작된다(DOC-A16).
+      label: copy.status === 'REJECTED' ? '반려됨' : '비비 검토 중',
       review,
     }
   if (review.suggestions.some((item) => item.decision === 'PENDING'))

@@ -162,6 +162,19 @@ export async function reviewRoutes(
       guardOwner(context, project, target, body.expected_revision)
       const document = findById(project.documents, target.document_id)
       const others = project.documents.filter((item) => item.id !== document.id)
+      const suggestions = suggestionsFor(context, target.content)
+      const approvedKind = (kind: string) =>
+        others.some((item) => item.kind === kind && item.approved_version)
+          ? '승인본과 비교함'
+          : '승인본이 없어 건너뜀'
+      // 반려 뒤 검토면 가장 최근 반려 제출을 서버가 고른다(DOC-A16 선택 규칙).
+      const rejected = project.submissions
+        .filter(
+          (item) =>
+            item.document_id === target.document_id &&
+            item.status === 'REJECTED',
+        )
+        .at(-1)
       const review: DocumentBeeReview = {
         id: nextId(database),
         input_revision: target.revision,
@@ -185,8 +198,24 @@ export async function reviewRoutes(
               ]
             : [],
         ),
-        suggestions: suggestionsFor(context, target.content),
+        suggestions,
         usage: [],
+        steps: [
+          {
+            label: '문서 읽기',
+            result: `문단 ${target.content.split(/\n\s*\n/).filter((part) => part.trim()).length}개`,
+          },
+          {
+            label: '승인된 API 명세서와 비교',
+            result: approvedKind('API_SPEC'),
+          },
+          { label: 'ERD와 맞춰 보기', result: approvedKind('ERD') },
+          { label: '요구사항과 비교', result: approvedKind('REQUIREMENTS') },
+          { label: '수정 제안 정리', result: `제안 ${suggestions.length}개` },
+        ],
+        ...(rejected && target.status === 'REJECTED'
+          ? { rejection_submission_id: rejected.id }
+          : {}),
       }
       target.latest_review = review
       return { status: 201, data: review }

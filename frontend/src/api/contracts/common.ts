@@ -281,6 +281,17 @@ export const documentBeeReviewSchema = z.object({
   references: documentReviewReferenceSchema.array(),
   suggestions: documentReviewSuggestionSchema.array(),
   usage: usageSchema.array(),
+  // 단계별 결과('n단계 / 5단계', '문단 4개'). 서버가 아직 주지 않을 수 있다.
+  steps: z
+    .object({
+      label: z.string(),
+      description: z.string().optional(),
+      result: z.string().optional(),
+    })
+    .array()
+    .optional(),
+  // 반려 뒤 검토면 서버가 고른 반려 제출
+  rejection_submission_id: idSchema.optional(),
 })
 export type DocumentBeeReview = z.infer<typeof documentBeeReviewSchema>
 
