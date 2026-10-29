@@ -30,6 +30,7 @@ export const statusLabels: Record<string, string> = {
   APPROVED: '승인',
   PUBLISHED: '발행 완료',
   REJECTED: '반려',
+  WITHDRAWN: '거둠',
   SUPERSEDED: '이전 버전',
   PENDING: '대기 중',
   FAILED: '실패',

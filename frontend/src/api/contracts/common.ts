@@ -387,38 +387,87 @@ export const changeProposalInputSchema = z.object({
   reason: z.string(),
   task_id: idSchema.optional(),
   validation_id: idSchema.optional(),
+  /** 거둔(WITHDRAWN) 제안을 새 제안으로 다시 올릴 때만. 반려된 제안은 CHG-A04로 같은 번호에서 다시 올린다. */
+  previous_proposal_id: idSchema.optional(),
   items: changeItemSchema.array(),
   documents: documentChangeSchema.array(),
 })
 export type ChangeProposalInput = z.infer<typeof changeProposalInputSchema>
 
+// PR #46(195): 충돌 검사는 updated_at이 아니라 제출 리비전과 스냅샷 해시로 한다.
+export const changeProposalStatusSchema = z.enum([
+  'PROPOSED',
+  'IN_REVIEW',
+  'APPROVED',
+  'PUBLISHED',
+  'REJECTED',
+  'WITHDRAWN',
+])
+export const snapshotHashSchema = z
+  .string()
+  .regex(/^sha256:[0-9a-f]{64}$/, 'sha256: 뒤에 소문자 64자리여야 합니다.')
+
+// DocumentChange 입력을 해석한 응답. 업로드를 고르면 after_content와 업로드 버전 ID가 함께 올 수 있다.
+export const resolvedDocumentChangeSchema = z.object({
+  document_id: idSchema,
+  base_document_version_id: idSchema,
+  after_content: z.string(),
+  content_hash: z.string(),
+  proposed_document_version_id: idSchema.optional(),
+})
+export type ResolvedDocumentChange = z.infer<
+  typeof resolvedDocumentChangeSchema
+>
+
 export const changeProposalSchema = z.object({
   id: idSchema,
+  key: z.string(),
+  revision: z.number().int().positive(),
+  snapshot_hash: snapshotHashSchema,
   project_id: idSchema,
   base_baseline_id: idSchema,
   title: z.string(),
   reason: z.string(),
   task_id: idSchema.optional(),
   validation_id: idSchema.optional(),
+  // 195 미구현(#218 요청): 실제 서버에는 없을 수 있다.
+  meeting_id: idSchema.optional(),
   items: changeItemSchema.array(),
-  documents: documentChangeSchema.array(),
-  status: z.enum([
-    'PROPOSED',
-    'IN_REVIEW',
-    'APPROVED',
-    'PUBLISHED',
-    'REJECTED',
-  ]),
+  documents: resolvedDocumentChangeSchema.array(),
+  status: changeProposalStatusSchema,
   proposer_account_id: idSchema,
   actor_type: z.enum(['HUMAN', 'AGENT']),
+  // 195 미구현(#218 요청)
+  agent: z
+    .object({
+      agent_session_id: idSchema,
+      name: z.string(),
+      member_id: idSchema,
+    })
+    .optional(),
   current_baseline_id: idSchema,
   requires_refresh: z.boolean(),
   published_baseline_id: idSchema.optional(),
   created_at: timeSchema,
   updated_at: timeSchema,
   rejection_reason: z.string().optional(),
+  previous_proposal_id: idSchema.optional(),
+  withdrawn_by: idSchema.optional(),
+  withdrawn_at: timeSchema.optional(),
 })
 export type ChangeProposal = z.infer<typeof changeProposalSchema>
+
+export const changeProposalSummarySchema = z.object({
+  id: idSchema,
+  key: z.string(),
+  title: z.string(),
+  status: changeProposalStatusSchema,
+  revision: z.number().int().positive(),
+  base_baseline_id: idSchema,
+  proposer_account_id: idSchema,
+  updated_at: timeSchema,
+})
+export type ChangeProposalSummary = z.infer<typeof changeProposalSummarySchema>
 
 export const approvalSchema = z.object({
   id: idSchema,
@@ -1014,7 +1063,10 @@ export type DependencyCandidate = z.infer<typeof dependencyCandidateSchema>
 
 export const comparisonSchema = z.object({
   target_type: z.enum(['DOCUMENT', 'DESIGN_ITEM']),
-  target_id: idSchema,
+  // CREATE 항목은 발행 전이라 ID가 없어 null
+  target_id: idSchema.nullable(),
+  // 기준과 지금 내용이 다름. 기준→제안 diff와 별개
+  current_changed: z.boolean(),
   format: z.enum(['TEXT', 'FILE', 'STRUCTURED']),
   base_content: z.union([structuredContentSchema, z.string()]).optional(),
   current_content: z.union([structuredContentSchema, z.string()]).optional(),

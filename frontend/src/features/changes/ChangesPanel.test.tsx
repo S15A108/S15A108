@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { authApi, changesApi } from '@/api/services'
+import { getApiErrorCode } from '@/api/error'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -112,7 +113,7 @@ it('제안자는 검토 중인 제안을 고칠 수 없고, 반려되면 같은 
   expect(
     await screen.findByText('이팀장님이 검토하고 있어요'),
   ).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '제안 거두기' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '제안 거두기' })).toBeEnabled()
   expect(
     screen.queryByRole('button', { name: '제안 고치기' }),
   ).not.toBeInTheDocument()
@@ -124,7 +125,8 @@ it('제안자는 검토 중인 제안을 고칠 수 없고, 반려되면 같은 
   const { proposal } = await changesApi.get('101', '71')
   await changesApi.reject('101', '71', {
     reason: '받은 초대를 먼저 보여 주는 안으로 고쳐 주세요.',
-    expected_updated_at: proposal.updated_at,
+    expected_revision: proposal.revision,
+    expected_snapshot_hash: proposal.snapshot_hash,
   })
   await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
   client.clear()
@@ -179,4 +181,50 @@ it('문서함에서 고치기로 들어오면 그 문서를 고른 새 제안으
   expect(
     await screen.findByRole('heading', { name: /빈 목록 안내 추가/ }),
   ).toBeInTheDocument()
+})
+
+// PR #46 CHG-A15: 제안자는 올린 제안을 거두고, 거둔 제안은 새 제안(previous_proposal_id)으로 다시 올린다.
+it('제안자는 제안을 거두고, 거둔 제안을 새 제안으로 다시 올린다', async () => {
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ChangesPanel projectId="101" isLeader={false} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await user.click(await screen.findByRole('button', { name: '제안 거두기' }))
+  await user.click(screen.getByRole('button', { name: '거두기' }))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '제안을 거뒀어요.',
+  )
+  expect((await changesApi.get('101', '71')).proposal.status).toBe('WITHDRAWN')
+  await user.click(
+    await screen.findByRole('button', { name: '새 제안으로 다시 올리기' }),
+  )
+  await user.click(screen.getByRole('button', { name: '제안 올리기' }))
+  const heading = await screen.findAllByRole('heading', {
+    name: /프로젝트 목록 빈 화면 안내/,
+  })
+  expect(heading.length).toBeGreaterThan(0)
+  const list = await changesApi.list('101')
+  const next = list.items.find((item) => item.id !== '71')!
+  expect((await changesApi.get('101', next.id)).proposal).toMatchObject({
+    previous_proposal_id: '71',
+    revision: 1,
+    status: 'PROPOSED',
+  })
+})
+
+it('조회한 리비전과 해시가 지금과 다르면 409 version_conflict', async () => {
+  const { proposal } = await changesApi.get('101', '71')
+  const stale = await changesApi
+    .reject('101', '71', {
+      reason: '다시 봐 주세요.',
+      expected_revision: proposal.revision + 1,
+      expected_snapshot_hash: proposal.snapshot_hash,
+    })
+    .catch((cause: unknown) => cause)
+  expect(getApiErrorCode(stale)).toBe('version_conflict')
 })

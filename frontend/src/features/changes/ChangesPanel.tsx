@@ -67,6 +67,7 @@ const statusOrder: Record<ChangeStatus, number> = {
   APPROVED: 2,
   PUBLISHED: 3,
   REJECTED: 4,
+  WITHDRAWN: 5,
 }
 
 // 변경 제안은 설계 항목(요구사항, API 계약, 데이터 계약, 정책, 제약)만 다룬다. 문서 새 버전은 공용 문서함에서 승인·반려한다.
@@ -91,6 +92,7 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
       : { kind: 'detail' },
   )
   const [discussing, setDiscussing] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
   const action = useProjectAction(projectId)
   const changes = useInfiniteQuery({
     queryKey: ['projects', projectId, 'changes', filter],
@@ -201,15 +203,13 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
     .filter((entry) => {
       const query = search.trim()
       if (!query) return true
-      return (
-        entry.title.includes(query) ||
-        entry.items.some((item) => itemKey(item.design_item_id).includes(query))
-      )
+      // 목록은 본문 없는 요약(PR #46)이라 제목과 제안 키로 거른다. 서버 검색(q)은 195 미구현.
+      return entry.title.includes(query) || entry.key.includes(query)
     })
     .toSorted((a, b) =>
       sort === 'status'
         ? statusOrder[a.status] - statusOrder[b.status]
-        : b.created_at.localeCompare(a.created_at),
+        : b.updated_at.localeCompare(a.updated_at),
     )
   const select = (id: string) => {
     setSelected({ id, focus: focusId })
@@ -228,6 +228,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
       title: values.title,
       reason: values.reason,
       ...(values.task_id ? { task_id: values.task_id } : {}),
+      // 거둔 제안을 다시 올리면 새 제안에 잇는다(PR #46 previous_proposal_id).
+      ...(source?.status === 'WITHDRAWN' && !update
+        ? { previous_proposal_id: source.id }
+        : {}),
       items: toChangeItems(values.items, approved),
       documents: values.document_id
         ? [
@@ -246,7 +250,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
         if (update && source) {
           await changesApi.update(projectId, source.id, {
             ...input,
-            expected_updated_at: source.updated_at,
+            expected_revision: source.revision,
+            expected_snapshot_hash: source.snapshot_hash,
           })
           select(source.id)
         } else {
@@ -356,13 +361,17 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         </strong>
                         <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                           <StatusPill value={entry.status} />
-                          항목 {entry.items.length}개 ·{' '}
+                          {entry.key} ·{' '}
                           {nameOfAccount(entry.proposer_account_id)}
                           {entry.proposer_account_id === session.data?.id &&
                             '(나)'}
-                          {entry.requires_refresh && (
-                            <span className="text-amber-700">기준 바뀜</span>
-                          )}
+                          {baseline.data &&
+                            entry.base_baseline_id !== baseline.data.id &&
+                            ['PROPOSED', 'IN_REVIEW', 'APPROVED'].includes(
+                              entry.status,
+                            ) && (
+                              <span className="text-amber-700">기준 바뀜</span>
+                            )}
                         </span>
                       </button>
                     </li>
@@ -393,12 +402,20 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
               key={documents.isSuccess ? 'documents' : 'loading'}
               documents={documentOptions}
               // 올린 제안(PROPOSED·IN_REVIEW)은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다(CHG-A04, 사용자 결정 10-30).
-              heading={mode.update ? '고쳐서 다시 올리기' : '새 변경 제안'}
+              heading={
+                mode.update
+                  ? '고쳐서 다시 올리기'
+                  : mode.source
+                    ? '새 제안으로 다시 올리기'
+                    : '새 변경 제안'
+              }
               status={mode.source && <StatusPill value={mode.source.status} />}
               description={
                 mode.update
                   ? `반려 사유: ${mode.source?.rejection_reason ?? ''} · 반려된 내용을 채웠어요. 같은 제안 번호로 다시 올리면 검토 대기가 되고, 이전 내용과 반려 사유는 이력에 남아요.`
-                  : undefined
+                  : mode.source
+                    ? '거둔 제안 내용을 채웠어요. 올리면 새 제안이 되고 거둔 제안과 이어져요.'
+                    : undefined
               }
               footnote={
                 mode.update
@@ -553,7 +570,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                                 changesApi.approve(projectId, current.id, {
                                   expected_base_baseline_id:
                                     current.base_baseline_id,
-                                  expected_updated_at: current.updated_at,
+                                  expected_revision: current.revision,
+                                  expected_snapshot_hash: current.snapshot_hash,
                                 }),
                               `기준 v${nextVersion} 발행을 마쳤어요.`,
                             ).then(() => setMode({ kind: 'detail' }))
@@ -572,8 +590,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       </Back>
                       <h3 className="text-lg font-bold">제안을 반려할까요?</h3>
                       <p className="text-sm leading-6 text-muted-foreground">
-                        반려한 제안은 고칠 수 없어요. 다시 올리면 새 제안이
-                        돼요. 제안자와 검토 요청을 보낸 팀원에게 알려요.
+                        반려하면 제안자가 같은 제안을 고쳐 다시 올릴 수 있어요.
+                        제안자와 검토 요청을 보낸 팀원에게 알려요.
                       </p>
                       <ActionForm
                         fields={[
@@ -592,7 +610,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             () =>
                               changesApi.reject(projectId, current.id, {
                                 reason: values.reason,
-                                expected_updated_at: current.updated_at,
+                                expected_revision: current.revision,
+                                expected_snapshot_hash: current.snapshot_hash,
                               }),
                             '제안을 반려했어요.',
                           )
@@ -609,8 +628,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         <StatusPill value={current.status} />
                       </h3>
                       <p className="text-xs text-muted-foreground">
-                        {nameOfAccount(current.proposer_account_id)} 제안 ·{' '}
-                        {formatDate(current.created_at)}
+                        {current.key} ·{' '}
+                        {nameOfAccount(current.proposer_account_id)} 제안 · r
+                        {current.revision} · {formatDate(current.created_at)}
                         {/* API 없음: 회의·작업 중 어디서 올렸는지 출처, 에이전트 제안이면 에이전트 이름(백엔드 메모 3·7) */}
                       </p>
                     </div>
@@ -647,6 +667,28 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             }
                           >
                             고쳐서 다시 올리기
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {current.status === 'WITHDRAWN' && (
+                      <div className="grid gap-2 rounded-xl border bg-muted/40 p-4 text-sm">
+                        <p>
+                          {nameOfAccount(current.withdrawn_by)}님이 거둔
+                          제안이에요
+                          {current.withdrawn_at &&
+                            ` · ${formatDate(current.withdrawn_at)}`}
+                          . 거둔 제안은 고칠 수 없어요.
+                        </p>
+                        {mine && (
+                          <Button
+                            variant="outline"
+                            className="justify-self-start"
+                            onClick={() =>
+                              setMode({ kind: 'form', source: current })
+                            }
+                          >
+                            새 제안으로 다시 올리기
                           </Button>
                         )}
                       </div>
@@ -827,9 +869,11 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                                 key={`${comparison.target_id}-${index}`}
                                 comparison={comparison}
                                 label={
-                                  comparison.target_type === 'DESIGN_ITEM'
-                                    ? itemKey(comparison.target_id)
-                                    : '문서'
+                                  comparison.target_type === 'DOCUMENT'
+                                    ? '문서'
+                                    : comparison.target_id
+                                      ? itemKey(comparison.target_id)
+                                      : '새 항목'
                                 }
                               />
                             ))
@@ -1022,22 +1066,61 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         </div>
                       )}
                     </div>
-                    {mine && editable && !isLeader && (
-                      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
-                        <span className="mr-auto text-xs text-muted-foreground">
-                          올린 제안은 잠겨 있어요. 거두면 이 제안은 끝나고, 다시
-                          올리면 새 제안이 돼요.
-                        </span>
-                        {/* API 없음: 제안자가 스스로 거두는 API(CHG-A15 withdraw, PR #42 요청 중) */}
-                        <Button
-                          variant="outline"
-                          disabled
-                          title="서버 기능이 준비되면 열려요"
-                        >
-                          제안 거두기
-                        </Button>
-                      </div>
-                    )}
+                    {mine &&
+                      (editable || current.status === 'REJECTED') &&
+                      !isLeader && (
+                        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                          {withdrawing ? (
+                            <>
+                              <span className="mr-auto text-sm">
+                                제안을 거둘까요? 거둔 제안은 다시 고칠 수 없고,
+                                다시 올리면 새 제안이 돼요.
+                              </span>
+                              <Button
+                                variant="outline"
+                                onClick={() => setWithdrawing(false)}
+                              >
+                                취소
+                              </Button>
+                              {/* CHG-A15 거두기(PR #46): 올렸거나 반려된 내 제안만 */}
+                              <Button
+                                variant="destructive"
+                                disabled={action.busy}
+                                onClick={() =>
+                                  void perform(
+                                    () =>
+                                      changesApi.withdraw(
+                                        projectId,
+                                        current.id,
+                                        {
+                                          expected_revision: current.revision,
+                                          expected_snapshot_hash:
+                                            current.snapshot_hash,
+                                        },
+                                      ),
+                                    '제안을 거뒀어요.',
+                                  ).then(() => setWithdrawing(false))
+                                }
+                              >
+                                거두기
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="mr-auto text-xs text-muted-foreground">
+                                올린 제안은 잠겨 있어요. 거두면 이 제안은
+                                끝나고, 다시 올리면 새 제안이 돼요.
+                              </span>
+                              <Button
+                                variant="outline"
+                                onClick={() => setWithdrawing(true)}
+                              >
+                                제안 거두기
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     {isLeader && editable && (
                       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
                         {current.requires_refresh && (
@@ -1054,7 +1137,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                               void perform(
                                 () =>
                                   changesApi.review(projectId, current.id, {
-                                    expected_updated_at: current.updated_at,
+                                    expected_revision: current.revision,
+                                    expected_snapshot_hash:
+                                      current.snapshot_hash,
                                   }),
                                 '검토를 시작했어요.',
                               )

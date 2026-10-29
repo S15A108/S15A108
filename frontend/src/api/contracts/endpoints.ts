@@ -1001,6 +1001,20 @@ export const endpointRegistry = [
     noContent: false,
     idempotent: false,
   },
+  // PR #46(195)에 구현된 거두기. dev 명세에는 아직 없다.
+  {
+    id: 'CHG-A15',
+    title: '변경 제안 거두기',
+    method: 'POST',
+    path: '/projects/{id}/change-proposals/{proposal_id}/withdraw',
+    auth: 'MEMBER',
+    domain: 'changes',
+    operation: 'withdraw',
+    multipart: false,
+    binary: false,
+    noContent: false,
+    idempotent: true,
+  },
   {
     id: 'TSK-A01',
     title: '작업 계획 등록',

@@ -340,7 +340,8 @@ describe('documented REST mock adapter', () => {
     await expect(
       changesApi.approve('101', '71', {
         expected_base_baseline_id: '999',
-        expected_updated_at: proposal.updated_at,
+        expected_revision: proposal.revision,
+        expected_snapshot_hash: proposal.snapshot_hash,
       }),
     ).rejects.toMatchObject({ response: { status: 409 } })
     expect((await documentsApi.baseline('101')).id).toBe('401')
@@ -349,7 +350,8 @@ describe('documented REST mock adapter', () => {
     )
     const published = await changesApi.approve('101', '71', {
       expected_base_baseline_id: '401',
-      expected_updated_at: proposal.updated_at,
+      expected_revision: proposal.revision,
+      expected_snapshot_hash: proposal.snapshot_hash,
     })
     expect(published.proposal.status).toBe('PUBLISHED')
     expect(published.baseline.version_no).toBe(2)
