@@ -176,8 +176,8 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             회의를 끝낼까요?
                           </h3>
                           <p className="mt-1 text-sm text-muted-foreground">
-                            비비 정리대로 공용 문서를 바꾸고 회의를 닫아요. 대화
-                            기록은 그대로 남아요.
+                            회의를 끝내면 비비가 이 정리를 바탕으로 변경 제안을
+                            만들어요. 대화 기록은 그대로 남아요.
                           </p>
                         </div>
                         <article className="rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
@@ -185,16 +185,19 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                           <p className="leading-6 whitespace-pre-wrap">
                             {review.text}
                           </p>
-                          {/* API 없음: 바뀔 문서와 줄, 근거 발언은 회의 종료 API가 생기면 여기에 그린다. */}
+                          {/* API 없음: 변경 제안에 들어갈 설계 항목과 문장, 근거 발언은 회의 종료 API가 생기면 여기에 그린다. */}
                         </article>
                         <ul className="list-inside list-disc text-sm text-muted-foreground">
-                          <li>관련 작업 담당자에게 바뀐 기준을 알려요.</li>
+                          <li>
+                            문서는 바로 바뀌지 않아요. 팀장이 변경 제안을
+                            승인하고 발행하면 기준에 반영돼요.
+                          </li>
                           <li>끝난 회의에는 더 쓸 수 없어요.</li>
                         </ul>
                         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
                           <p className="text-xs text-muted-foreground">
-                            팀장만 끝낼 수 있어요. 끝내면 따로 승인 없이 바로
-                            반영돼요.
+                            팀장만 끝낼 수 있어요. 기준 v1 뒤의 문서 수정은 모두
+                            변경 제안을 거쳐요.
                           </p>
                           <div className="flex gap-2">
                             <Button
@@ -203,12 +206,12 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             >
                               취소
                             </Button>
-                            {/* API 없음: 회의 종료와 문서 새 버전 만들기, 관련 작업 담당자 알림 */}
+                            {/* API 없음: 회의 종료(MTG-A13 요청 중)와 비비가 만든 변경 제안(CHG-A01)으로 잇기. 끝낸 뒤에는 그 제안을 변경 제안 창에서 연다. */}
                             <Button
                               disabled
                               title="서버 기능이 준비되면 열려요"
                             >
-                              회의 끝내고 문서 바꾸기
+                              회의 끝내고 변경 제안 만들기
                             </Button>
                           </div>
                         </div>

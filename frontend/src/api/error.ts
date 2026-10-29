@@ -45,6 +45,13 @@ const messages: Record<string, string> = {
   baseline_exists:
     '이미 기준 v1이 있어요. 새로고침해서 지금 기준을 확인해 주세요.',
   required_documents_missing: '필수 문서 4종을 먼저 올려 주세요.',
+  change_proposal_required:
+    '기준 설계 생성 이후 문서 수정은 변경 제안을 통해 요청해 주세요.',
+  submission_locked: '팀장 검토를 요청한 뒤에는 고칠 수 없어요.',
+  review_stale: '본문이 바뀌어 비비 검토를 다시 받아야 해요.',
+  review_decisions_pending:
+    '처리하지 않은 보완 제안이 있어요. 반영하거나 넘겨 주세요.',
+  submission_decided: '이미 결정한 검토 요청이에요.',
   agent_limit_reached:
     '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
 }

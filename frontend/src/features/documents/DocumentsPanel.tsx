@@ -117,10 +117,21 @@ export function DocumentsPanel({
         </Button>
       </header>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 p-4">
+        {/* 기준 v1(PLN-A10) 뒤의 문서 수정은 dev처럼 모두 변경 제안(CHG-A01 → CHG-A09)으로 간다. */}
         <p className="text-sm text-muted-foreground">
-          문서를 올리면 비비 검토 → 수정 제안 반영 → 팀장 승인을 거쳐 현재
-          문서가 돼요. 4종이 모두 승인되면 팀장이 기준 v1을 만들어요.
+          {baseline.data
+            ? '기준 v1이 생겼어요. 이제 문서를 고치려면 변경 제안으로 요청해요. 팀장이 승인·발행하면 기준에 반영돼요.'
+            : '문서를 올리면 비비 검토 → 수정 제안 반영 → 팀장 승인을 거쳐 현재 문서가 돼요. 4종이 모두 승인되면 팀장이 기준 v1을 만들어요.'}
         </p>
+        {baseline.data && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => openPane('changes')}
+          >
+            변경 제안으로 요청
+          </Button>
+        )}
         {isLeader && allApproved && !baseline.data && (
           <Button size="sm" onClick={() => openPane('planning')}>
             기준 v1 만들기
@@ -330,6 +341,7 @@ export function DocumentsPanel({
             title={reviewed.title}
             kind={reviewed.kind}
             isLeader={isLeader}
+            locked={!!baseline.data}
             onClose={() => setReviewing(null)}
           />
         ) : selected ? (
@@ -644,8 +656,9 @@ function DocumentDetail({
             )}
             <div className="flex flex-wrap items-center gap-3">
               <p className="text-xs text-muted-foreground">
-                문서 상세는 보기 전용이에요. 문서를 고치려면 새 .md를 올려 비비
-                검토와 팀장 승인을 다시 거쳐요.
+                문서 상세는 보기 전용이에요. 기준 v1 전에는 새 .md를 올려 비비
+                검토와 팀장 승인을 거치고, 기준 v1 뒤에는 변경 제안으로
+                요청해요.
               </p>
               {data.document.approved_version &&
                 data.document.approved_version.id !== data.version.id && (

@@ -75,7 +75,7 @@ it('팀장은 메시지를 보내고 비비 정리를 받은 뒤 회의 끝내�
     screen.getByRole('heading', { name: '회의를 끝낼까요?' }),
   ).toBeInTheDocument()
   expect(
-    screen.getByRole('button', { name: '회의 끝내고 문서 바꾸기' }),
+    screen.getByRole('button', { name: '회의 끝내고 변경 제안 만들기' }),
   ).toBeDisabled()
 })
 

@@ -11,6 +11,7 @@ import {
   resetMockApi,
   setupMockApi,
 } from '@/mocks/setup'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { DocumentReview } from './DocumentReview'
 
 let restore: () => void
@@ -94,4 +95,33 @@ it('팀장은 사유를 써서 반려하고, 올린 사람에게는 반려 사�
   expect(
     screen.getByRole('button', { name: '비비에게 검토 요청' }),
   ).toBeInTheDocument()
+})
+
+it('기준 v1이 생긴 뒤에는 고치는 버튼 대신 변경 제안으로 안내한다', async () => {
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <DocumentReview
+        projectId="101"
+        documentId="201"
+        title="기획안"
+        kind="PLAN"
+        isLeader
+        locked
+        onClose={vi.fn()}
+      />
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByText(/기준 설계 생성 이후 문서 수정은 변경 제안을 통해/),
+  ).toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: '비비에게 검토 요청' }),
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '변경 제안으로 요청' }))
+  expect(useWorkspaceStore.getState().pane).toBe('changes')
 })

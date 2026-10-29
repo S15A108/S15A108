@@ -22,3 +22,9 @@ it('최초 기준 만들기 거절 코드마다 할 일을 알려 준다', () =>
     '이미 기준 v1이 있어요',
   )
 })
+
+it('기준 v1 뒤 문서 수정은 변경 제안으로 안내한다', () => {
+  expect(getApiErrorMessage(failure('change_proposal_required'))).toBe(
+    '기준 설계 생성 이후 문서 수정은 변경 제안을 통해 요청해 주세요.',
+  )
+})

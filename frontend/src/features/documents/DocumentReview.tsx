@@ -13,6 +13,7 @@ import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { statusLabel } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { reviewStage } from './reviewStage'
 
 const STEPS = ['파일 등록', '비비 검토', '수정 제안 반영', '팀장 승인'] as const
@@ -24,6 +25,7 @@ export function DocumentReview({
   title,
   kind,
   isLeader,
+  locked = false,
   onClose,
 }: {
   projectId: string
@@ -31,9 +33,12 @@ export function DocumentReview({
   title: string
   kind: string
   isLeader: boolean
+  /** 기준 v1이 생겨 이 흐름으로는 고칠 수 없음(change_proposal_required) */
+  locked?: boolean
   onClose: () => void
 }) {
   const session = useSession()
+  const openPane = useWorkspaceStore((state) => state.openPane)
   const action = useProjectAction(projectId)
   const [editing, setEditing] = useState(false)
   const [rejecting, setRejecting] = useState(false)
@@ -75,6 +80,22 @@ export function DocumentReview({
         <h3 className="text-lg font-bold">{title}</h3>
       </div>
       {action.message && <Toast>{action.message}</Toast>}
+      {locked && (
+        <div className="grid gap-2 rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
+          <p>
+            기준 설계 생성 이후 문서 수정은 변경 제안을 통해 요청해 주세요. 이
+            화면에서는 보기만 할 수 있어요.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="justify-self-start"
+            onClick={() => openPane('changes')}
+          >
+            변경 제안으로 요청
+          </Button>
+        </div>
+      )}
       {action.error && (
         <p
           role="alert"
@@ -86,7 +107,7 @@ export function DocumentReview({
       <AsyncState query={copy}>
         {(data) => {
           const stage = reviewStage(data)
-          const owner = data.owner_account_id === session.data?.id
+          const owner = !locked && data.owner_account_id === session.data?.id
           const rejected = data.submissions.find(
             (item) => item.status === 'REJECTED',
           )
@@ -260,7 +281,7 @@ export function DocumentReview({
                   </div>
                 )}
               {data.status === 'SUBMITTED' &&
-                (isLeader ? (
+                (isLeader && !locked ? (
                   <AsyncState query={detail}>
                     {(submission) => (
                       <div className="grid gap-3">
