@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useFieldArray, useForm, useWatch } from 'react-hook-form'
@@ -85,6 +86,20 @@ export function ProposalForm({
     },
   })
   const rows = useFieldArray({ control, name: 'items' })
+  // 고치기 화면은 처음 올린 줄을 필드 id로 기억한다. 줄을 빼도 나머지 줄의 비교가 어긋나지 않는다.
+  const [originalById] = useState(
+    () =>
+      new Map(
+        rows.fields.flatMap((field, index) =>
+          original?.[index] ? [[field.id, original[index]] as const] : [],
+        ),
+      ),
+  )
+  const removed = [...originalById].filter(
+    ([id]) => !rows.fields.some((field) => field.id === id),
+  )
+  // 새 제안은 설계 항목만 보이고 '+ 문서 고치기'로 고칠 문서 칸을 연다(PNL-04 수정안). 문서함 '고치기'로 오면 열린 채.
+  const [documentOpen, setDocumentOpen] = useState(!!defaultValues?.document_id)
   const values = useWatch({ control, name: 'items' })
   const documentId = useWatch({ control, name: 'document_id' })
   return (
@@ -173,7 +188,19 @@ export function ProposalForm({
               </p>
             </section>
           )}
-          {documents.length > 0 && (
+          {documents.length > 0 && !documentOpen && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="justify-self-start"
+              onClick={() => setDocumentOpen(true)}
+            >
+              <Plus />
+              문서 고치기
+            </Button>
+          )}
+          {documents.length > 0 && documentOpen && (
             <div className="grid gap-2 rounded-xl border p-3">
               <Label htmlFor="proposal-document">
                 고칠 문서{' '}
@@ -243,7 +270,7 @@ export function ProposalForm({
             const base = items.find(
               (item) => item.design_item_id === row.design_item_id,
             )
-            const before = original?.[index]
+            const before = originalById.get(field.id)
             const changed =
               !!before &&
               (before.operation !== row.operation ||
@@ -359,6 +386,23 @@ export function ProposalForm({
             <Plus />
             항목 추가
           </Button>
+          {removed.map(([id, row]) => (
+            <p
+              key={id}
+              className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground"
+            >
+              {operationLabel[row.operation]} ·{' '}
+              {row.operation === 'CREATE'
+                ? kindLabel[row.kind]
+                : (items.find(
+                    (item) => item.design_item_id === row.design_item_id,
+                  )?.key ?? '설계 항목')}
+              {row.sentence && ` · ${row.sentence}`}
+              <span className="ml-2 font-semibold text-foreground">
+                이번 제안에서 뺐어요
+              </span>
+            </p>
+          ))}
         </fieldset>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">

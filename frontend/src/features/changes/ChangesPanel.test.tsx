@@ -269,3 +269,39 @@ it('조회한 리비전과 해시가 지금과 다르면 409 version_conflict', 
     .catch((cause: unknown) => cause)
   expect(getApiErrorCode(stale)).toBe('version_conflict')
 })
+
+// PNL-04 수정안: 새 제안은 설계 항목만 보이고 '+ 문서 고치기'로 고칠 문서 칸을 연다.
+it('새 제안 폼은 문서 고치기를 눌러야 고칠 문서 칸이 열린다', async () => {
+  const user = userEvent.setup()
+  renderPanel()
+  await user.click(await screen.findByRole('button', { name: '새 변경 제안' }))
+  expect(screen.queryByLabelText(/고칠 문서/)).not.toBeInTheDocument()
+  await user.click(await screen.findByRole('button', { name: '문서 고치기' }))
+  expect(screen.getByLabelText(/고칠 문서/)).toBeInTheDocument()
+})
+
+// PNL-04-v2-edit: 반려된 제안을 고칠 때 뺀 항목은 점선 줄로 남겨 보여 준다.
+it('반려된 제안을 고치며 항목을 빼면 이번 제안에서 뺐다고 보여 준다', async () => {
+  const { proposal } = await changesApi.get('101', '71')
+  await changesApi.reject('101', '71', {
+    reason: '문서로 고쳐 주세요.',
+    expected_revision: proposal.revision,
+    expected_snapshot_hash: proposal.snapshot_hash,
+  })
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ChangesPanel projectId="101" isLeader={false} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await user.click(
+    await screen.findByRole('button', { name: '고쳐서 다시 올리기' }),
+  )
+  await user.click(screen.getByRole('button', { name: '문서 고치기' }))
+  await user.selectOptions(await screen.findByLabelText(/고칠 문서/), '203')
+  await user.click(screen.getByRole('button', { name: '항목 1 빼기' }))
+  expect(screen.getByText('이번 제안에서 뺐어요')).toBeInTheDocument()
+})

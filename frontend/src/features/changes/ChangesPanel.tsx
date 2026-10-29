@@ -25,6 +25,7 @@ import { formatDate } from '@/lib/formatDate'
 import { describeContent } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { foldDiff, lineDiff } from './lineDiff'
 import { ProposalForm } from './ProposalForm'
 import { operationLabel, toChangeItems, toRows } from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
@@ -145,7 +146,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   const baselines = useQuery({
     queryKey: ['projects', projectId, 'baselines'],
     queryFn: () => documentsApi.baselines(projectId, { limit: 20 }),
-    enabled: mode.kind === 'history',
+    // 승인 이력 화면과 발행한 뒤 '기준 vN 보기' 버튼이 쓴다.
+    enabled:
+      mode.kind === 'history' || detail.data?.proposal.status === 'PUBLISHED',
   })
   const documents = useQuery({
     queryKey: ['projects', projectId, 'planning-documents'],
@@ -158,6 +161,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
             {
               id: document.id,
               label: `${document.title} · 기준 v${document.approved_version.version_no}`,
+              title: document.title,
+              versionNo: document.approved_version.version_no,
               content: document.approved_version.content ?? '',
               versionId: document.approved_version.id,
             },
@@ -216,6 +221,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
     setTab('overview')
     setMode({ kind: 'detail' })
   }
+  const publishedVersion = (id: string) =>
+    baselines.data?.items.find((item) => item.id === id)?.version_no
   const perform = (operation: () => Promise<unknown>, message: string) =>
     action.run(operation, message).catch(() => undefined)
   const submitForm = async (
@@ -532,6 +539,14 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       <h3 className="text-lg font-bold">
                         기준 v{nextVersion} 발행을 승인할까요?
                       </h3>
+                      <p className="text-sm font-semibold">
+                        기준 v{nextVersion}에 들어가는 것
+                      </p>
+                      {current.items.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          설계 항목
+                        </p>
+                      )}
                       <ul className="grid gap-1.5 text-sm">
                         {current.items.map((item, index) => (
                           <li
@@ -546,10 +561,32 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                           </li>
                         ))}
                       </ul>
+                      {current.documents.length > 0 && (
+                        <>
+                          <p className="text-xs text-muted-foreground">문서</p>
+                          <ul className="grid gap-1.5 text-sm">
+                            {current.documents.map((change) => {
+                              const document = documentOptions.find(
+                                (item) => item.id === change.document_id,
+                              )
+                              return (
+                                <li
+                                  key={change.document_id}
+                                  className="rounded-lg border px-3 py-2"
+                                >
+                                  {document
+                                    ? `${document.title} v${document.versionNo} → v${document.versionNo + 1}`
+                                    : '문서 → 새 버전'}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )}
                       <p className="rounded-lg bg-muted/50 p-3 text-sm leading-6">
                         승인하면 이 항목을 쓰는 검증은 &apos;다시 검증
                         필요&apos;, 진행 중 작업은 &apos;대기 · 재검증&apos;으로
-                        바뀌어요. 문서는 공용 문서함 승인 때 바뀌어요.
+                        바뀌어요. 문서 원문도 함께 새 기준이 돼요.
                         {/* API 없음: 승인 전에 바뀔 검증·작업 목록을 미리 받는 응답(백엔드 메모 4). 지금은 영향 탭의 확인된 관계로 대신한다. */}
                         {impact.data?.explicit.length
                           ? ` 확인된 관련 작업: ${impact.data.explicit.map((entry) => taskKey(entry.task_id)).join(', ')}`
@@ -601,6 +638,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             type: 'textarea',
                             required: true,
                             max: 2000,
+                            // 기준이 바뀐 제안은 돌려보내는 이유를 채워 둔다(PNL-04 수정안 기준 바뀜).
+                            value: current.requires_refresh
+                              ? '기준이 바뀌었어요. 최신 기준으로 고쳐 다시 올려 주세요.'
+                              : undefined,
                           },
                         ]}
                         submitLabel="반려하기"
@@ -719,7 +760,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                                 variant="outline"
                                 onClick={() => openPane('documents')}
                               >
-                                기준 보기
+                                {publishedVersion(result.baseline_id)
+                                  ? `기준 v${publishedVersion(result.baseline_id)} 보기`
+                                  : '기준 보기'}
                               </Button>
                               <Button
                                 size="sm"
@@ -870,7 +913,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                                 comparison={comparison}
                                 label={
                                   comparison.target_type === 'DOCUMENT'
-                                    ? '문서'
+                                    ? (documentOptions.find(
+                                        (item) =>
+                                          item.id === comparison.target_id,
+                                      )?.title ?? '문서')
                                     : comparison.target_id
                                       ? itemKey(comparison.target_id)
                                       : '새 항목'
@@ -1153,7 +1199,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                           disabled={action.busy}
                           onClick={() => setMode({ kind: 'reject' })}
                         >
-                          반려
+                          {current.requires_refresh
+                            ? '기준이 바뀌어 반려'
+                            : '반려'}
                         </Button>
                         <Button
                           disabled={action.busy || current.requires_refresh}
@@ -1242,10 +1290,17 @@ function Diff({
   comparison: Comparison
   label: string
 }) {
-  const before = describeContent(
-    comparison.current_content ?? comparison.base_content,
-  )
+  const [whole, setWhole] = useState(false)
+  const baseText = comparison.current_content ?? comparison.base_content
+  const before = describeContent(baseText)
   const after = describeContent(comparison.proposed_content)
+  // 문서 원문은 줄 단위로 비교하고 바뀐 줄 앞뒤만 보여 준다(PNL-04 수정안 회의 제안 · 바뀌는 내용).
+  const lines =
+    comparison.target_type === 'DOCUMENT' &&
+    typeof baseText === 'string' &&
+    typeof comparison.proposed_content === 'string'
+      ? lineDiff(baseText, comparison.proposed_content)
+      : undefined
   return (
     <details className="rounded-xl border px-3.5 py-2.5 text-sm">
       <summary className="cursor-pointer font-medium">{label}</summary>
@@ -1253,6 +1308,44 @@ function Diff({
         <p className="mt-2 text-muted-foreground">
           파일 버전 변경이에요. 공용 문서함에서 두 원본을 내려받아 확인하세요.
         </p>
+      ) : lines ? (
+        <div className="mt-2 grid gap-1">
+          <div className="grid font-mono text-xs leading-6 whitespace-pre-wrap">
+            {(whole ? lines : foldDiff(lines)).map((line, index) =>
+              line.kind === 'folded' ? (
+                <p key={index} className="px-2 text-muted-foreground">
+                  … 같은 줄 {line.count}개
+                </p>
+              ) : (
+                <p
+                  key={index}
+                  className={cn(
+                    'px-2',
+                    line.kind === 'removed' &&
+                      'bg-destructive/5 text-destructive',
+                    line.kind === 'added' && 'bg-primary/10',
+                  )}
+                >
+                  {line.kind === 'removed'
+                    ? '− '
+                    : line.kind === 'added'
+                      ? '+ '
+                      : '  '}
+                  {line.text}
+                </p>
+              ),
+            )}
+          </div>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="justify-self-start"
+            onClick={() => setWhole((value) => !value)}
+          >
+            {whole ? '바뀐 줄만 보기' : '원문 전체 보기'}
+          </Button>
+        </div>
       ) : (
         <div className="mt-2 grid gap-1 font-mono text-xs leading-6 whitespace-pre-wrap">
           <p className="rounded bg-destructive/5 px-2 text-destructive">
