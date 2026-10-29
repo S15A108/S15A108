@@ -96,3 +96,38 @@ it('새 변경 제안은 항목을 고르지 않으면 막고, 다 채우면 목
     await screen.findByRole('heading', { name: /로그인 실패 안내/ }),
   ).toBeInTheDocument()
 })
+
+it('제안자는 검토 중인 내 제안을 같은 폼으로 고쳐 다시 올리고 고친 항목을 확인한다', async () => {
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ChangesPanel projectId="101" isLeader={false} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByText('이팀장님이 검토하고 있어요'),
+  ).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '제안 거두기' })).toBeDisabled()
+  expect(
+    screen.queryByRole('button', { name: /승인하고 기준/ }),
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '제안 고치기' }))
+  expect(
+    screen.getByRole('heading', { name: /제안 고치기/ }),
+  ).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '받은 의견' })).toBeInTheDocument()
+  const sentence = screen.getByLabelText('항목 1 바뀔 문장')
+  await user.clear(sentence)
+  await user.type(sentence, '없으면 받은 초대를 먼저 보여 준다.')
+  expect(screen.getByText('고친 항목')).toBeInTheDocument()
+  expect(
+    screen.getByText(/처음 올린 문장: 로그인한 사용자는/),
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '고친 내용 올리기' }))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '고친 내용을 올렸어요. 다시 검토 대기예요.',
+  )
+})

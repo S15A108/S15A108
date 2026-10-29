@@ -153,6 +153,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   const editable =
     !!proposal && ['PROPOSED', 'IN_REVIEW'].includes(proposal.status)
   const mine = proposal?.proposer_account_id === session.data?.id
+  const leaderName =
+    members.data?.items.find((member) => member.role === 'LEADER')?.name ??
+    '팀장'
   const nameOfAccount = (id?: string) =>
     people.find((member) => member.account_id === id)?.name ?? '팀원'
   const nameOfMember = (id?: string) =>
@@ -212,7 +215,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
           select(created.id)
         }
       },
-      update ? '최신 기준으로 다시 올렸어요.' : '변경 제안을 올렸어요.',
+      update
+        ? '고친 내용을 올렸어요. 다시 검토 대기예요.'
+        : '변경 제안을 올렸어요.',
     )
   }
 
@@ -314,6 +319,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                           <StatusPill value={entry.status} />
                           항목 {entry.items.length}개 ·{' '}
                           {nameOfAccount(entry.proposer_account_id)}
+                          {entry.proposer_account_id === session.data?.id &&
+                            '(나)'}
                           {entry.requires_refresh && (
                             <span className="text-amber-700">기준 바뀜</span>
                           )}
@@ -346,14 +353,49 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
             <ProposalForm
               heading={
                 mode.update
-                  ? '최신 기준으로 고치기'
+                  ? '제안 고치기'
                   : mode.source
                     ? '고쳐서 새로 올리기'
                     : '새 변경 제안'
               }
-              submitLabel={mode.update ? '다시 올리기' : '제안 올리기'}
+              status={mode.source && <StatusPill value={mode.source.status} />}
+              description={
+                mode.update
+                  ? mode.source?.requires_refresh
+                    ? '다른 제안이 먼저 발행돼 기준이 바뀌었어요. 겹치는 항목을 최신 기준으로 맞춰 주세요.'
+                    : '검토 중인 내 제안이에요. 지금 내용이 채워져 있어요. 고친 뒤 올리면 다시 검토 대기가 돼요.'
+                  : mode.source
+                    ? '반려된 제안 내용을 채웠어요. 올리면 새 제안이 되고 이전 검토 기록은 반려된 제안에 남아요.'
+                    : undefined
+              }
+              footnote={
+                mode.update
+                  ? '올리면 다시 검토 대기가 되고 영향 분석을 다시 해요. 이전 제출과 의견은 이력으로 남아요.'
+                  : undefined
+              }
+              submitLabel={
+                mode.update
+                  ? '고친 내용 올리기'
+                  : mode.source
+                    ? '새 제안으로 올리기'
+                    : '제안 올리기'
+              }
               items={approved}
               tasks={taskList}
+              baselineVersion={baseline.data?.version_no}
+              original={mode.source && toRows(mode.source.items)}
+              comments={
+                mode.source &&
+                commentList.map((comment) => ({
+                  id: comment.id,
+                  author: nameOfAccount(comment.author_account_id),
+                  body: comment.body,
+                }))
+              }
+              onShowComments={() => {
+                setMode({ kind: 'detail' })
+                setTab('comments')
+              }}
               defaultValues={
                 mode.source && {
                   title: mode.source.title,
@@ -529,6 +571,19 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         {/* API 없음: 회의·작업 중 어디서 올렸는지 출처, 에이전트 제안이면 에이전트 이름(백엔드 메모 3·7) */}
                       </p>
                     </div>
+                    {mine && editable && !isLeader && (
+                      <div className="grid gap-1 rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
+                        <strong>
+                          {current.status === 'IN_REVIEW'
+                            ? `${leaderName}님이 검토하고 있어요`
+                            : `${leaderName}님의 검토를 기다리고 있어요`}
+                        </strong>
+                        <span className="text-muted-foreground">
+                          승인과 반려는 팀장이 해요. 결과가 나오면 알림으로 알려
+                          드려요. 검토 중에도 내용을 고칠 수 있어요.
+                        </span>
+                      </div>
+                    )}
                     {current.status === 'REJECTED' && (
                       <div className="grid gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
                         <p className="text-sm font-semibold">반려 사유</p>
@@ -639,6 +694,34 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       {tab === 'overview' && (
                         <div className="grid gap-3 text-sm">
                           <p className="leading-6">{current.reason}</p>
+                          <h4 className="flex flex-wrap items-center gap-2 font-semibold">
+                            바뀌는 내용 {current.items.length}
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {(['UPDATE', 'CREATE', 'RETIRE'] as const)
+                                .map(
+                                  (operation) =>
+                                    [
+                                      operation,
+                                      current.items.filter(
+                                        (item) => item.operation === operation,
+                                      ).length,
+                                    ] as const,
+                                )
+                                .filter(([, count]) => count)
+                                .map(
+                                  ([operation, count]) =>
+                                    `${operationLabel[operation]} ${count}`,
+                                )
+                                .join(' · ')}
+                            </span>
+                            <button
+                              type="button"
+                              className="ml-auto text-xs font-normal underline"
+                              onClick={() => setTab('diff')}
+                            >
+                              자세히
+                            </button>
+                          </h4>
                           <ul className="grid gap-1.5">
                             {current.items.map((item, index) => (
                               <li
@@ -666,11 +749,36 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                               </li>
                             )}
                           </ul>
-                          <p className="text-muted-foreground">
-                            영향 {impactCount}건 · 의견 {commentList.length}건
-                            {current.task_id &&
-                              ` · 관련 작업 ${taskKey(current.task_id)}`}
-                          </p>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <button
+                              type="button"
+                              className="grid gap-1 rounded-xl border p-3 text-left hover:bg-muted/40"
+                              onClick={() => setTab('impact')}
+                            >
+                              <strong>영향</strong>
+                              <span className="text-xs text-muted-foreground">
+                                확인된 관계 {impact.data?.explicit.length ?? 0}{' '}
+                                · AI 후보 {impact.data?.candidates.length ?? 0}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="grid gap-1 rounded-xl border p-3 text-left hover:bg-muted/40"
+                              onClick={() => setTab('comments')}
+                            >
+                              <strong>의견</strong>
+                              <span className="text-xs text-muted-foreground">
+                                의견 {commentList.length}
+                                {commentList[0] &&
+                                  ` · ${nameOfAccount(commentList[0].author_account_id)}: ${commentList[0].body}`}
+                              </span>
+                            </button>
+                          </div>
+                          {current.task_id && (
+                            <p className="text-xs text-muted-foreground">
+                              관련 작업 {taskKey(current.task_id)}
+                            </p>
+                          )}
                         </div>
                       )}
                       {tab === 'diff' && (
@@ -881,6 +989,33 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         </div>
                       )}
                     </div>
+                    {mine && editable && !isLeader && (
+                      <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                        <span className="mr-auto text-xs text-muted-foreground">
+                          고쳐서 올리면 다시 검토 대기가 돼요. 받은 의견은
+                          그대로 남아요.
+                        </span>
+                        {/* API 없음: 제안자가 스스로 거두는 상태와 API(CHG-A15, 백엔드 메모 6) */}
+                        <Button
+                          variant="outline"
+                          disabled
+                          title="서버 기능이 준비되면 열려요"
+                        >
+                          제안 거두기
+                        </Button>
+                        <Button
+                          onClick={() =>
+                            setMode({
+                              kind: 'form',
+                              source: current,
+                              update: true,
+                            })
+                          }
+                        >
+                          제안 고치기
+                        </Button>
+                      </div>
+                    )}
                     {isLeader && editable && (
                       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
                         {current.requires_refresh && (
