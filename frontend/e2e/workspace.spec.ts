@@ -116,36 +116,41 @@ test('문서와 작업 검증, 비비의 근거 응답을 같은 사무실에서
   })
 })
 
-test('회의를 만들고 텍스트 기록과 회의록을 목 API로 저장한다', async ({
+test('비비가 연 회의에서 대화하고 비비 정리를 목 API로 저장한다', async ({
   page,
 }) => {
   await openWorkspace(page)
   await page.getByRole('button', { name: '회의실', exact: true }).click()
-  await page.getByRole('button', { name: '회의 만들기', exact: true }).click()
-  const form = page.getByRole('dialog').last()
-  await form.getByLabel('회의 제목').fill('프론트 이식 회의')
-  await form.getByRole('button', { name: '회의 만들기', exact: true }).click()
   await expect(
-    page.getByRole('heading', { name: '프론트 이식 회의', exact: true }),
+    page.getByRole('heading', { name: '초대 안내 문구 검토', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: '회의 만들기', exact: true }),
+  ).toHaveCount(0)
+  const log = page.getByRole('log', { name: '회의 대화' })
+  await page
+    .getByRole('textbox', { name: /메시지/ })
+    .fill('3D 부지 선택을 유지하고 API 계약을 프론트에서 준비합니다.')
+  await page.getByRole('button', { name: '보내기', exact: true }).click()
+  await expect(
+    log.getByText('3D 부지 선택을 유지하고 API 계약을 프론트에서 준비합니다.', {
+      exact: true,
+    }),
   ).toBeVisible()
   await page
-    .getByLabel('회의에 남길 내용')
-    .fill('3D 부지 선택을 유지하고 API 계약을 프론트에서 준비합니다.')
-  await page.getByRole('button', { name: '기록 남기기', exact: true }).click()
-  await expect(
-    page.getByText(
-      '3D 부지 선택을 유지하고 API 계약을 프론트에서 준비합니다.',
-      { exact: true },
-    ),
-  ).toBeVisible()
-  await page.getByRole('button', { name: '회의록 만들기', exact: true }).click()
-  await expect(page.getByRole('status')).toHaveText('회의록을 만들었어요.')
-  await expect(
-    page.getByText('예시 템플릿 · 실제 AI 호출 없음', { exact: true }),
-  ).toBeVisible()
+    .getByRole('button', { name: '비비에게 검토 요청', exact: true })
+    .click()
+  await expect(page.getByRole('status')).toHaveText(
+    '비비가 회의 내용을 정리했어요.',
+  )
+  await expect(log.getByText(/회의 내용을 정리했어요 · 메시지/)).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: '회의실', exact: true }).click()
   await expect(
-    page.getByRole('heading', { name: '프론트 이식 회의', exact: true }),
+    page
+      .getByRole('log', { name: '회의 대화' })
+      .getByText('3D 부지 선택을 유지하고 API 계약을 프론트에서 준비합니다.', {
+        exact: true,
+      }),
   ).toBeVisible()
 })

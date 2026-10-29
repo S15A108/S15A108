@@ -33,29 +33,57 @@ afterEach(() => {
   restore()
 })
 
-it('creates a meeting, records text and produces clearly marked template minutes', async () => {
-  const user = userEvent.setup()
+function renderPanel(isLeader: boolean) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <MeetingsPanel projectId="101" isLeader />
+        <MeetingsPanel projectId="101" isLeader={isLeader} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
-  await screen.findByRole('button', { name: /초대 안내 문구 검토/ })
-  await user.click(screen.getByRole('button', { name: '회의 만들기' }))
-  const dialog = screen.getByRole('dialog')
-  await user.type(within(dialog).getByLabelText(/회의 제목/), '첫 화면 검토')
-  await user.click(within(dialog).getByRole('button', { name: '회의 만들기' }))
-  const text = await screen.findByLabelText(/회의에 남길 내용/)
-  await user.type(text, '기존 계약을 유지하고 설명을 보완해요.')
-  await user.click(screen.getByRole('button', { name: '기록 남기기' }))
-  await screen.findByText('기존 계약을 유지하고 설명을 보완해요.')
-  await user.click(screen.getByRole('button', { name: '회의록 만들기' }))
+}
+
+it('팀장은 메시지를 보내고 비비 정리를 받은 뒤 회의 끝내기 확인을 연다', async () => {
+  const user = userEvent.setup()
+  renderPanel(true)
+  await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
   expect(
-    await screen.findByText('예시 템플릿 · 실제 AI 호출 없음'),
+    screen.queryByRole('button', { name: '회의 만들기' }),
+  ).not.toBeInTheDocument()
+  const log = await screen.findByRole('log', { name: '회의 대화' })
+  expect(
+    await within(log).findByText(/작업이 부딪혀서 회의를 열었어요/),
   ).toBeInTheDocument()
   expect(
-    await screen.findByRole('button', { name: '문서 수정 초안' }),
-  ).toBeEnabled()
+    await within(log).findByText('TASK-002에서 만료 전용 안내는 뺄게요.'),
+  ).toBeInTheDocument()
+  await user.type(
+    screen.getByRole('textbox', { name: /메시지/ }),
+    '기존 계약을 유지하고 설명을 보완해요.',
+  )
+  await user.click(screen.getByRole('button', { name: '보내기' }))
+  await within(log).findByText('기존 계약을 유지하고 설명을 보완해요.')
+  await user.click(screen.getByRole('button', { name: '비비에게 검토 요청' }))
+  expect(
+    await within(log).findByText(/회의 내용을 정리했어요 · 메시지 4개 기준/),
+  ).toBeInTheDocument()
+  expect(
+    within(log).getAllByText('예시 템플릿 · 실제 AI 호출 없음'),
+  ).toHaveLength(2)
+  await user.click(screen.getByRole('button', { name: '회의 끝내기' }))
+  expect(
+    screen.getByRole('heading', { name: '회의를 끝낼까요?' }),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: '회의 끝내고 문서 바꾸기' }),
+  ).toBeDisabled()
+})
+
+it('팀원은 대화만 하고 검토 요청은 팀장만 할 수 있다고 안내받는다', async () => {
+  renderPanel(false)
+  await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
+  expect(
+    screen.getByRole('button', { name: '비비에게 검토 요청' }),
+  ).toBeDisabled()
+  expect(screen.getByText('팀장만 요청할 수 있어요')).toBeInTheDocument()
 })

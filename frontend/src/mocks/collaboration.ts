@@ -164,8 +164,21 @@ export function collaborationRoutes(
           item.kind === 'TEXT',
       )
       const summary = included.map((entry) => entry.text).join('\n')
+      const author = (accountId?: string) =>
+        project.members.find((member) => member.account_id === accountId)
+          ?.name ?? '팀원'
+      // 비비 정리 예시: 누가 무슨 말을 했는지만 모은다. 충돌·결정·할 일을 고르는 실제 AI 정리는 아니다.
       const generation = templateGeneration(
-        `회의 텍스트를 모았어요. 실제 AI 요약은 실행하지 않았어요.\n${summary}`,
+        id === 'MTG-A07'
+          ? [
+              `회의 내용을 정리했어요 · 메시지 ${included.length}개 기준`,
+              ...included.map(
+                (entry) =>
+                  `- ${author(entry.author_account_id)}: ${entry.text}`,
+              ),
+              '실제 AI 정리는 실행하지 않았어요.',
+            ].join('\n')
+          : `회의 텍스트를 모았어요. 실제 AI 요약은 실행하지 않았어요.\n${summary}`,
       )
       const entry: MeetingEntry = {
         id: nextId(database),
