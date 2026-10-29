@@ -13,7 +13,6 @@ import {
 } from '@/api/services'
 import {
   idSchema,
-  structuredContentSchema,
   taskPlanInputSchema,
   type DesignItemVersion,
   type TaskDetail,
@@ -47,13 +46,19 @@ import { Textarea } from '@/components/ui/textarea'
 import { useSession } from '@/features/auth/useSession'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { lines } from '@/lib/display'
+import { describeContent, lines } from '@/lib/display'
+import { formatDate } from '@/lib/formatDate'
 
 interface Props {
   projectId: string
   isLeader: boolean
 }
 type StateEvent = TaskStateInput['event']
+const relationLabel = {
+  READS: '참고만',
+  IMPLEMENTS: '구현',
+  CHANGES: '계약 변경',
+} as const
 
 export function TasksPanel({ projectId, isLeader }: Props) {
   const session = useSession()
@@ -157,7 +162,43 @@ export function TasksPanel({ projectId, isLeader }: Props) {
     result?.status === 'PASS' &&
     result.plan_revision_id === task?.current_plan_revision.id &&
     ['READY', 'WAITING'].includes(task?.status ?? '')
+  const blocked = ['NEEDS_INPUT', 'NEEDS_REVIEW'].includes(result?.status ?? '')
+  const primary =
+    task?.status === 'IN_PROGRESS'
+      ? 'complete'
+      : canStart
+        ? 'start'
+        : blocked
+          ? 'revise'
+          : 'validate'
+  const startBlocked =
+    result?.status === 'RUNNING'
+      ? '계획 검증 중이라 시작할 수 없어요.'
+      : blocked
+        ? '검증에서 막힌 항목을 고쳐야 시작할 수 있어요.'
+        : result?.status === 'STALE'
+          ? '기준이 바뀌어 다시 검증해야 해요.'
+          : result?.status === 'ERROR'
+            ? '검증을 마치지 못했어요. 다시 실행해 주세요.'
+            : result?.status === 'PASS'
+              ? '지금 계획으로 다시 검증해 주세요.'
+              : '계획 검증을 통과해야 시작할 수 있어요.'
   const designItems = approved.data?.pages.flatMap((page) => page.items) ?? []
+  // 근거는 '정확한 버전 311' 대신 'REQ-001 승인 v1 · 구현'처럼 사람 말로(M7).
+  const refLabel = (reference: {
+    design_item_id: string
+    design_item_version_id: string
+    relation: string
+  }) => {
+    const key =
+      designItems.find(
+        (item) => item.design_item_id === reference.design_item_id,
+      )?.key ?? '설계 항목'
+    const version = designItems.find(
+      (item) => item.id === reference.design_item_version_id,
+    )?.version_no
+    return `${key} ${version ? `승인 v${version}` : '이전 승인본'} · ${relationLabel[reference.relation as keyof typeof relationLabel]}`
+  }
   const perform = (operation: () => Promise<unknown>, message: string) => {
     void action.run(operation, message).catch(() => undefined)
   }
@@ -363,10 +404,40 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                         )}
                       </ul>
                     </div>
-                    <div className="flex flex-wrap gap-2 border-t pt-4">
+                    {current.status === 'IN_PROGRESS' && (
+                      <p className="rounded-lg bg-muted/40 p-3 text-sm">
+                        시작 직전에 참조 설계와 선행 작업을 다시 확인했어요.
+                      </p>
+                    )}
+                    {current.status === 'COMPLETED' && (
+                      <div className="grid gap-2 rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
+                        <p className="font-semibold">완료 보고를 마쳤어요</p>
+                        <ul className="grid gap-1">
+                          {current.current_plan_revision.plan.completion_criteria.map(
+                            (value, index) => (
+                              <li key={index}>✓ {value}</li>
+                            ),
+                          )}
+                        </ul>
+                        {/* API 없음: 완료 보고의 요약과 계획과 달라진 점이 작업 상세 응답에 없어 완료 기준만 다시 보여 준다. */}
+                        {isOwner && (
+                          <Button
+                            className="justify-self-start"
+                            onClick={() => {
+                              setFormTask(undefined)
+                              setEditing('new')
+                            }}
+                          >
+                            다음 작업 계획 등록
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {/* 주 버튼은 상태마다 하나(M5): 진행 중이면 완료 보고, 시작할 수 있으면 시작, 막혔으면 계획 고치기, 그 밖에는 계획 검증. */}
+                    <div className="flex flex-wrap items-start gap-2 border-t pt-4">
                       {isOwner && active && (
                         <Button
-                          variant="outline"
+                          variant={primary === 'revise' ? 'default' : 'outline'}
                           disabled={action.busy}
                           onClick={() => {
                             setFormTask(current)
@@ -385,11 +456,14 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                             setAssigning(true)
                           }}
                         >
-                          담당자 변경
+                          담당자 바꾸기
                         </Button>
                       )}
                       {isOwner && active && (
                         <Button
+                          variant={
+                            primary === 'validate' ? 'default' : 'outline'
+                          }
                           disabled={action.busy || result?.status === 'RUNNING'}
                           onClick={() =>
                             perform(
@@ -407,21 +481,46 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                           계획 검증
                         </Button>
                       )}
-                      {canStart && (
-                        <Button
-                          disabled={action.busy}
-                          onClick={() =>
-                            report(
-                              current.status === 'WAITING' ? 'RESUME' : 'START',
-                            )
-                          }
-                        >
-                          <Play />
-                          {current.status === 'WAITING' ? '재개' : '시작'}
-                        </Button>
-                      )}
+                      {isOwner &&
+                        active &&
+                        ['DRAFT', 'READY', 'WAITING'].includes(
+                          current.status,
+                        ) && (
+                          <span className="grid gap-1">
+                            <Button
+                              variant={
+                                primary === 'start' ? 'default' : 'outline'
+                              }
+                              disabled={action.busy || !canStart}
+                              onClick={() =>
+                                report(
+                                  current.status === 'WAITING'
+                                    ? 'RESUME'
+                                    : 'START',
+                                )
+                              }
+                            >
+                              <Play />
+                              {current.status === 'WAITING' ? '재개' : '시작'}
+                            </Button>
+                            {!canStart && (
+                              <span className="text-xs text-muted-foreground">
+                                {startBlocked}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       {isOwner && current.status === 'IN_PROGRESS' && (
                         <>
+                          <Button
+                            disabled={action.busy}
+                            onClick={() => {
+                              setFormTask(current)
+                              setReporting('COMPLETED')
+                            }}
+                          >
+                            완료 보고
+                          </Button>
                           <Button
                             variant="outline"
                             disabled={action.busy}
@@ -431,15 +530,6 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                             }}
                           >
                             대기 보고
-                          </Button>
-                          <Button
-                            disabled={action.busy}
-                            onClick={() => {
-                              setFormTask(current)
-                              setReporting('COMPLETED')
-                            }}
-                          >
-                            완료 보고
                           </Button>
                         </>
                       )}
@@ -454,13 +544,29 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                       )}
                     </div>
                     {!isOwner && (
-                      <p className="text-xs text-muted-foreground">
-                        계획 변경·검증·시작·완료 보고는 현재 담당자가 진행해요.
+                      <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground">
+                          보기만 · 담당자{' '}
+                          {members.data?.items.find(
+                            (member) =>
+                              member.id === current.assignee_member_id,
+                          )?.name ?? '확인 중'}
+                        </span>
+                        계획 변경·검증·시작·완료 보고는 담당자가 해요. 의견은
+                        변경 제안으로 남겨 주세요.
+                        {/* 열린 질문 Q5: '회의로 묻기'는 사람이 회의를 만들지 않는 결정과 부딪혀 두지 않는다. */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => openPane('changes')}
+                        >
+                          변경 제안
+                        </Button>
                       </p>
                     )}
                   </CardContent>
                 </Card>
-                <Card>
+                <Card className={blocked ? 'border-destructive/60' : ''}>
                   <CardHeader>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <CardTitle>설계와 계획의 검증 결과</CardTitle>
@@ -469,7 +575,15 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                       />
                     </div>
                     <CardDescription>
-                      출처가 있는 규칙 검사와 의미 분석 후보를 함께 확인하세요.
+                      {result &&
+                        `r${
+                          revisions.data?.items.find(
+                            (revision) =>
+                              revision.id === result.plan_revision_id,
+                          )?.revision_no ??
+                          current.current_plan_revision.revision_no
+                        } 기준 · ${formatDate(result.finished_at ?? result.created_at)} · `}
+                      계획 검증은 코드 품질이나 테스트 통과를 보장하지 않아요.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -604,18 +718,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                             key={reference.design_item_id}
                             className="rounded-lg bg-muted/40 p-3 text-sm"
                           >
-                            {designItems.find(
-                              (item) =>
-                                item.design_item_id ===
-                                reference.design_item_id,
-                            )?.key ??
-                              `설계 항목 ${reference.design_item_id}`}{' '}
-                            · 정확한 버전 {reference.design_item_version_id} ·{' '}
-                            {reference.relation === 'READS'
-                              ? '참고'
-                              : reference.relation === 'IMPLEMENTS'
-                                ? '구현'
-                                : '계약 변경'}
+                            {refLabel(reference)}
                           </p>
                         ),
                       )}
@@ -654,7 +757,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                       {(data) => (
                         <details className="text-sm">
                           <summary className="cursor-pointer font-medium">
-                            계획 리비전 {data.items.length}개 보기
+                            계획 이력 · 리비전 {data.items.length}개
                           </summary>
                           <div className="mt-3 space-y-3">
                             {data.items.map((revision) => (
@@ -669,6 +772,15 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                                 <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
                                   {revision.plan.goal}
                                 </p>
+                                {revision.plan.design_refs.length > 0 && (
+                                  <p className="mt-1 text-xs">
+                                    근거:{' '}
+                                    {revision.plan.design_refs
+                                      .map(refLabel)
+                                      .join(', ')}
+                                  </p>
+                                )}
+                                {/* API 없음: 리비전마다 당시 개발 맥락은 지금 계획의 패킷만 불러올 수 있다. */}
                               </div>
                             ))}
                           </div>
@@ -791,89 +903,57 @@ export function TasksPanel({ projectId, isLeader }: Props) {
           }}
         />
       )}
-      {reporting && formTask && (
+      {reporting === 'WAIT' && formTask && (
         <FormDialog
-          title={reporting === 'WAIT' ? '대기 상태 보고' : '완료 결과 보고'}
-          description={
-            reporting === 'WAIT'
-              ? '현재 작업을 멈추고 기다리는 이유를 남겨요.'
-              : '완료는 담당자의 자기 보고예요. 계획 대비 변경이 있으면 재검증이 끝날 때까지 대기 상태로 남아요.'
-          }
-          fields={
-            reporting === 'WAIT'
-              ? [
-                  {
-                    name: 'waiting_reason',
-                    label: '기다리는 이유',
-                    type: 'select',
-                    required: true,
-                    options: [
-                      { value: 'INPUT', label: '추가 입력 필요' },
-                      { value: 'APPROVAL', label: '승인 필요' },
-                      { value: 'DEPENDENCY', label: '선행 작업 대기' },
-                    ],
-                  },
-                  { name: 'summary', label: '현재 상황', type: 'textarea' },
-                ]
-              : [
-                  {
-                    name: 'summary',
-                    label: '완료한 내용',
-                    type: 'textarea',
-                    required: true,
-                  },
-                  {
-                    name: 'completion_confirm',
-                    label: '계획의 완료 기준을 직접 확인했나요?',
-                    type: 'select',
-                    required: true,
-                    options: [
-                      { value: '', label: '확인해 주세요' },
-                      { value: 'yes', label: '모든 완료 기준을 확인했습니다' },
-                    ],
-                  },
-                  {
-                    name: 'delta',
-                    label: '계획 대비 변경 내용 (구조화 목록, 없으면 [])',
-                    type: 'textarea',
-                    value: '[]',
-                    required: true,
-                  },
-                ]
-          }
-          submitLabel="상태 보고"
+          title="대기 보고"
+          description="기다리는 이유를 하나 고르면 팀 활동에 남아요."
+          fields={[
+            {
+              name: 'waiting_reason',
+              label: '기다리는 이유',
+              type: 'select',
+              required: true,
+              options: [
+                { value: 'INPUT', label: '추가 입력이 필요해요' },
+                { value: 'APPROVAL', label: '승인을 기다려요' },
+                { value: 'DEPENDENCY', label: '선행 작업을 기다려요' },
+              ],
+            },
+            { name: 'summary', label: '지금 상황', type: 'textarea' },
+          ]}
+          submitLabel="대기 보고"
           onClose={() => setReporting(null)}
           onSubmit={async (values) => {
-            const delta =
-              reporting === 'COMPLETED'
-                ? z
-                    .array(structuredContentSchema)
-                    .parse(JSON.parse(values.delta))
-                : undefined
             await action.run(
               () =>
                 tasksApi.state(projectId, formTask.id, {
-                  event: reporting,
+                  event: 'WAIT',
                   plan_revision_id: formTask.current_plan_revision.id,
                   expected_lock_version: formTask.lock_version,
                   summary: values.summary,
-                  ...(reporting === 'WAIT'
-                    ? {
-                        waiting_reason: values.waiting_reason as
-                          'INPUT' | 'APPROVAL' | 'DEPENDENCY',
-                      }
-                    : {
-                        delta,
-                        completion_checks:
-                          formTask.current_plan_revision.plan.completion_criteria.map(
-                            (criterion) => ({
-                              criterion,
-                              met: values.completion_confirm === 'yes',
-                            }),
-                          ),
-                      }),
+                  waiting_reason: values.waiting_reason as
+                    'INPUT' | 'APPROVAL' | 'DEPENDENCY',
                 }),
-              '보고를 접수했어요. 화면에서 최종 작업 상태를 확인해 주세요.',
+              '대기 보고를 남겼어요.',
+            )
+            setReporting(null)
+          }}
+        />
+      )}
+      {reporting === 'COMPLETED' && formTask && (
+        <CompleteDialog
+          criteria={formTask.current_plan_revision.plan.completion_criteria}
+          onClose={() => setReporting(null)}
+          onSubmit={async (report) => {
+            await action.run(
+              () =>
+                tasksApi.state(projectId, formTask.id, {
+                  event: 'COMPLETED',
+                  plan_revision_id: formTask.current_plan_revision.id,
+                  expected_lock_version: formTask.lock_version,
+                  ...report,
+                }),
+              '완료 보고를 접수했어요.',
             )
             setReporting(null)
           }}
@@ -889,10 +969,10 @@ export function TasksPanel({ projectId, isLeader }: Props) {
               type: 'select',
               value: 'PROGRESS',
               options: [
-                { value: 'PROGRESS', label: '진행 상황' },
-                { value: 'DECISION', label: '작업 판단' },
-                { value: 'ISSUE', label: '문제와 이슈' },
-                { value: 'HANDOVER', label: '인계' },
+                { value: 'PROGRESS', label: '진행' },
+                { value: 'DECISION', label: '판단' },
+                { value: 'ISSUE', label: '중단·이슈' },
+                { value: 'HANDOVER', label: '인수인계' },
               ],
             },
             {
@@ -1006,15 +1086,11 @@ function PlanDialog({
       dependency_task_ids: plan?.dependency_task_ids ?? [],
       context_packet_id: plan?.context_packet_id ?? '',
       no_contract_change: plan?.no_contract_change ?? false,
-      unlinked: JSON.stringify(plan?.unlinked ?? [], null, 2),
+      unlinked: plan?.unlinked.map(describeContent).join('\n') ?? '',
       refs:
         plan?.design_refs.map((reference) => ({
           ...reference,
-          proposed_content: JSON.stringify(
-            reference.proposed_content ?? {},
-            null,
-            2,
-          ),
+          proposed_content: describeContent(reference.proposed_content ?? ''),
         })) ?? [],
     },
   })
@@ -1035,7 +1111,15 @@ function PlanDialog({
     multiline = true,
   ) => (
     <div className="grid gap-2">
-      <Label htmlFor={`plan-${name}`}>{label}</Label>
+      {/* 필수 표시는 라벨 밖에 둔다(L4). 라벨 이름은 그대로 남아 화면 읽기 프로그램에 같은 이름으로 읽힌다. */}
+      <span className="flex gap-1">
+        <Label htmlFor={`plan-${name}`}>{label}</Label>
+        {name !== 'excluded_scope' && (
+          <span aria-hidden="true" className="text-sm text-destructive">
+            *
+          </span>
+        )}
+      </span>
       {multiline ? (
         <Textarea
           id={`plan-${name}`}
@@ -1075,11 +1159,14 @@ function PlanDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            {task ? '계획 새 리비전 작성' : '작업 계획 등록'}
+            {task
+              ? `계획 고치기 · r${task.current_plan_revision.revision_no + 1}`
+              : '작업 계획 등록'}
           </DialogTitle>
           <DialogDescription>
-            목표·범위·완료 기준과 정확한 승인 설계 버전을 연결하세요. 저장 뒤
-            계획 검증을 진행할 수 있어요.
+            {task
+              ? '지금 계획을 채워 두었어요. 저장하면 새 리비전으로 다시 검증해요.'
+              : '목표·범위·완료 기준과 참조할 승인 설계를 연결하세요. 저장 뒤 계획 검증을 할 수 있어요.'}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -1094,18 +1181,23 @@ function PlanDialog({
                 excluded_scope: lines(values.excluded_scope),
                 completion_criteria: lines(values.completion_criteria),
                 context_packet_id: values.context_packet_id || undefined,
-                unlinked: z
-                  .array(structuredContentSchema)
-                  .parse(JSON.parse(values.unlinked)),
+                // API 미정(H2): 줄마다 쓴 내용을 description 하나짜리 구조로 보낸다.
+                unlinked: lines(values.unlinked).map((description) => ({
+                  description,
+                })),
                 design_refs: values.refs.map((reference) => ({
                   design_item_id: reference.design_item_id,
                   design_item_version_id: reference.design_item_version_id,
                   relation: reference.relation,
                   ...(reference.relation === 'CHANGES'
                     ? {
-                        proposed_content: structuredContentSchema.parse(
-                          JSON.parse(reference.proposed_content),
-                        ),
+                        proposed_content: {
+                          ...items.find(
+                            (item) =>
+                              item.design_item_id === reference.design_item_id,
+                          )?.content,
+                          description: reference.proposed_content,
+                        },
                       }
                     : {}),
                 })),
@@ -1152,10 +1244,8 @@ function PlanDialog({
                                   design_item_id: item.design_item_id,
                                   design_item_version_id: item.id,
                                   relation: 'IMPLEMENTS',
-                                  proposed_content: JSON.stringify(
+                                  proposed_content: describeContent(
                                     item.content,
-                                    null,
-                                    2,
                                   ),
                                 },
                               ]
@@ -1169,7 +1259,7 @@ function PlanDialog({
                     />
                     <span>
                       <strong>
-                        {item.key} · v{item.version_no}
+                        {item.key} · 승인 v{item.version_no}
                       </strong>
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {typeof item.content.description === 'string'
@@ -1186,13 +1276,13 @@ function PlanDialog({
                         {...register(`refs.${index}.relation`)}
                       >
                         <NativeSelectOption value="READS">
-                          참고하는 설계
+                          {relationLabel.READS}
                         </NativeSelectOption>
                         <NativeSelectOption value="IMPLEMENTS">
-                          구현할 설계
+                          {relationLabel.IMPLEMENTS}
                         </NativeSelectOption>
                         <NativeSelectOption value="CHANGES">
-                          계약을 변경할 설계
+                          {relationLabel.CHANGES}
                         </NativeSelectOption>
                       </NativeSelect>
                       {refs[index].design_item_version_id !== item.id && (
@@ -1218,12 +1308,11 @@ function PlanDialog({
                       {refs[index].relation === 'CHANGES' && (
                         <div className="grid gap-2">
                           <Label htmlFor={`change-${index}`}>
-                            제안할 계약 내용
+                            바꿀 계약 문장
                           </Label>
-                          <Textarea
+                          <Input
                             id={`change-${index}`}
                             disabled={isSubmitting}
-                            rows={4}
                             {...register(`refs.${index}.proposed_content`)}
                           />
                         </div>
@@ -1318,7 +1407,7 @@ function PlanDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="plan-unlinked">
-                  검토가 필요한 구조화 내용 · 없으면 []
+                  아직 연결하지 못한 내용 · 한 줄에 하나씩
                 </Label>
                 <Textarea
                   id="plan-unlinked"
@@ -1339,6 +1428,160 @@ function PlanDialog({
           )}
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? '저장 중…' : '계획 저장'}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const completeSchema = z
+  .object({
+    summary: z.string().trim().min(1, '완료한 내용을 입력해 주세요.'),
+    checks: z
+      .boolean()
+      .array()
+      .refine(
+        (values) => values.every(Boolean),
+        '모든 완료 기준을 확인해야 완료로 보고할 수 있어요.',
+      ),
+    changed: z.enum(['no', 'yes']),
+    delta: z.string(),
+  })
+  .superRefine((values, context) => {
+    if (values.changed === 'yes' && !lines(values.delta).length)
+      context.addIssue({
+        code: 'custom',
+        path: ['delta'],
+        message: '달라진 점을 한 줄 이상 써 주세요.',
+      })
+  })
+type Complete = z.infer<typeof completeSchema>
+
+// 완료 보고 · 완료 기준을 하나씩 체크하고, 계획과 달라진 점은 없음/있음을 고른 뒤 줄마다 쓴다(H2: JSON 입력 없앰).
+function CompleteDialog({
+  criteria,
+  onClose,
+  onSubmit,
+}: {
+  criteria: string[]
+  onClose: () => void
+  onSubmit: (
+    report: Pick<TaskStateInput, 'summary' | 'delta' | 'completion_checks'>,
+  ) => Promise<void>
+}) {
+  const {
+    register,
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<Complete>({
+    resolver: zodResolver(completeSchema),
+    defaultValues: {
+      summary: '',
+      checks: criteria.map(() => false),
+      changed: 'no',
+      delta: '',
+    },
+  })
+  const changed = useWatch({ control, name: 'changed' })
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !isSubmitting) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>완료 보고</DialogTitle>
+          <DialogDescription>
+            완료는 담당자의 자기 보고예요. 계획과 달라진 점이 있으면 다시 검증이
+            끝날 때까지 대기로 남아요.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          noValidate
+          className="grid gap-4"
+          onSubmit={handleSubmit((values) =>
+            onSubmit({
+              summary: values.summary,
+              completion_checks: criteria.map((criterion) => ({
+                criterion,
+                met: true,
+              })),
+              // API 미정(H2): 줄마다 쓴 달라진 점을 description 하나짜리 구조로 보낸다.
+              delta:
+                values.changed === 'yes'
+                  ? lines(values.delta).map((description) => ({ description }))
+                  : [],
+            }).catch(() => undefined),
+          )}
+        >
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-medium">완료 기준 확인</legend>
+            {criteria.map((criterion, index) => (
+              <label key={index} className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-primary"
+                  {...register(`checks.${index}`)}
+                />
+                {criterion}
+              </label>
+            ))}
+            {errors.checks && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.checks.message ?? errors.checks.root?.message}
+              </p>
+            )}
+          </fieldset>
+          <div className="grid gap-1.5">
+            <Label htmlFor="complete-summary">완료한 내용</Label>
+            <Textarea
+              id="complete-summary"
+              rows={3}
+              aria-invalid={!!errors.summary}
+              {...register('summary')}
+            />
+            {errors.summary && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.summary.message}
+              </p>
+            )}
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-medium">
+              계획과 달라진 점
+            </legend>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input type="radio" value="no" {...register('changed')} />
+                없음
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" value="yes" {...register('changed')} />
+                있음
+              </label>
+            </div>
+            {changed === 'yes' && (
+              <>
+                <Textarea
+                  aria-label="달라진 점 · 한 줄에 하나씩"
+                  rows={3}
+                  aria-invalid={!!errors.delta}
+                  {...register('delta')}
+                />
+                {errors.delta && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {errors.delta.message}
+                  </p>
+                )}
+              </>
+            )}
+          </fieldset>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? '처리 중…' : '완료 보고'}
           </Button>
         </form>
       </DialogContent>

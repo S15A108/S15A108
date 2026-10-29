@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ChangeItem, DesignItemVersion } from '@/api/contracts/common'
+import { describeContent } from '@/lib/display'
 
 export const kindLabel = {
   REQUIREMENT: '요구사항',
@@ -64,14 +65,6 @@ export const emptyRow: ProposalRow = {
   design_item_id: '',
   kind: 'REQUIREMENT',
   sentence: '',
-}
-
-export function describeContent(content: unknown) {
-  if (content && typeof content === 'object' && 'description' in content) {
-    const description = (content as { description: unknown }).description
-    if (typeof description === 'string') return description
-  }
-  return typeof content === 'string' ? content : JSON.stringify(content ?? '')
 }
 
 // API 미정(H2): 설계 항목 내용을 문장 하나로 받을지 정해지지 않아 description에 넣고 나머지 구조는 그대로 둔다.

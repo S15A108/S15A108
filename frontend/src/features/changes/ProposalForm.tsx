@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
+import { describeContent } from '@/lib/display'
 import {
-  describeContent,
   emptyRow,
   kindLabel,
   operationLabel,

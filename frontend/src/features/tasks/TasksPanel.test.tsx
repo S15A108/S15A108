@@ -190,3 +190,50 @@ it('편집 중 재조회가 일어나도 검토했던 리비전과 잠금 번호
     goal: '승인된 응답 필드를 구현한다.',
   })
 })
+
+it('검증 중에는 시작을 끄고 옆에 이유를 적는다', async () => {
+  task = {
+    ...task,
+    validation_status: 'RUNNING',
+    validation: { ...task.validation!, status: 'RUNNING' },
+  }
+  show(false)
+  expect(await screen.findByRole('button', { name: '시작' })).toBeDisabled()
+  expect(
+    screen.getByText('계획 검증 중이라 시작할 수 없어요.'),
+  ).toBeInTheDocument()
+})
+
+it('완료 보고는 완료 기준을 모두 체크해야 보내고 달라진 점은 줄마다 보낸다', async () => {
+  task = { ...task, status: 'IN_PROGRESS' }
+  const state = vi.spyOn(tasksApi, 'state').mockImplementation(async () => task)
+  show(false)
+  fireEvent.click(await screen.findByRole('button', { name: '완료 보고' }))
+  await screen.findByRole('dialog')
+  fireEvent.change(screen.getByLabelText('완료한 내용'), {
+    target: { value: '응답 필드를 붙였어요.' },
+  })
+  fireEvent.click(screen.getAllByRole('button', { name: '완료 보고' }).at(-1)!)
+  expect(
+    await screen.findByText(
+      '모든 완료 기준을 확인해야 완료로 보고할 수 있어요.',
+    ),
+  ).toBeInTheDocument()
+  expect(state).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByLabelText('응답 필드 확인'))
+  fireEvent.click(screen.getByLabelText('있음'))
+  fireEvent.change(screen.getByLabelText('달라진 점 · 한 줄에 하나씩'), {
+    target: { value: '필드 이름을 바꿈\n\n정렬을 더함' },
+  })
+  fireEvent.click(screen.getAllByRole('button', { name: '완료 보고' }).at(-1)!)
+  await waitFor(() => expect(state).toHaveBeenCalled())
+  expect(state.mock.calls[0][2]).toMatchObject({
+    event: 'COMPLETED',
+    summary: '응답 필드를 붙였어요.',
+    completion_checks: [{ criterion: '응답 필드 확인', met: true }],
+    delta: [
+      { description: '필드 이름을 바꿈' },
+      { description: '정렬을 더함' },
+    ],
+  })
+})

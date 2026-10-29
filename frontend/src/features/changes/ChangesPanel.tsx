@@ -22,15 +22,11 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useSession } from '@/features/auth/useSession'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { formatDate } from '@/lib/formatDate'
+import { describeContent } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { ProposalForm } from './ProposalForm'
-import {
-  describeContent,
-  operationLabel,
-  toChangeItems,
-  toRows,
-} from './proposalItems'
+import { operationLabel, toChangeItems, toRows } from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
 
 interface Props {

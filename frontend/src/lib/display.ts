@@ -65,3 +65,12 @@ export const objectParticle = (word: string) => {
   const code = word.trim().charCodeAt(word.trim().length - 1) - 0xac00
   return code >= 0 && code <= 11171 && code % 28 !== 0 ? '을' : '를'
 }
+
+// 설계 항목 내용처럼 구조가 정해지지 않은 값을 한 줄로 보여 준다. description 문장이 있으면 그것을 쓴다.
+export function describeContent(content: unknown) {
+  if (content && typeof content === 'object' && 'description' in content) {
+    const description = (content as { description: unknown }).description
+    if (typeof description === 'string') return description
+  }
+  return typeof content === 'string' ? content : JSON.stringify(content ?? '')
+}
