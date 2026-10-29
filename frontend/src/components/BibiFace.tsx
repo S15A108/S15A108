@@ -1,8 +1,8 @@
 import bibi from '@/assets/bibi.png'
 import { cn } from '@/lib/utils'
 
-// 비비 얼굴: 캔버스 원본 이미지(공용 문서함 모달안, 에셋 eb5e742b…)를 둥근 칸에 머리 중심으로 잘라 보여 준다.
-// 작은 크기에서 왼쪽 아래 손과 몸이 빠지도록 머리 쪽을 기준으로 키운다.
+// 비비 얼굴: 사용자 제공 캐릭터 시트(꿀벌 로봇)의 정면 그림을 머리 전체(더듬이 포함)와 손·'팀장' 완장이
+// 조금 보이게 잘라 둔 이미지다. 둥근 칸을 그대로 채운다.
 export function BibiFace({
   className,
   label,
@@ -14,7 +14,7 @@ export function BibiFace({
   return (
     <span
       className={cn(
-        'inline-block size-10 shrink-0 overflow-hidden rounded-full bg-[#ece8df]',
+        'inline-block size-10 shrink-0 overflow-hidden rounded-full bg-[#f6e9ec]',
         className,
       )}
       aria-hidden={label ? undefined : true}
@@ -23,7 +23,7 @@ export function BibiFace({
         src={bibi}
         alt={label ?? ''}
         draggable={false}
-        className="size-full origin-[50%_35%] scale-125 object-cover"
+        className="size-full object-cover"
       />
     </span>
   )
