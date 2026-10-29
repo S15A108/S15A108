@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
   authApi,
@@ -128,7 +129,7 @@ it('현재 담당자는 PASS에 연결된 계획·검증·잠금 번호로 시�
     return task
   })
   show(false)
-  fireEvent.click(await screen.findByRole('button', { name: '시작' }))
+  fireEvent.click(await screen.findByRole('button', { name: '작업 시작' }))
   await waitFor(() =>
     expect(state).toHaveBeenCalledWith('101', '501', {
       event: 'START',
@@ -142,13 +143,19 @@ it('현재 담당자는 PASS에 연결된 계획·검증·잠금 번호로 시�
 it('팀장도 담당자가 아니면 시작·검증을 대신하지 않고 취소 개입만 제공한다', async () => {
   task = { ...task, assignee_member_id: '22' }
   show(true)
-  expect(await screen.findByRole('button', { name: '작업 취소' })).toBeEnabled()
-  expect(screen.queryByRole('button', { name: '시작' })).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: '작업 시작' }),
+  ).not.toBeInTheDocument()
+  // 수정안: 새 리비전·담당자 변경·작업 취소는 '더 보기'로 묶는다.
+  await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
+  expect(
+    await screen.findByRole('menuitem', { name: '작업 취소' }),
+  ).toBeEnabled()
   expect(
     screen.queryByRole('button', { name: '계획 검증' }),
   ).not.toBeInTheDocument()
   expect(
-    screen.queryByRole('button', { name: '계획 새 리비전 작성' }),
+    screen.queryByRole('menuitem', { name: '계획 고치기' }),
   ).not.toBeInTheDocument()
 })
 
@@ -157,8 +164,9 @@ it('편집 중 재조회가 일어나도 검토했던 리비전과 잠금 번호
     .spyOn(tasksApi, 'savePlan')
     .mockImplementation(async () => task)
   const { client } = show(false)
-  fireEvent.click(
-    await screen.findByRole('button', { name: '계획 새 리비전 작성' }),
+  await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
+  await userEvent.click(
+    await screen.findByRole('menuitem', { name: '계획 고치기' }),
   )
   expect(await screen.findByLabelText('이번 작업의 목표')).toHaveValue(
     '승인된 응답 필드를 구현한다.',
@@ -198,7 +206,9 @@ it('검증 중에는 시작을 끄고 옆에 이유를 적는다', async () => {
     validation: { ...task.validation!, status: 'RUNNING' },
   }
   show(false)
-  expect(await screen.findByRole('button', { name: '시작' })).toBeDisabled()
+  expect(
+    await screen.findByRole('button', { name: '작업 시작' }),
+  ).toBeDisabled()
   expect(
     screen.getByText('계획 검증 중이라 시작할 수 없어요.'),
   ).toBeInTheDocument()

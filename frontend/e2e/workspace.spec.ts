@@ -97,7 +97,7 @@ test('문서와 작업 검증, 비비의 근거 응답을 같은 사무실에서
     dialog.getByText('설계와 계획의 검증 결과', { exact: true }),
   ).toBeVisible()
   await expect(
-    dialog.getByRole('button', { name: '시작', exact: true }),
+    dialog.getByRole('button', { name: '작업 시작', exact: true }),
   ).toBeEnabled()
   await dialog.getByRole('button', { name: '닫기', exact: true }).click()
   await page.getByRole('button', { name: '비비와 대화', exact: true }).click()

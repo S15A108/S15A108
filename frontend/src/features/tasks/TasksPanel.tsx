@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ClipboardCheck, Play, Plus, RefreshCw } from 'lucide-react'
+import { ClipboardCheck, Ellipsis, Play, Plus, RefreshCw } from 'lucide-react'
 import {
   contextsApi,
   membersApi,
@@ -39,6 +39,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -435,28 +442,15 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                     )}
                     {/* 주 버튼은 상태마다 하나(M5): 진행 중이면 완료 보고, 시작할 수 있으면 시작, 막혔으면 계획 고치기, 그 밖에는 계획 검증. */}
                     <div className="flex flex-wrap items-start gap-2 border-t pt-4">
-                      {isOwner && active && (
+                      {isOwner && active && primary === 'revise' && (
                         <Button
-                          variant={primary === 'revise' ? 'default' : 'outline'}
                           disabled={action.busy}
                           onClick={() => {
                             setFormTask(current)
                             setEditing('edit')
                           }}
                         >
-                          계획 새 리비전 작성
-                        </Button>
-                      )}
-                      {isLeader && active && (
-                        <Button
-                          variant="outline"
-                          disabled={action.busy}
-                          onClick={() => {
-                            setFormTask(current)
-                            setAssigning(true)
-                          }}
-                        >
-                          담당자 바꾸기
+                          계획 고치기
                         </Button>
                       )}
                       {isOwner && active && (
@@ -501,7 +495,9 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                               }
                             >
                               <Play />
-                              {current.status === 'WAITING' ? '재개' : '시작'}
+                              {current.status === 'WAITING'
+                                ? '재개'
+                                : '작업 시작'}
                             </Button>
                             {!canStart && (
                               <span className="text-xs text-muted-foreground">
@@ -533,14 +529,49 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                           </Button>
                         </>
                       )}
+                      {/* 새 리비전·담당자 변경·작업 취소는 '더 보기'로 묶는다. */}
                       {active && (isOwner || isLeader) && (
-                        <Button
-                          variant="ghost"
-                          disabled={action.busy}
-                          onClick={() => report('CANCEL')}
-                        >
-                          작업 취소
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="더 보기"
+                              disabled={action.busy}
+                            >
+                              <Ellipsis />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {isOwner && primary !== 'revise' && (
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setFormTask(current)
+                                  setEditing('edit')
+                                }}
+                              >
+                                계획 고치기
+                              </DropdownMenuItem>
+                            )}
+                            {isLeader && (
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setFormTask(current)
+                                  setAssigning(true)
+                                }}
+                              >
+                                담당자 바꾸기
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => report('CANCEL')}
+                            >
+                              작업 취소
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                     {!isOwner && (
