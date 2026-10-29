@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Check, ChevronLeft, CircleHelp, Lock, Settings } from 'lucide-react'
-import { dashboardApi, inboxApi } from '@/api/services'
+import { dashboardApi, documentsApi, inboxApi } from '@/api/services'
 import type { Member } from '@/api/contracts/common'
 import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
@@ -76,6 +76,19 @@ export function WorkspaceHud({
       return { documents, changes, tasks }
     },
   })
+  // 팀장 시작 가이드: 문서별 승인 요청(DOC-A19)과 승인된 문서 수
+  const submitted = useQuery({
+    queryKey: ['projects', project.id, 'document-submissions', 'SUBMITTED'],
+    queryFn: () =>
+      documentsApi.reviewSubmissions(project.id, { status: 'SUBMITTED' }),
+    enabled: isLeader && !onboarding.baseline_published,
+  })
+  const pendingApprovals = submitted.data?.length ?? 0
+  const approvedDocs =
+    counts.data?.documents.by_kind.reduce(
+      (sum, item) => sum + item.approved_count,
+      0,
+    ) ?? 0
   const unread = useQuery({
     queryKey: ['notifications', project.id, 'unread'],
     queryFn: () =>
@@ -168,14 +181,17 @@ export function WorkspaceHud({
     },
     {
       title: '승인해서 기준 v1 만들기',
-      detail:
-        '4종을 하나씩 승인하고 색인이 끝나면 기준 만들기로 기준 v1을 만들어요. 이때 프로젝트가 시작돼요.',
+      detail: `승인 ${approvedDocs} / 4${pendingApprovals ? ` · 승인 요청 ${pendingApprovals}건` : ''} · 4종을 하나씩 승인하고 색인이 끝나면 기준 만들기로 기준 v1을 만들어요. 이때 프로젝트가 시작돼요.`,
       // 프로젝트 시작 = 최초 기준 설계 생성(PLN-A10). 시작 여부는 onboarding.baseline_published로 본다(dev 89b2c60).
       // API 없음: 문서별 색인 완료(index_ready)가 dev 명세에 없어 이 단계를 열 시점은 업로드 기준으로 둔다(PR #42 요청 중).
       done: onboarding.baseline_published,
-      // 문서함 승인 흐름(PNL-02-m)이 들어오기 전까지는 기존 기획 분석 창에서 발행한다.
       locked: !allUploaded,
-      action: { label: '승인하러 가기', pane: 'planning' },
+      // 승인 요청이 있으면 공용 문서함에서 문서별로 승인하고, 4종이 다 승인되면 기준 만들기(기획 분석 창)로 간다.
+      action: pendingApprovals
+        ? { label: '승인 요청 보기', pane: 'documents' }
+        : approvedDocs >= 4
+          ? { label: '기준 v1 만들기', pane: 'planning' }
+          : { label: '문서함 보기', pane: 'documents' },
     },
     {
       title: '팀원 초대하기',

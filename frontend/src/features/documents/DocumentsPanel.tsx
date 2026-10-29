@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -26,7 +26,9 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { statusLabel } from '@/lib/display'
 import { apiMode } from '@/lib/apiMode'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
-import type { Document, DocumentVersion } from '@/api/contracts/common'
+import type { DocumentVersion } from '@/api/contracts/common'
+import { DocumentReview } from './DocumentReview'
+import { reviewStage } from './reviewStage'
 
 const KINDS = ['PLAN', 'ERD', 'REQUIREMENTS', 'API_SPEC'] as const
 const stamp = (value: string) =>
@@ -69,6 +71,33 @@ export function DocumentsPanel({
     enabled: !!search,
   })
   const selected = focusId ?? documents.data?.items[0]?.id
+  const [reviewing, setReviewing] = useState<string | null>(null)
+  const docs = documents.data?.items ?? []
+  // 문서마다 작성 건(DOC-A13)을 불러 '진행 중'을 만든다. 승인 완료는 아래 문서 목록에만 둔다.
+  const copies = useQueries({
+    queries: docs.map((document) => ({
+      queryKey: ['projects', projectId, 'working-copy', document.id],
+      queryFn: () => documentsApi.workingCopy(projectId, document.id),
+      retry: false,
+    })),
+  })
+  const inProgress = docs.flatMap((document, index) => {
+    const copy = copies[index]?.data
+    return copy && copy.status !== 'APPROVED'
+      ? [{ document, stage: reviewStage(copy), status: copy.status }]
+      : []
+  })
+  const baseline = useQuery({
+    queryKey: ['projects', projectId, 'baseline'],
+    queryFn: () => documentsApi.baseline(projectId),
+    retry: false,
+  })
+  const allApproved = KINDS.every((kind) =>
+    docs.some(
+      (document) => document.kind === kind && document.approved_version,
+    ),
+  )
+  const reviewed = docs.find((document) => document.id === reviewing)
   return (
     <div className="grid gap-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
@@ -89,16 +118,14 @@ export function DocumentsPanel({
       </header>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/40 p-4">
         <p className="text-sm text-muted-foreground">
-          문서 초안은 승인 전 자료예요. 기획 분석에서 인간 팀장이 기준 설계를
-          승인·발행해요.
+          문서를 올리면 비비 검토 → 수정 제안 반영 → 팀장 승인을 거쳐 현재
+          문서가 돼요. 4종이 모두 승인되면 팀장이 기준 v1을 만들어요.
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => openPane('planning')}
-        >
-          {isLeader ? '기획 분석에서 승인·발행' : '기획 분석 보기'}
-        </Button>
+        {isLeader && allApproved && !baseline.data && (
+          <Button size="sm" onClick={() => openPane('planning')}>
+            기준 v1 만들기
+          </Button>
+        )}
       </div>
       <Card>
         <CardHeader>
@@ -196,6 +223,44 @@ export function DocumentsPanel({
           )}
         </CardContent>
       </Card>
+      {inProgress.length > 0 && (
+        <section aria-labelledby="documents-in-progress" className="grid gap-2">
+          <h3 id="documents-in-progress" className="text-sm font-semibold">
+            진행 중 {inProgress.length}
+          </h3>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {inProgress.map(({ document, stage, status }) => (
+              <li key={document.id}>
+                <button
+                  type="button"
+                  className="grid w-full gap-1 rounded-xl border p-3 text-left text-sm hover:bg-muted/40"
+                  onClick={() => {
+                    openPane('documents', document.id)
+                    setReviewing(document.id)
+                  }}
+                >
+                  <span className="text-xs text-muted-foreground">
+                    {statusLabel(document.kind)} · {stage.label}
+                  </span>
+                  <strong>{document.title}</strong>
+                  <span className="text-xs text-muted-foreground">
+                    다음:{' '}
+                    {status === 'SUBMITTED'
+                      ? isLeader
+                        ? '승인 검토하기'
+                        : '팀장 승인 기다리기'
+                      : stage.step === 1
+                        ? '비비 검토 받기'
+                        : stage.step === 2
+                          ? '수정 제안 확인'
+                          : '팀장에게 검토 요청'}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <aside>
           <AsyncState query={documents}>
@@ -257,7 +322,17 @@ export function DocumentsPanel({
             )}
           </AsyncState>
         </aside>
-        {selected ? (
+        {reviewed && reviewed.id === selected ? (
+          <DocumentReview
+            key={`review:${reviewed.id}`}
+            projectId={projectId}
+            documentId={reviewed.id}
+            title={reviewed.title}
+            kind={reviewed.kind}
+            isLeader={isLeader}
+            onClose={() => setReviewing(null)}
+          />
+        ) : selected ? (
           <DocumentDetail
             key={`${projectId}:${selected}`}
             projectId={projectId}
@@ -283,6 +358,8 @@ export function DocumentsPanel({
           onDone={(id) => {
             setUploading(false)
             openPane('documents', id)
+            // 등록하면 바로 ① 비비 검토 단계로 잇는다.
+            setReviewing(id)
           }}
         />
       )}
@@ -440,7 +517,6 @@ function DocumentDetail({
 }) {
   const action = useProjectAction(projectId)
   const [versionNo, setVersionNo] = useState<number>()
-  const [editing, setEditing] = useState(false)
   const [classification, setClassification] = useState(false)
   const [comparison, setComparison] = useState<{
     from_version: number
@@ -567,22 +643,9 @@ function DocumentDetail({
               </EmptyState>
             )}
             <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                disabled={
-                  !data.document.approved_version ||
-                  data.document.approved_version.id !== data.version.id
-                }
-                onClick={() => setEditing(true)}
-              >
-                수정 초안 작성
-              </Button>
               <p className="text-xs text-muted-foreground">
-                {!data.document.approved_version
-                  ? '최초 승인 후 수정 초안을 작성할 수 있어요.'
-                  : data.document.approved_version.id !== data.version.id
-                    ? '현재 승인본에서 수정 초안을 작성해 주세요.'
-                    : `v${data.version.version_no}을 기준으로 새 초안을 보관해요. 승인된 본문은 바꾸지 않아요.`}
+                문서 상세는 보기 전용이에요. 문서를 고치려면 새 .md를 올려 비비
+                검토와 팀장 승인을 다시 거쳐요.
               </p>
               {data.document.approved_version &&
                 data.document.approved_version.id !== data.version.id && (
@@ -700,61 +763,9 @@ function DocumentDetail({
                 }}
               />
             )}
-            {editing && (
-              <DraftDialog
-                projectId={projectId}
-                document={data.document}
-                version={data.version}
-                onClose={() => setEditing(false)}
-              />
-            )}
           </CardContent>
         </Card>
       )}
     </AsyncState>
-  )
-}
-
-function DraftDialog({
-  projectId,
-  document,
-  version,
-  onClose,
-}: {
-  projectId: string
-  document: Document
-  version: DocumentVersion
-  onClose: () => void
-}) {
-  const action = useProjectAction(projectId)
-  return (
-    <FormDialog
-      title="문서 수정 초안"
-      description={`v${version.version_no}을 기준으로 새 파일 버전을 등록해요. 기준이 바뀌면 저장이 거부되며 입력 내용은 유지돼요.`}
-      fields={[
-        {
-          name: 'content',
-          label: '수정할 본문',
-          type: 'textarea',
-          required: true,
-          value: version.content ?? '',
-        },
-      ]}
-      onClose={onClose}
-      submitLabel="새 초안 저장"
-      onSubmit={async (values) => {
-        await action.run(
-          () =>
-            documentsApi.uploadDraft(projectId, document.id, {
-              file: new File([values.content], `${document.title}.md`, {
-                type: 'text/markdown',
-              }),
-              base_document_version_id: version.id,
-            }),
-          '새 초안을 등록했어요.',
-        )
-        onClose()
-      }}
-    />
   )
 }

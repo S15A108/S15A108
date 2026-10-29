@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query'
 import { FileCheck2, Lightbulb, RefreshCw, Sparkles } from 'lucide-react'
 import { documentsApi, planningApi } from '@/api/services'
-import type { DesignItemVersion } from '@/api/contracts/common'
+import type { DesignItemVersion, DocumentVersion } from '@/api/contracts/common'
 import { structuredContentSchema } from '@/api/contracts/common'
 import { getApiErrorStatus } from '@/api/error'
 import { AsyncState } from '@/components/AsyncState'
@@ -46,10 +46,16 @@ export function PlanningPanel({ projectId, isLeader }: Props) {
     queryKey: ['projects', projectId, 'planning-documents'],
     queryFn: () => documentsApi.list(projectId, { limit: 100 }),
   })
+  // 문서별 승인(DOC-A21)을 마친 문서는 그 승인본을, 아직이면 최신 초안을 기준 후보로 본다(dev 89b2c60).
+  const versionOf = (document: {
+    approved_version?: DocumentVersion
+    latest_draft?: DocumentVersion
+  }) => document.approved_version ?? document.latest_draft
   const versions =
-    documents.data?.items.flatMap((document) =>
-      document.latest_draft ? [document.latest_draft] : [],
-    ) ?? []
+    documents.data?.items.flatMap((document) => {
+      const version = versionOf(document)
+      return version ? [version] : []
+    }) ?? []
   const analyses = useQueries({
     queries: versions.map((version) => ({
       queryKey: ['projects', projectId, 'analysis', version.id],
@@ -109,7 +115,7 @@ export function PlanningPanel({ projectId, isLeader }: Props) {
     )
   const allKinds = new Set(
     documents.data?.items
-      .filter((document) => document.latest_draft)
+      .filter((document) => versionOf(document))
       .map((document) => document.kind),
   )
   const analysesReady =
@@ -171,7 +177,7 @@ export function PlanningPanel({ projectId, isLeader }: Props) {
             {(['PLAN', 'ERD', 'REQUIREMENTS', 'API_SPEC'] as const).map(
               (kind) => {
                 const document = data.items.find((item) => item.kind === kind)
-                const version = document?.latest_draft
+                const version = document ? versionOf(document) : undefined
                 const analysis = version
                   ? analyses[
                       versions.findIndex((item) => item.id === version.id)
