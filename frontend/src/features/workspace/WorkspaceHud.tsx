@@ -9,7 +9,6 @@ import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { useProjectStart } from '@/features/projects/useProjectStart'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
-import { BibiFace } from '@/components/BibiFace'
 import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
@@ -342,7 +341,8 @@ export function WorkspaceHud({
         : undefined
   // 비비 대화 창이 열린 동안은 단축 바만 남기고 다른 위젯은 숨긴다(PNL-12 B안).
   const chatOpen = pane === 'chat'
-  // 팀 목록(SCR-06 수정안 · 팀 현황): 사람마다 지금 하는 일, 연결된 에이전트, 비비를 한 줄씩.
+  // 팀 목록(SCR-06 수정안 · 팀 현황): 사람마다 지금 하는 일과 연결된 에이전트를 한 줄씩.
+  // 비비는 목록에 넣지 않고 단축 바 가운데 버튼으로만 연다(사용자 요청 10-30).
   // API 없음: 접속 점·위치·마지막 접속(MON-A07 presence, PR #42 요청)과 에이전트가 하는 일(MON-A05 보고)은 계약이 생기면 줄에 붙인다.
   const taskOrder = ['IN_PROGRESS', 'WAITING', 'DRAFT', 'READY']
   const taskOf = (memberId: string) =>
@@ -502,7 +502,7 @@ export function WorkspaceHud({
             <span className="text-xs font-semibold">
               팀{' '}
               <span className="font-normal text-muted-foreground">
-                {teamRows.length + 1}
+                {teamRows.length}
               </span>
               {members.length <= 1 && (
                 <span className="ml-1.5 font-normal text-muted-foreground">
@@ -560,23 +560,6 @@ export function WorkspaceHud({
                 </button>
               </li>
             ))}
-            <li>
-              <button
-                type="button"
-                onClick={() => openPane('chat')}
-                className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-muted"
-              >
-                <BibiFace className="size-7 shrink-0" />
-                <span className="min-w-0">
-                  <strong className="block truncate text-xs">
-                    비비 · AI 팀장
-                  </strong>
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    질문을 기다려요
-                  </span>
-                </span>
-              </button>
-            </li>
           </ul>
         </div>
       </section>
