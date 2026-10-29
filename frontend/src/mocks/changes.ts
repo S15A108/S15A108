@@ -307,8 +307,13 @@ export function changeRoutes(
       expectValue(proposal!.updated_at, body.expected_updated_at)
       if (proposal!.proposer_account_id !== requireAccount(context).id)
         requireLeader(context)
-      if (proposal!.status === 'PUBLISHED')
-        fail(409, 'invalid_transition', '발행된 제안은 수정할 수 없어요.')
+      // 올린 제안은 잠기고 반려된 제안만 같은 번호로 다시 올린다(PR #42 CHG-A04 처리 규칙, 사용자 결정 10-30).
+      if (proposal!.status !== 'REJECTED')
+        fail(
+          409,
+          'invalid_transition',
+          '반려된 제안만 고쳐 다시 올릴 수 있어요.',
+        )
       Object.assign(proposal!, changeProposalInputSchema.parse(body), {
         status: 'PROPOSED',
         updated_at: now(),

@@ -176,8 +176,9 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             회의를 끝낼까요?
                           </h3>
                           <p className="mt-1 text-sm text-muted-foreground">
-                            회의를 끝내면 비비가 이 정리를 바탕으로 변경 제안을
-                            만들어요. 대화 기록은 그대로 남아요.
+                            회의를 끝내면 이 정리로 회의 결과 변경 제안을
+                            만들어요. 제안자는 회의를 끝낸 팀장이에요. 대화
+                            기록은 그대로 남아요.
                           </p>
                         </div>
                         <article className="rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
@@ -206,7 +207,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             >
                               취소
                             </Button>
-                            {/* API 없음: 회의 종료(MTG-A13 요청 중)와 비비가 만든 변경 제안(CHG-A01)으로 잇기. 끝낸 뒤에는 그 제안을 변경 제안 창에서 연다. */}
+                            {/* API 없음: 회의 종료(MTG-A13 요청 중)와 회의 결과 변경 제안(CHG-A01, 제안자 = 회의를 끝낸 팀장, meeting_id는 PR #42 요청 중)으로 잇기. 끝낸 뒤에는 그 제안을 변경 제안 창에서 연다. */}
                             <Button
                               disabled
                               title="서버 기능이 준비되면 열려요"

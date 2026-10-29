@@ -392,35 +392,20 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
             <ProposalForm
               key={documents.isSuccess ? 'documents' : 'loading'}
               documents={documentOptions}
-              heading={
-                mode.update
-                  ? '제안 고치기'
-                  : mode.source
-                    ? '고쳐서 새로 올리기'
-                    : '새 변경 제안'
-              }
+              // 올린 제안(PROPOSED·IN_REVIEW)은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다(CHG-A04, 사용자 결정 10-30).
+              heading={mode.update ? '고쳐서 다시 올리기' : '새 변경 제안'}
               status={mode.source && <StatusPill value={mode.source.status} />}
               description={
                 mode.update
-                  ? mode.source?.requires_refresh
-                    ? '다른 제안이 먼저 발행돼 기준이 바뀌었어요. 겹치는 항목을 최신 기준으로 맞춰 주세요.'
-                    : '검토 중인 내 제안이에요. 지금 내용이 채워져 있어요. 고친 뒤 올리면 다시 검토 대기가 돼요.'
-                  : mode.source
-                    ? '반려된 제안 내용을 채웠어요. 올리면 새 제안이 되고 이전 검토 기록은 반려된 제안에 남아요.'
-                    : undefined
+                  ? `반려 사유: ${mode.source?.rejection_reason ?? ''} · 반려된 내용을 채웠어요. 같은 제안 번호로 다시 올리면 검토 대기가 되고, 이전 내용과 반려 사유는 이력에 남아요.`
+                  : undefined
               }
               footnote={
                 mode.update
                   ? '올리면 다시 검토 대기가 되고 영향 분석을 다시 해요. 이전 제출과 의견은 이력으로 남아요.'
                   : undefined
               }
-              submitLabel={
-                mode.update
-                  ? '고친 내용 올리기'
-                  : mode.source
-                    ? '새 제안으로 올리기'
-                    : '제안 올리기'
-              }
+              submitLabel={mode.update ? '다시 올리기' : '제안 올리기'}
               items={approved}
               tasks={taskList}
               baselineVersion={baseline.data?.version_no}
@@ -638,7 +623,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         </strong>
                         <span className="text-muted-foreground">
                           승인과 반려는 팀장이 해요. 결과가 나오면 알림으로 알려
-                          드려요. 검토 중에도 내용을 고칠 수 있어요.
+                          드려요. 올린 제안은 고칠 수 없어요. 반려되면 같은
+                          제안을 고쳐 다시 올려요.
                         </span>
                       </div>
                     )}
@@ -653,24 +639,6 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             variant="outline"
                             className="justify-self-start"
                             onClick={() =>
-                              setMode({ kind: 'form', source: current })
-                            }
-                          >
-                            고쳐서 새로 올리기
-                          </Button>
-                        )}
-                        {/* API 없음: 다시 올린 제안이 이전 제안을 가리키는 필드(백엔드 메모 5) */}
-                      </div>
-                    )}
-                    {current.requires_refresh && editable && (
-                      <div className="grid gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                        이 제안을 만든 뒤 다른 제안이 먼저 발행돼 기준이
-                        바뀌었어요. 겹치는 항목을 최신 기준으로 맞춰 주세요.
-                        {mine && (
-                          <Button
-                            variant="outline"
-                            className="justify-self-start"
-                            onClick={() =>
                               setMode({
                                 kind: 'form',
                                 source: current,
@@ -678,9 +646,16 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                               })
                             }
                           >
-                            최신 기준으로 고치기
+                            고쳐서 다시 올리기
                           </Button>
                         )}
+                      </div>
+                    )}
+                    {current.requires_refresh && editable && (
+                      <div className="grid gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                        이 제안을 만든 뒤 다른 제안이 먼저 발행돼 기준이
+                        바뀌었어요. 올린 제안은 고칠 수 없어서, 반려되면 최신
+                        기준으로 맞춰 다시 올려요.
                       </div>
                     )}
                     {current.status === 'PUBLISHED' && (
@@ -1050,27 +1025,16 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                     {mine && editable && !isLeader && (
                       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
                         <span className="mr-auto text-xs text-muted-foreground">
-                          고쳐서 올리면 다시 검토 대기가 돼요. 받은 의견은
-                          그대로 남아요.
+                          올린 제안은 잠겨 있어요. 거두면 이 제안은 끝나고, 다시
+                          올리면 새 제안이 돼요.
                         </span>
-                        {/* API 없음: 제안자가 스스로 거두는 상태와 API(CHG-A15, 백엔드 메모 6) */}
+                        {/* API 없음: 제안자가 스스로 거두는 API(CHG-A15 withdraw, PR #42 요청 중) */}
                         <Button
                           variant="outline"
                           disabled
                           title="서버 기능이 준비되면 열려요"
                         >
                           제안 거두기
-                        </Button>
-                        <Button
-                          onClick={() =>
-                            setMode({
-                              kind: 'form',
-                              source: current,
-                              update: true,
-                            })
-                          }
-                        >
-                          제안 고치기
                         </Button>
                       </div>
                     )}

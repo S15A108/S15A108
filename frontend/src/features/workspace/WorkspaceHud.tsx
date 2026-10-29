@@ -63,7 +63,7 @@ const notices: Record<
   },
   3: {
     title: '기준 v1이 생겼어요 · 프로젝트가 시작됐어요',
-    text: '이제 변경 제안, 작업 현황, 설계 관계를 쓸 수 있어요. 문서 수정도 이제 변경 제안으로 해요.',
+    text: '이제 변경 제안, 회의실, 작업 현황, 설계 관계를 쓸 수 있어요. 문서 수정도 이제 변경 제안으로 해요.',
   },
 }
 const leaderBubbles = [
@@ -221,7 +221,8 @@ export function WorkspaceHud({
             </Button>
           </li>
           <li className="text-[11px] text-muted-foreground">
-            변경 제안 · 작업 현황 · 설계 관계는 프로젝트를 시작하면 열려요
+            변경 제안 · 회의실 · 작업 현황 · 설계 관계는 프로젝트를 시작하면
+            열려요
           </li>
         </ul>
       ),
@@ -500,7 +501,7 @@ export function WorkspaceHud({
         </div>
       </section>
       <Hotbar
-        locked={started ? [] : ['changes', 'tasks', 'relations']}
+        locked={started ? [] : ['changes', 'meetings', 'tasks', 'relations']}
         lockedReason="프로젝트를 시작하면 열려요"
         badges={{ changes: reviewCount }}
         highlight={isLeader && !allUploaded ? 'documents' : undefined}

@@ -5,7 +5,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { authApi } from '@/api/services'
+import { authApi, changesApi } from '@/api/services'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -97,27 +97,45 @@ it('새 변경 제안은 항목을 고르지 않으면 막고, 다 채우면 목
   ).toBeInTheDocument()
 })
 
-it('제안자는 검토 중인 내 제안을 같은 폼으로 고쳐 다시 올리고 고친 항목을 확인한다', async () => {
+// 사용자 결정(10-30, PR #42 CHG-A04): 올린 제안은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다.
+it('제안자는 검토 중인 제안을 고칠 수 없고, 반려되면 같은 제안을 고쳐 다시 올린다', async () => {
   await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
   const user = userEvent.setup()
-  render(
+  const view = (
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ChangesPanel projectId="101" isLeader={false} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const { unmount } = render(view)
   expect(
     await screen.findByText('이팀장님이 검토하고 있어요'),
   ).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '제안 거두기' })).toBeDisabled()
   expect(
+    screen.queryByRole('button', { name: '제안 고치기' }),
+  ).not.toBeInTheDocument()
+  expect(
     screen.queryByRole('button', { name: /승인하고 기준/ }),
   ).not.toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: '제안 고치기' }))
+  unmount()
+  await authApi.login({ email: DEMO_EMAIL, password: DEMO_PASSWORD })
+  const { proposal } = await changesApi.get('101', '71')
+  await changesApi.reject('101', '71', {
+    reason: '받은 초대를 먼저 보여 주는 안으로 고쳐 주세요.',
+    expected_updated_at: proposal.updated_at,
+  })
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  client.clear()
+  render(view)
+  await user.click(
+    await screen.findByRole('button', { name: '고쳐서 다시 올리기' }),
+  )
   expect(
-    screen.getByRole('heading', { name: /제안 고치기/ }),
+    screen.getByRole('heading', { name: /고쳐서 다시 올리기/ }),
   ).toBeInTheDocument()
+  expect(screen.getByText(/받은 초대를 먼저 보여 주는 안/)).toBeInTheDocument()
   expect(screen.getByRole('region', { name: '받은 의견' })).toBeInTheDocument()
   const sentence = screen.getByLabelText('항목 1 바뀔 문장')
   await user.clear(sentence)
@@ -126,10 +144,11 @@ it('제안자는 검토 중인 내 제안을 같은 폼으로 고쳐 다시 올�
   expect(
     screen.getByText(/처음 올린 문장: 로그인한 사용자는/),
   ).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: '고친 내용 올리기' }))
+  await user.click(screen.getByRole('button', { name: '다시 올리기' }))
   expect(await screen.findByRole('status')).toHaveTextContent(
     '고친 내용을 올렸어요. 다시 검토 대기예요.',
   )
+  expect((await changesApi.get('101', '71')).proposal.status).toBe('PROPOSED')
 })
 
 // 공용 문서함 '고치기'(PNL-02 수정안 10-29): 그 문서가 골라진 새 제안 폼으로 들어와 고친 글만으로도 올린다.
