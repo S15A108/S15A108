@@ -29,7 +29,7 @@ import type {
 import { contractExamples } from './contract-examples'
 
 // 예시 데이터를 바꾸면 버전을 올려 브라우저에 남은 예전 데이터 대신 새 예시를 불러온다.
-export const MOCK_STORAGE_KEY = 'beez.mock.api.v7'
+export const MOCK_STORAGE_KEY = 'beez.mock.api.v8'
 export const DEMO_EMAIL = 'demo@beez.local'
 export const DEMO_PASSWORD = 'beez-demo-2026'
 export const MOCK_NOTICE =
@@ -421,11 +421,32 @@ function seededProject(
   state.meetings.push({
     ...meeting,
     title: '초대 안내 문구 검토',
+    origin: 'BEE_CONFLICT',
+    task_ids: ['501', '502'],
+    conflict_summary: '만료된 초대를 어떻게 안내할지 정해 주세요',
+    status: 'OPEN',
     participants: ['21', '22', '25'].map((member_id) => ({
       member_id,
       status: 'ACCEPTED' as const,
     })),
     created_at: '2026-10-28T01:40:00Z',
+  })
+  // 끝난 회의 예시(PNL-06 수정안 10-29 '진행 중 / 끝난 회의')
+  state.meetings.push({
+    ...meeting,
+    id: '902',
+    title: 'API 오류 응답 형식 통일',
+    origin: 'BEE_CONFLICT',
+    task_ids: ['503'],
+    conflict_summary: 'API 오류 응답 형식을 하나로 맞춰 주세요',
+    status: 'CLOSED',
+    closed_at: '2026-10-26T06:20:00Z',
+    closed_by: '11',
+    participants: ['21', '26'].map((member_id) => ({
+      member_id,
+      status: 'ACCEPTED' as const,
+    })),
+    created_at: '2026-10-26T05:40:00Z',
   })
   const opened = {
     origin: 'TEMPLATE' as const,

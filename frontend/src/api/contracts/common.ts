@@ -851,6 +851,13 @@ export const meetingSchema = z.object({
   project_id: idSchema,
   title: z.string(),
   change_proposal_id: idSchema.optional(),
+  // dev 명세의 '수정안 요청' 필드(PR #42). 서버가 아직 주지 않을 수 있다.
+  origin: z.enum(['BEE_CONFLICT', 'HUMAN']).optional(),
+  task_ids: idSchema.array().optional(),
+  conflict_summary: z.string().optional(),
+  status: z.enum(['OPEN', 'CLOSED']).optional(),
+  closed_at: timeSchema.optional(),
+  closed_by: idSchema.optional(),
   participants: participantSchema.array(),
   created_at: timeSchema,
 })

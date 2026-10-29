@@ -63,7 +63,7 @@ it('팀장은 메시지를 보내고 비비 정리를 받은 뒤 회의 끝내�
   )
   await user.click(screen.getByRole('button', { name: '보내기' }))
   await within(log).findByText('기존 계약을 유지하고 설명을 보완해요.')
-  await user.click(screen.getByRole('button', { name: '비비에게 검토 요청' }))
+  await user.click(screen.getByRole('button', { name: '비비에게 정리 요청' }))
   expect(
     await within(log).findByText(/회의 내용을 정리했어요 · 메시지 4개 기준/),
   ).toBeInTheDocument()
@@ -83,7 +83,7 @@ it('팀원은 대화만 하고 검토 요청은 팀장만 할 수 있다고 안�
   renderPanel(false)
   await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
   expect(
-    screen.getByRole('button', { name: '비비에게 검토 요청' }),
+    screen.getByRole('button', { name: '비비에게 정리 요청' }),
   ).toBeDisabled()
   expect(screen.getByText('팀장만 요청할 수 있어요')).toBeInTheDocument()
 })
@@ -107,4 +107,36 @@ it('참여자는 관련자 추가로 아직 없는 팀원을 골라 회의에 �
     '관련자를 추가했어요.',
   )
   expect(await screen.findByText('박팀원')).toBeInTheDocument()
+})
+
+// 10-29 수정안: 진행 중/끝난 회의, 안건 고정, 단계 표시, 끝난 회의는 읽기만
+it('진행 중과 끝난 회의를 나누고, 안건과 단계를 보이며, 끝난 회의에는 쓸 수 없다', async () => {
+  const user = userEvent.setup()
+  renderPanel(true)
+  await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
+  const agenda = screen.getByRole('region', { name: '안건' })
+  expect(
+    within(agenda).getByText('만료된 초대를 어떻게 안내할지 정해 주세요'),
+  ).toBeInTheDocument()
+  expect(
+    await within(agenda).findByRole('button', { name: /TASK-001/ }),
+  ).toBeInTheDocument()
+  const steps = screen.getByRole('list', { name: '회의 단계' })
+  expect(within(steps).getByText('대화').closest('li')).toHaveAttribute(
+    'aria-current',
+    'step',
+  )
+  expect(screen.getByRole('heading', { name: /진행 중/ })).toHaveTextContent(
+    '1',
+  )
+  await user.click(
+    screen.getByRole('button', { name: /API 오류 응답 형식 통일/ }),
+  )
+  expect(
+    await screen.findByText('끝난 회의라 메시지를 보낼 수 없어요.'),
+  ).toBeInTheDocument()
+  expect(screen.getByText(/이팀장이 끝냄/)).toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: '비비에게 정리 요청' }),
+  ).not.toBeInTheDocument()
 })

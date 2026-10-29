@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, Sparkles } from 'lucide-react'
 import { BibiFace } from '@/components/BibiFace'
-import { meetingsApi, membersApi } from '@/api/services'
+import { meetingsApi, membersApi, tasksApi } from '@/api/services'
 import type { MeetingEntry, Member } from '@/api/contracts/common'
 import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
@@ -35,8 +35,11 @@ const participationLabel = {
   DECLINED: '불참',
 }
 
+const meetingSteps = ['대화', '비비 정리', '회의 끝내기', '변경 제안 승인']
+
 // 회의는 사람이 만들지 않는다. 작업이 부딪히면 비비가 팀장과 관련 작업자를 불러 연다.
-// API 없음: 회의를 연 이유(작업 충돌)·관련 작업·비비의 첫 메시지·끝남 상태가 응답에 없어 칩과 첫 말풍선은 아직 그리지 않는다.
+// 10-29 수정안: 진행 중/끝난 회의로 나누고, 안건(왜 열렸는지)을 대화 위에 고정하고, 단계(대화 → 비비 정리 → 회의 끝내기 → 변경 제안 승인)를 보인다.
+// API 없음: origin·task_ids·conflict_summary·status·closed_*는 dev 명세의 '수정안 요청'이라 서버가 주면 그린다.
 export function MeetingsPanel({ projectId, isLeader }: Props) {
   const session = useSession()
   const action = useProjectAction(projectId)
@@ -47,6 +50,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
     focus: string | null
   } | null>(null)
   const [ending, setEnding] = useState(false)
+  const [agendaOpen, setAgendaOpen] = useState(false)
   const list = useInfiniteQuery({
     queryKey: ['projects', projectId, 'meetings'],
     initialPageParam: undefined as string | undefined,
@@ -55,8 +59,13 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
     getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
   })
   const meetings = list.data?.pages.flatMap((page) => page.items) ?? []
+  const open = meetings.filter((meeting) => meeting.status !== 'CLOSED')
+  const closed = meetings.filter((meeting) => meeting.status === 'CLOSED')
+  // 처음에는 진행 중인 회의를 연다.
   const selectedId =
-    selection?.focus === focus ? selection.id : (focus ?? meetings[0]?.id)
+    selection?.focus === focus
+      ? selection.id
+      : (focus ?? open[0]?.id ?? meetings[0]?.id)
   const detail = useQuery({
     queryKey: ['projects', projectId, 'meeting', selectedId],
     queryFn: () => meetingsApi.get(projectId, selectedId!),
@@ -75,6 +84,16 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
     queryFn: () => membersApi.list(projectId, { limit: 100 }),
   })
   const people = members.data?.items ?? []
+  const tasks = useQuery({
+    queryKey: ['projects', projectId, 'meeting-tasks'],
+    queryFn: () => tasksApi.list(projectId, { limit: 100 }),
+  })
+  const taskOf = (id: string) =>
+    tasks.data?.items.find((task) => task.id === id)
+  const nameOfMember = (id: string) =>
+    people.find((member) => member.id === id)?.name ?? '팀원'
+  const nameOfAccount = (id?: string) =>
+    people.find((member) => member.account_id === id)?.name ?? '팀장'
   const me = people.find((member) => member.account_id === session.data?.id)
   // 목록은 최신순으로 온다. 대화는 오래된 것부터 보여 준다.
   const notes = entries.data?.pages.flatMap((page) => page.items) ?? []
@@ -116,38 +135,71 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
         {() =>
           meetings.length ? (
             <div className="grid gap-5 lg:grid-cols-[250px_minmax(0,1fr)]">
-              <div>
-                <h3 className="mb-2.5 flex justify-between text-sm font-bold">
-                  팀의 회의
-                  <span className="font-medium">{meetings.length}</span>
-                </h3>
-                <ul className="grid gap-2">
-                  {meetings.map((meeting) => (
-                    <li key={meeting.id}>
-                      <button
-                        type="button"
-                        aria-current={meeting.id === selectedId}
-                        className={cn(
-                          'grid w-full gap-1 rounded-xl border px-3.5 py-3 text-left hover:bg-muted/40',
-                          meeting.id === selectedId &&
-                            'border-2 border-foreground',
-                        )}
-                        onClick={() => {
-                          setSelection({ id: meeting.id, focus })
-                          setEnding(false)
-                        }}
-                      >
-                        <strong className="text-sm font-semibold">
-                          {meeting.title}
-                        </strong>
-                        <span className="text-xs text-muted-foreground">
-                          참여 {meeting.participants.length}명 ·{' '}
-                          {formatDate(meeting.created_at)}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+              <div className="grid content-start gap-4">
+                {(
+                  [
+                    ['진행 중', open, '진행 중인 회의가 없어요.'],
+                    ['끝난 회의', closed, '끝난 회의가 없어요.'],
+                  ] as const
+                ).map(([heading, group, empty]) => (
+                  <div key={heading}>
+                    <h3 className="mb-2.5 flex justify-between text-sm font-bold">
+                      {heading}
+                      <span className="font-medium">{group.length}</span>
+                    </h3>
+                    {group.length ? (
+                      <ul className="grid gap-2">
+                        {group.map((meeting) => (
+                          <li key={meeting.id}>
+                            <button
+                              type="button"
+                              aria-current={meeting.id === selectedId}
+                              className={cn(
+                                'grid w-full gap-1 rounded-xl border px-3.5 py-3 text-left hover:bg-muted/40',
+                                meeting.id === selectedId &&
+                                  'border-2 border-foreground',
+                              )}
+                              onClick={() => {
+                                setSelection({ id: meeting.id, focus })
+                                setEnding(false)
+                                setAgendaOpen(false)
+                              }}
+                            >
+                              <MeetingChip
+                                status={meeting.status}
+                                origin={meeting.origin}
+                              />
+                              <strong className="text-sm font-semibold">
+                                {meeting.title}
+                              </strong>
+                              <span className="text-xs text-muted-foreground">
+                                {[
+                                  ...(meeting.task_ids ?? []).map(
+                                    (id) => taskOf(id)?.key ?? '작업',
+                                  ),
+                                  `참여 ${meeting.participants.length}명`,
+                                ].join(' · ')}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDate(meeting.created_at)}
+                                {meeting.origin === 'BEE_CONFLICT' &&
+                                  ' · 비비가 엶'}
+                              </span>
+                              {meeting.status === 'CLOSED' &&
+                                meeting.change_proposal_id && (
+                                  <span className="text-xs font-semibold text-amber-800">
+                                    변경 제안 올라감 ›
+                                  </span>
+                                )}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">{empty}</p>
+                    )}
+                  </div>
+                ))}
                 {list.hasNextPage && (
                   <Button
                     variant="outline"
@@ -181,6 +233,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             만들어요. 제안자는 회의를 끝낸 팀장이에요. 대화
                             기록은 그대로 남아요.
                           </p>
+                          <MeetingSteps current={2} />
                         </div>
                         <article className="rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
                           <h4 className="mb-2 font-semibold">비비 정리</h4>
@@ -221,57 +274,76 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                     ) : (
                       <div className="grid min-w-0 content-start gap-3">
                         <div className="flex flex-wrap items-start justify-between gap-4">
-                          <div>
-                            <h3 className="text-lg font-bold">
-                              {meeting.title}
-                            </h3>
+                          <div className="grid gap-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-lg font-bold">
+                                {meeting.title}
+                              </h3>
+                              <MeetingChip
+                                status={meeting.status}
+                                origin={meeting.origin}
+                              />
+                            </div>
                             <p className="text-xs text-muted-foreground">
                               {formatDate(meeting.created_at)}
-                              {meeting.change_proposal_id && (
-                                <>
-                                  {' · '}
-                                  <button
-                                    type="button"
-                                    className="underline underline-offset-2"
-                                    onClick={() =>
-                                      openPane(
-                                        'changes',
-                                        meeting.change_proposal_id,
-                                      )
-                                    }
-                                  >
-                                    관련 변경 제안 보기
-                                  </button>
-                                </>
-                              )}
+                              {meeting.status === 'CLOSED'
+                                ? ` · ${nameOfAccount(meeting.closed_by)}이 끝냄`
+                                : meeting.origin === 'BEE_CONFLICT'
+                                  ? ' · 비비가 열었어요'
+                                  : ''}
+                              {' · '}기록은 원문 그대로 남아요
                             </p>
+                            <MeetingSteps
+                              current={
+                                meeting.status === 'CLOSED' ? 3 : review ? 1 : 0
+                              }
+                            />
                           </div>
-                          <span className="grid justify-items-end gap-1">
-                            <Button
-                              disabled={
-                                !isLeader ||
-                                latest?.kind !== 'TEXT' ||
-                                action.busy
-                              }
-                              onClick={() =>
-                                perform(
-                                  () => requestReview(latest!.id),
-                                  '비비가 회의 내용을 정리했어요.',
-                                )
-                              }
-                            >
-                              <Sparkles />
-                              비비에게 검토 요청
-                            </Button>
-                            {!isLeader && (
-                              <span className="text-xs text-muted-foreground">
-                                팀장만 요청할 수 있어요
-                              </span>
-                            )}
-                          </span>
+                          {meeting.status === 'CLOSED' ? (
+                            meeting.change_proposal_id && (
+                              <Button
+                                onClick={() =>
+                                  openPane(
+                                    'changes',
+                                    meeting.change_proposal_id,
+                                  )
+                                }
+                              >
+                                변경 제안 보기
+                              </Button>
+                            )
+                          ) : (
+                            <span className="grid justify-items-end gap-1">
+                              <Button
+                                disabled={
+                                  !isLeader ||
+                                  latest?.kind !== 'TEXT' ||
+                                  action.busy
+                                }
+                                onClick={() =>
+                                  perform(
+                                    () => requestReview(latest!.id),
+                                    '비비가 회의 내용을 정리했어요.',
+                                  )
+                                }
+                              >
+                                <Sparkles />
+                                비비에게 정리 요청
+                              </Button>
+                              {!isLeader && (
+                                <span className="text-xs text-muted-foreground">
+                                  팀장만 요청할 수 있어요
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-sm">
-                          <span className="text-muted-foreground">참여자</span>
+                          <span className="text-muted-foreground">
+                            {meeting.origin === 'BEE_CONFLICT'
+                              ? '비비가 부른 사람'
+                              : '참여자'}
+                          </span>
                           {/* API 없음: 사람마다 관련 작업(TASK-001 등)과 누가 추가했는지('이팀장이 추가')를 붙인다. */}
                           {meeting.participants.map((item) => {
                             const member = people.find(
@@ -297,32 +369,95 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                               </span>
                             )
                           })}
-                          {(isLeader || !!participant) && (
-                            <AddParticipant
-                              candidates={people.filter(
-                                (member) =>
-                                  !meeting.participants.some(
-                                    (item) => item.member_id === member.id,
-                                  ),
-                              )}
-                              joined={meeting.participants.map(
-                                (item) =>
-                                  people.find(
-                                    (member) => member.id === item.member_id,
-                                  )?.name ?? '팀원',
-                              )}
-                              onAdd={(memberIds) =>
-                                action.run(
-                                  () =>
-                                    meetingsApi.invite(projectId, meeting.id, {
-                                      member_ids: memberIds,
-                                    }),
-                                  '관련자를 추가했어요.',
-                                )
-                              }
-                            />
-                          )}
+                          {(isLeader || !!participant) &&
+                            meeting.status !== 'CLOSED' && (
+                              <AddParticipant
+                                candidates={people.filter(
+                                  (member) =>
+                                    !meeting.participants.some(
+                                      (item) => item.member_id === member.id,
+                                    ),
+                                )}
+                                joined={meeting.participants.map(
+                                  (item) =>
+                                    people.find(
+                                      (member) => member.id === item.member_id,
+                                    )?.name ?? '팀원',
+                                )}
+                                onAdd={(memberIds) =>
+                                  action.run(
+                                    () =>
+                                      meetingsApi.invite(
+                                        projectId,
+                                        meeting.id,
+                                        {
+                                          member_ids: memberIds,
+                                        },
+                                      ),
+                                    '관련자를 추가했어요.',
+                                  )
+                                }
+                              />
+                            )}
                         </div>
+                        {meeting.conflict_summary && (
+                          <section
+                            aria-label="안건"
+                            className="grid gap-2 rounded-xl border border-primary/40 bg-primary/5 p-3 text-sm"
+                          >
+                            {review && !agendaOpen ? (
+                              <p className="flex flex-wrap items-center justify-between gap-2">
+                                <span>
+                                  <strong>안건</strong>{' '}
+                                  {meeting.conflict_summary}
+                                  {meeting.task_ids?.length
+                                    ? ` · ${meeting.task_ids.map((id) => taskOf(id)?.key ?? '작업').join('과 ')}가 달라요`
+                                    : ''}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="text-xs underline"
+                                  onClick={() => setAgendaOpen(true)}
+                                >
+                                  펼치기
+                                </button>
+                              </p>
+                            ) : (
+                              <>
+                                <p className="flex flex-wrap items-baseline justify-between gap-2">
+                                  <strong>{meeting.conflict_summary}</strong>
+                                  <span className="text-xs text-muted-foreground">
+                                    비비가 찾은 충돌 ·{' '}
+                                    {formatDate(meeting.created_at)}
+                                  </span>
+                                </p>
+                                {/* API 없음: 작업마다 어떻게 다른지와 기준 문단(REQ-005 보기)은 충돌 상세 필드가 생기면 붙인다. 지금은 비비 첫 말풍선에 있다. */}
+                                <ul className="flex flex-wrap gap-2">
+                                  {(meeting.task_ids ?? []).map((id) => {
+                                    const task = taskOf(id)
+                                    return (
+                                      <li key={id}>
+                                        <button
+                                          type="button"
+                                          className="rounded-lg border bg-card px-2.5 py-1 text-xs hover:bg-muted"
+                                          onClick={() => openPane('tasks', id)}
+                                        >
+                                          <strong>{task?.key ?? '작업'}</strong>{' '}
+                                          {
+                                            task?.current_plan_revision.plan
+                                              .title
+                                          }
+                                          {task &&
+                                            ` · ${nameOfMember(task.assignee_member_id)}`}
+                                        </button>
+                                      </li>
+                                    )
+                                  })}
+                                </ul>
+                              </>
+                            )}
+                          </section>
+                        )}
                         <AsyncState query={entries}>
                           {() => (
                             <div
@@ -370,7 +505,11 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                           )}
                         </AsyncState>
                         {/* API 없음: 정리 수정 요청 전용 필드. 지금은 고칠 점을 메시지로 남기고 그 시점까지 다시 정리한다. */}
-                        {isLeader && review ? (
+                        {meeting.status === 'CLOSED' ? (
+                          <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-muted-foreground">
+                            끝난 회의라 메시지를 보낼 수 없어요.
+                          </p>
+                        ) : isLeader && review ? (
                           <div className="grid gap-3">
                             <ActionForm
                               key={`fix:${review.id}`}
@@ -470,6 +609,54 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
         }
       </AsyncState>
     </section>
+  )
+}
+
+function MeetingChip({
+  status,
+  origin,
+}: {
+  status?: 'OPEN' | 'CLOSED'
+  origin?: 'BEE_CONFLICT' | 'HUMAN'
+}) {
+  if (status !== 'CLOSED' && origin !== 'BEE_CONFLICT') return null
+  return (
+    <span
+      className={cn(
+        'w-fit rounded-full px-2 py-0.5 text-xs font-semibold',
+        status === 'CLOSED'
+          ? 'bg-muted text-muted-foreground'
+          : 'bg-amber-100 text-amber-800',
+      )}
+    >
+      {status === 'CLOSED' ? '끝남' : '작업 충돌'}
+    </span>
+  )
+}
+
+// 회의 단계: 대화 → 비비 정리 → 회의 끝내기 → 변경 제안 승인
+function MeetingSteps({ current }: { current: number }) {
+  return (
+    <ol
+      aria-label="회의 단계"
+      className="flex flex-wrap items-center gap-1 text-xs"
+    >
+      {meetingSteps.map((step, index) => (
+        <li
+          key={step}
+          aria-current={index === current ? 'step' : undefined}
+          className={cn(
+            'flex items-center gap-1 rounded-full px-2 py-0.5',
+            index < current && 'font-semibold text-muted-foreground',
+            index === current && 'bg-foreground font-bold text-background',
+            index > current && 'text-muted-foreground/70',
+          )}
+        >
+          <span aria-hidden="true">{index < current ? '✓' : index + 1}</span>
+          {step}
+        </li>
+      ))}
+    </ol>
   )
 }
 

@@ -145,7 +145,7 @@ test('비비가 연 회의에서 대화하고 비비 정리를 목 API로 저장
     }),
   ).toBeVisible()
   await page
-    .getByRole('button', { name: '비비에게 검토 요청', exact: true })
+    .getByRole('button', { name: '비비에게 정리 요청', exact: true })
     .click()
   await expect(page.getByRole('status')).toHaveText(
     '비비가 회의 내용을 정리했어요.',
