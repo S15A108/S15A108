@@ -2,7 +2,7 @@
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { api } from '@/api/client'
-import { authApi, membersApi } from '@/api/services'
+import { authApi, membersApi, tasksApi } from '@/api/services'
 import { getApiErrorCode, getApiErrorStatus } from '@/api/error'
 import { DEMO_EMAIL, DEMO_PASSWORD, resetMockApi, setupMockApi } from './setup'
 
@@ -70,4 +70,32 @@ it('작업 인계 대상이 떠나는 본인이거나 팀원이 아니면 400', 
     .remove('101', '22', { reassign_to_member_id: '999' })
     .catch((cause: unknown) => cause)
   expect(getApiErrorStatus(stranger)).toBe(400)
+})
+
+// PR #50 d4db914: 진행 중 작업의 담당자를 바꾸면 WAITING(REVALIDATION)으로 내리고 검증을 무효로 만든다.
+it('진행 중 작업의 담당자를 바꾸면 재검증 대기가 되고 검증은 ASSIGNEE_CHANGED로 무효가 된다', async () => {
+  const task = await tasksApi.get('101', '501')
+  const started = await tasksApi.state('101', '501', {
+    event: 'START',
+    plan_revision_id: task.current_plan_revision.id,
+    expected_lock_version: task.lock_version,
+    validation_id: task.validation!.id,
+  })
+  expect(started.status).toBe('IN_PROGRESS')
+  const moved = await tasksApi.assign('101', '501', {
+    assignee_member_id: '22',
+    expected_lock_version: started.lock_version,
+  })
+  expect(moved).toMatchObject({
+    status: 'WAITING',
+    waiting_reason: 'REVALIDATION',
+    assignee_member_id: '22',
+    validation_status: 'STALE',
+  })
+  expect(moved.validation?.stale_reason).toBe('ASSIGNEE_CHANGED')
+  const same = await tasksApi.assign('101', '501', {
+    assignee_member_id: '22',
+    expected_lock_version: moved.lock_version,
+  })
+  expect(same.lock_version).toBe(moved.lock_version)
 })

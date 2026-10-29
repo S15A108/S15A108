@@ -36,6 +36,38 @@ function syncValidation(context: MockContext, validation: Validation): void {
   }
 }
 
+// 담당자 인계(PR #50 d4db914, 서버 TaskHandoverService.reassign). TSK-A06과 제외·나가기가 같이 쓴다.
+// 같은 담당자면 그대로. 점유 중(IN_PROGRESS·WAITING)이면 DELTA를 뺀 이 작업의 검증(진행 중 포함)을
+// STALE(ASSIGNEE_CHANGED)로 바꾸고, IN_PROGRESS는 WAITING(REVALIDATION)으로 내린 뒤 넘긴다.
+export function reassignTask(
+  context: MockContext,
+  task: TaskDetail,
+  memberId: string,
+): void {
+  if (task.assignee_member_id === memberId) return
+  if (['IN_PROGRESS', 'WAITING'].includes(task.status))
+    for (const validation of requireProject(context).validations) {
+      if (
+        validation.task_id !== task.id ||
+        validation.trigger === 'DELTA' ||
+        validation.status === 'STALE'
+      )
+        continue
+      validation.status = 'STALE'
+      validation.stale_reason = 'ASSIGNEE_CHANGED'
+      validation.finished_at ??= now()
+      delete context.database.pending_validations[validation.id]
+      syncValidation(context, validation)
+    }
+  if (task.status === 'IN_PROGRESS') {
+    task.status = 'WAITING'
+    task.waiting_reason = 'REVALIDATION'
+  }
+  task.assignee_member_id = memberId
+  task.lock_version++
+  task.updated_at = now()
+}
+
 function evaluate(context: MockContext, validation: Validation): void {
   const project = requireProject(context)
   const task = findById(project.tasks, validation.task_id)
@@ -301,9 +333,7 @@ export function taskRoutes(
         project.members,
         requiredString(body, 'assignee_member_id'),
       )
-      task!.assignee_member_id = member.id
-      task!.lock_version++
-      task!.updated_at = now()
+      reassignTask(context, task!, member.id)
       return { data: task! }
     }
     case 'VAL-A01':

@@ -266,3 +266,18 @@ it('검증을 통과한 작업은 단계가 작업 시작에 있고 다음 할 �
   expect(screen.getByText('다음 할 일')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '다시 검증' })).toBeEnabled()
 })
+
+// PR #50 d4db914: 진행 중 작업을 넘기면 대기(재검증)가 된다고 담당자 변경 창에서 먼저 알린다.
+it('팀장이 진행 중 작업의 담당자를 바꾸려 하면 재검증 안내를 보여 준다', async () => {
+  task = { ...task, status: 'IN_PROGRESS' }
+  show(true)
+  await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
+  await userEvent.click(
+    await screen.findByRole('menuitem', { name: '담당자 바꾸기' }),
+  )
+  expect(
+    await screen.findByText(
+      /진행 중인 작업이라 넘기면 대기\(재검증\)로 바뀌고/,
+    ),
+  ).toBeInTheDocument()
+})

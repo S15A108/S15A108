@@ -721,6 +721,15 @@ export function TeamPanel({
             ) : (
               <p className="text-muted-foreground">넘길 작업이 없어요.</p>
             )}
+            {/* PR #50 d4db914: 진행 중·대기 작업은 넘기면 대기(재검증)가 된다. 보드에 없는 안내라 짧게 둔다. */}
+            {handover.some((task) =>
+              ['IN_PROGRESS', 'WAITING'].includes(task.status),
+            ) && (
+              <p className="text-xs text-muted-foreground">
+                진행 중인 작업은 넘기면 대기(재검증)로 바뀌고, 넘겨받은 동료가
+                다시 검증받아야 해요.
+              </p>
+            )}
           </section>
         </FormDialog>
       )}

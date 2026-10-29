@@ -69,6 +69,10 @@ const relationLabel = {
 } as const
 
 const taskSteps = ['계획 작성', '계획 검증', '작업 시작', '완료 보고']
+// 서버가 검증을 무효로 만든 이유 코드(stale_reason). 모르는 값은 그대로 보여 준다.
+const staleReasonLabel: Record<string, string> = {
+  ASSIGNEE_CHANGED: '담당자가 바뀌어 새 담당자가 다시 검증받아야 해요.',
+}
 
 export function TasksPanel({ projectId, isLeader }: Props) {
   const session = useSession()
@@ -187,7 +191,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       ? 4
       : task?.status === 'IN_PROGRESS'
         ? 3
-        : canStart || task?.status === 'WAITING'
+        : canStart
           ? 2
           : 1
   const startBlocked =
@@ -196,7 +200,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       : blocked
         ? '검증에서 막힌 항목을 고쳐야 시작할 수 있어요.'
         : result?.status === 'STALE'
-          ? '기준이 바뀌어 다시 검증해야 해요.'
+          ? (staleReasonLabel[result.stale_reason ?? ''] ??
+            '기준이 바뀌어 다시 검증해야 해요.')
           : result?.status === 'ERROR'
             ? '검증을 마치지 못했어요. 다시 실행해 주세요.'
             : result?.status === 'PASS'
@@ -675,7 +680,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                     )}
                     {result?.stale_reason && (
                       <p className="text-sm text-amber-800">
-                        {result.stale_reason}
+                        {staleReasonLabel[result.stale_reason] ??
+                          result.stale_reason}
                       </p>
                     )}
                     {result?.status === 'RUNNING' && (
@@ -952,6 +958,14 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       {assigning && formTask && (
         <FormDialog
           title="작업 담당자 변경"
+          // 진행 중이거나 대기 중인 작업은 넘기면 새 담당자가 다시 검증받는다(PR #50 d4db914, 보드에 없는 안내).
+          description={`바뀐 담당자에게 알림이 가요. 계획과 기록은 그대로 남아요.${
+            formTask.status === 'IN_PROGRESS'
+              ? ' 진행 중인 작업이라 넘기면 대기(재검증)로 바뀌고, 새 담당자가 다시 검증받아야 해요.'
+              : formTask.status === 'WAITING'
+                ? ' 넘기면 새 담당자가 다시 검증받아야 해요.'
+                : ''
+          }`}
           fields={[
             {
               name: 'member_id',

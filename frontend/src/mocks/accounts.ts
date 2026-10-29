@@ -11,6 +11,7 @@ import {
 } from './helpers'
 import type { MockContext, MockReply } from './helpers'
 import { blankProject, nextId, now, passwordFingerprint } from './state'
+import { reassignTask } from './tasks'
 
 async function password(value: unknown): Promise<string> {
   if (typeof value !== 'string' || value.length < 8)
@@ -440,11 +441,13 @@ export async function accountRoutes(
             task.assignee_member_id === member.id &&
             !['COMPLETED', 'CANCELLED'].includes(task.status),
         )
-        .forEach((task) => {
-          task.assignee_member_id =
-            typeof reassigned === 'string' ? reassigned : context.member!.id
-          task.lock_version++
-        })
+        .forEach((task) =>
+          reassignTask(
+            context,
+            task,
+            typeof reassigned === 'string' ? reassigned : context.member!.id,
+          ),
+        )
       project.members = project.members.filter((item) => item !== member)
       if (id === 'MEM-A10')
         project.left_account_ids = [
