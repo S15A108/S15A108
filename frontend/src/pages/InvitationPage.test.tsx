@@ -62,10 +62,10 @@ it('로그아웃 상태로 열면 로그인·가입하고 참여하는 길만 �
   await authApi.logout()
   open()
   expect(
-    await screen.findByRole('link', { name: '로그인하고 참여하기' }),
+    await screen.findByRole('link', { name: '로그인하고 프로젝트 열기' }),
   ).toHaveAttribute('href', `/login?invite=${token}`)
   expect(
-    screen.getByRole('link', { name: '회원가입하고 참여하기' }),
+    screen.getByRole('link', { name: '이 이메일로 회원가입하기' }),
   ).toHaveAttribute('href', `/register?invite=${token}`)
   expect(screen.queryByRole('button', { name: /수락/ })).not.toBeInTheDocument()
 })

@@ -118,12 +118,12 @@ export default function InvitationPage() {
                 <div className="flex flex-wrap gap-2">
                   <Button asChild>
                     <Link to={`/login?invite=${encoded}`}>
-                      로그인하고 참여하기
+                      로그인하고 프로젝트 열기
                     </Link>
                   </Button>
                   <Button variant="outline" asChild>
                     <Link to={`/register?invite=${encoded}`}>
-                      회원가입하고 참여하기
+                      이 이메일로 회원가입하기
                     </Link>
                   </Button>
                 </div>
