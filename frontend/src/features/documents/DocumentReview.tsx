@@ -121,7 +121,15 @@ export function DocumentReview({
         </span>
         <h3 className="text-lg font-bold">{title}</h3>
       </div>
-      {action.message && <Toast>{action.message}</Toast>}
+      {/* 팀장 승인·반려 알림은 가운데 위(승인 초록, 반려 빨강, PNL-02 수정안 10-29). */}
+      {action.message && (
+        <Toast
+          key={action.message}
+          tone={action.message.startsWith('반려') ? 'danger' : 'success'}
+        >
+          {action.message}
+        </Toast>
+      )}
       {locked && (
         <div className="grid gap-2 rounded-xl border border-primary/40 bg-primary/10 p-4 text-sm">
           <p>

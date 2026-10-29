@@ -13,7 +13,6 @@ import {
   ListChecks,
   Lock,
   Play,
-  Plus,
   Search,
   Upload,
   X,
@@ -156,9 +155,9 @@ export function DocumentsPanel({
     .toSorted((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind))
 
   const toast = notice && (
-    <Toast key={notice.title + notice.text}>
+    <Toast key={notice.title + notice.text} tone="success">
       <strong className="block">{notice.title}</strong>
-      {notice.text}
+      <span className="text-muted-foreground">{notice.text}</span>
     </Toast>
   )
 
@@ -226,21 +225,8 @@ export function DocumentsPanel({
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Chip tone={started ? 'amber' : 'muted'}>
-            {started ? '문서 수정은 변경 제안으로' : '시작 전'}
-          </Chip>
-          프로젝트에서 함께 보는 설계 문서
-        </p>
-        {/* 시작 전에는 '문서 등록' 버튼 없이 필수 문서 빈 칸을 눌러 등록한다(10-29 사용자 코멘트). */}
-        {started && (
-          <Button onClick={() => openPane('changes', 'new')}>
-            <Plus />
-            변경 제안 쓰기
-          </Button>
-        )}
-      </div>
+      {/* 머리 줄(상태 칩·설명·'변경 제안 쓰기')은 두지 않는다. 시작 전에는 필수 문서 빈 칸으로 등록하고,
+          시작 뒤에는 문서를 열어 '수정 제안하기'로 간다(PNL-02-v2 10-29). 검색칸은 사용자 결정으로 둔다. */}
       <SearchBar value={query} onSearch={setQuery} />
       {query ? (
         <SearchResults
@@ -251,14 +237,7 @@ export function DocumentsPanel({
         />
       ) : (
         <>
-          {started ? (
-            <p className="rounded-xl bg-primary/10 p-4 text-sm leading-6">
-              이제 문서 수정은 변경 제안으로 해요. 문서를 열고
-              &apos;고치기&apos;를 누르면 변경 제안을 쓰고, 비비도 회의 결과와
-              작업 기록을 보고 변경 제안을 올려요. 팀장이 승인·발행하면 기준이
-              v2, v3으로 올라가요.
-            </p>
-          ) : (
+          {started ? null : (
             <section
               aria-labelledby="start-title"
               className="grid gap-3.5 rounded-2xl border p-5"
@@ -272,15 +251,6 @@ export function DocumentsPanel({
                     팀장 승인 {approvedCount} / 4
                   </span>
                 </div>
-                <span
-                  aria-hidden="true"
-                  className="h-1.5 overflow-hidden rounded-full bg-muted"
-                >
-                  <span
-                    className="block h-full rounded-full bg-green-600"
-                    style={{ width: `${approvedCount * 25}%` }}
-                  />
-                </span>
                 <span className="text-sm text-muted-foreground">
                   문서마다 비비 검토와 팀장 승인을 거쳐요. 4종이 모두 승인돼야
                   프로젝트를 시작할 수 있어요.
@@ -417,14 +387,7 @@ export function DocumentsPanel({
                   )}
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3.5">
-                  <span className="text-sm text-muted-foreground">
-                    {approvedCount
-                      ? `${4 - approvedCount}개가 더 승인되면 켜져요.`
-                      : '필수 문서 4종을 올리고 팀장이 모두 승인하면 켜져요.'}{' '}
-                    시작한 뒤 문서 수정은 모두 변경 제안으로 가요. 시작은 팀장만
-                    할 수 있어요.
-                  </span>
+                <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-3.5">
                   <Button variant="secondary" disabled>
                     <Lock />
                     프로젝트 시작
@@ -1016,14 +979,15 @@ function DocumentDetail({
                 >
                   분류 수정
                 </Button>
-                {started && <Button onClick={onEdit}>고치기</Button>}
+                {started && <Button onClick={onEdit}>수정 제안하기</Button>}
               </div>
             </div>
-            <p className="rounded-xl bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
-              {started
-                ? "프로젝트를 시작한 뒤에는 새 버전을 올려 승인받지 않아요. '고치기'를 누르면 이 문서를 담은 변경 제안을 써요. 팀장이 승인·발행하면 문서와 기준이 함께 바뀌어요."
-                : '승인된 버전은 바뀌지 않아요. 고칠 내용은 새 .md를 올려 비비 검토와 팀장 승인을 거쳐요.'}
-            </p>
+            {!started && (
+              <p className="rounded-xl bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
+                승인된 버전은 바뀌지 않아요. 고칠 내용은 새 .md를 올려 비비
+                검토와 팀장 승인을 거쳐요.
+              </p>
+            )}
             {base && base.id !== data.version.id && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-orange-50 p-3 text-sm">
                 v{data.version.version_no}를 보고 있어요. 팀의 기준은 v

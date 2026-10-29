@@ -1,19 +1,52 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Check, X } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
-// 오른쪽 위에 잠깐 떴다가 4초 뒤 사라지는 알림. 새 내용을 보이려면 key를 바꿔 다시 그린다.
-export function Toast({ children }: { children: ReactNode }) {
+// 잠깐 떴다가 사라지는 알림. 새 내용을 보이려면 key를 바꿔 다시 그린다.
+// 기본은 오른쪽 위 4초. tone을 주면 화면 가운데 위의 흰 카드(초록 체크·빨간 X)로 6초(PNL-02 수정안 10-29:
+// 프로젝트 시작·문서 등록·팀장 승인/반려). 움직임 줄이기 설정이면 미끄러지지 않는다.
+export function Toast({
+  children,
+  tone,
+}: {
+  children: ReactNode
+  tone?: 'success' | 'danger'
+}) {
   const [shown, setShown] = useState(true)
   useEffect(() => {
-    const timer = setTimeout(() => setShown(false), 4000)
+    const timer = setTimeout(() => setShown(false), tone ? 6000 : 4000)
     return () => clearTimeout(timer)
-  }, [])
-  return shown ? (
-    <p
+  }, [tone])
+  if (!shown) return null
+  if (!tone)
+    return (
+      <p
+        role="status"
+        className="fixed top-4 right-4 z-50 rounded-xl border bg-card px-4 py-3 text-sm shadow-lg"
+      >
+        {children}
+      </p>
+    )
+  return (
+    <div
       role="status"
-      className="fixed top-4 right-4 z-50 rounded-xl border bg-card px-4 py-3 text-sm shadow-lg"
+      className="fixed inset-x-0 top-6 z-50 mx-auto flex w-90 max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border bg-card px-4 py-3.5 text-sm break-keep shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-4"
     >
-      {children}
-    </p>
-  ) : null
+      <span
+        aria-hidden="true"
+        className={cn(
+          'grid size-6 shrink-0 place-items-center rounded-full text-white',
+          tone === 'success' ? 'bg-green-700' : 'bg-destructive',
+        )}
+      >
+        {tone === 'success' ? (
+          <Check className="size-3.5" strokeWidth={3} />
+        ) : (
+          <X className="size-3.5" strokeWidth={3} />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
 }

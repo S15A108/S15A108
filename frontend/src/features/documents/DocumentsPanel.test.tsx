@@ -187,7 +187,6 @@ it('시작 전에는 필수 문서 4종 칸과 잠긴 프로젝트 시작을 보
   })
   mount()
   expect(await screen.findByText('팀장 승인 2 / 4')).toBeInTheDocument()
-  expect(screen.getByText(/2개가 더 승인되면 켜져요/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '프로젝트 시작' })).toBeDisabled()
   expect(screen.getAllByText('승인 v1')).toHaveLength(2)
   await user.click(screen.getByRole('button', { name: '기획안 올리기' }))

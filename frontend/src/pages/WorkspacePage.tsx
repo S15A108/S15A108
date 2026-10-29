@@ -232,7 +232,12 @@ function Workspace({ projectId }: { projectId: string }) {
                   <DialogTitle>
                     {pane && pane !== 'settings' ? paneTitles[pane] : ''}
                   </DialogTitle>
-                  <DialogDescription>{data.project.name}</DialogDescription>
+                  {/* 공용 문서함은 머리 부제목 없이 제목만(PNL-02-v2 10-29 부제목 제거). */}
+                  <DialogDescription
+                    className={pane === 'documents' ? 'sr-only' : undefined}
+                  >
+                    {data.project.name}
+                  </DialogDescription>
                 </DialogHeader>
                 <div key={`${projectId}:${pane}`} className="mt-4 min-w-0">
                   {pane === 'documents' && <DocumentsPanel {...panelProps} />}

@@ -929,9 +929,11 @@ export function WorkspaceHud({
       </section>
       <TourGuide accountId={me?.account_id} mode={tour} onChange={setTour} />
       {notice && (
-        <Toast key={stage}>
+        <Toast key={stage} tone="success">
           <strong className="block">{notice.title}</strong>
-          {(!isLeader && notice.member) || notice.text}
+          <span className="text-muted-foreground">
+            {(!isLeader && notice.member) || notice.text}
+          </span>
         </Toast>
       )}
     </>
