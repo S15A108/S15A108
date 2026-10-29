@@ -12,22 +12,7 @@ import {
 import { formatDate } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import type { WorkspacePane } from '@/stores/workspaceStore'
-
-const targetPane: Record<Notification['target_type'], WorkspacePane> = {
-  CHANGE_PROPOSAL: 'changes',
-  MEETING: 'meetings',
-  BASELINE: 'documents',
-  TASK: 'tasks',
-  VALIDATION: 'tasks',
-}
-const targetLabel: Record<Notification['target_type'], string> = {
-  CHANGE_PROPOSAL: '변경 제안',
-  MEETING: '회의실',
-  BASELINE: '공용 문서함',
-  TASK: '작업 현황',
-  VALIDATION: '작업 현황',
-}
+import { targetLabel, targetPane } from './notificationTarget'
 
 // 벨 아래 팝오버. 알림을 누르면 그 창으로 가고 그 알림만 읽음 처리한다.
 export function InboxPopover({ projectId }: { projectId: string }) {

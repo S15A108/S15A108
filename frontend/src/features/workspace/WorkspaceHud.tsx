@@ -1,23 +1,43 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronLeft, CircleHelp, Lock, Settings } from 'lucide-react'
-import { dashboardApi, documentsApi, inboxApi } from '@/api/services'
-import type { Member } from '@/api/contracts/common'
+import {
+  changesApi,
+  dashboardApi,
+  documentsApi,
+  inboxApi,
+} from '@/api/services'
+import type { Member, TaskDetail } from '@/api/contracts/common'
 import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { useProjectStart } from '@/features/projects/useProjectStart'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
+import { targetLabel, targetPane } from '@/features/inbox/notificationTarget'
 import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
 import type { TourMode } from './TourGuide'
 import { Button } from '@/components/ui/button'
-import { statusLabel } from '@/lib/display'
+import { describeContent, statusLabel } from '@/lib/display'
+import { formatAgo } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePane } from '@/stores/workspaceStore'
+
+// '지금 할 일' 한 줄: 설명 한 줄과 바로 가기. 변경 제안 줄은 −/+ 미리 보기와 영향까지(SCR-06-v2-workspace-hotbar).
+type Todo = {
+  key: string
+  mark: string
+  tone: 'review' | 'alert' | 'done'
+  title: string
+  detail: string
+  preview?: { before?: string; after?: string }
+  note?: string
+  action: string
+  open: () => void
+}
 
 // 가이드 숨김·'기준 설계 읽기' 체크는 브라우저에만 둔다.
 // API 없음: 가이드 상태(봤음·숨김·완료)를 계정·프로젝트별로 서버에 저장하는 필드.
@@ -108,7 +128,7 @@ export function WorkspaceHud({
     status: string
     assignee_member_id: string
   }[]
-  myTasks: { status: string; validation_status: string }[]
+  myTasks: TaskDetail[]
 }) {
   const navigate = useNavigate()
   const openPane = useWorkspaceStore((state) => state.openPane)
@@ -144,6 +164,29 @@ export function WorkspaceHud({
     queryKey: ['notifications', project.id, 'unread'],
     queryFn: () =>
       inboxApi.list({ project_id: project.id, unread: true, limit: 20 }),
+  })
+  const queryClient = useQueryClient()
+  // '지금 할 일' 첫 줄(SCR-06-v2-workspace-hotbar): 검토를 기다리는 첫 변경 제안의 상세·영향. 키는 변경 제안 창과 같다.
+  const reviewList = useQuery({
+    queryKey: ['projects', project.id, 'hud-review'],
+    queryFn: () =>
+      changesApi.list(project.id, { group: 'IN_PROGRESS', limit: 20 }),
+    // 창이 열린 동안은 '지금 할 일'이 가려지므로 부르지 않는다(목 모드 부하, E2E 시간).
+    enabled:
+      started && !pane && (counts.data?.changes.review_required_count ?? 0) > 0,
+  })
+  const firstReview = reviewList.data?.items.find((item) =>
+    ['PROPOSED', 'IN_REVIEW'].includes(item.status),
+  )
+  const reviewDetail = useQuery({
+    queryKey: ['projects', project.id, 'change', firstReview?.id],
+    queryFn: () => changesApi.get(project.id, firstReview!.id),
+    enabled: !!firstReview && !pane,
+  })
+  const reviewImpact = useQuery({
+    queryKey: ['projects', project.id, 'impact', firstReview?.id],
+    queryFn: () => changesApi.impact(project.id, firstReview!.id),
+    enabled: !!firstReview && !pane,
   })
   const [, rerender] = useState(0)
   // 워크스페이스에 처음 들어오면 환영 창을 한 번 띄운다. 다시 보기는 ? 키와 도움말 버튼.
@@ -401,35 +444,100 @@ export function WorkspaceHud({
     counts.data?.tasks.by_status.find((item) => item.status === 'IN_PROGRESS')
       ?.count ?? 0
   // 내 작업 중 계획 검증을 통과해 바로 시작할 수 있는 것만 센다.
-  const ready = myTasks.filter(
+  const readyTasks = myTasks.filter(
     (task) => task.status === 'READY' && task.validation_status === 'PASS',
-  ).length
-  const unreadCount = unread.data?.items.length ?? 0
-  const todos = [
-    reviewCount > 0 && {
-      mark: '!',
-      title: `변경 제안 ${reviewCount}건 검토하기`,
-      detail: '승인을 기다리는 제안이 있어요',
-      pane: 'changes' as const,
-    },
-    unreadCount > 0 && {
-      mark: String(unreadCount),
-      title: `읽지 않은 알림 ${unreadCount}건`,
-      detail: unread.data?.items[0]?.title ?? '',
-      pane: 'inbox' as const,
-    },
-    ready > 0 && {
-      mark: '✓',
-      title: `시작할 수 있는 작업 ${ready}건`,
-      detail: '계획 검증을 통과했어요',
-      pane: 'tasks' as const,
-    },
-  ].filter(Boolean) as {
-    mark: string
-    title: string
-    detail: string
-    pane: WorkspacePane
-  }[]
+  )
+  const unreadItems = unread.data?.items ?? []
+  const nameOfAccount = (id: string) =>
+    members.find((member) => member.account_id === id)?.name ?? '팀원'
+  const proposal = reviewDetail.data?.proposal
+  // −/+ 미리 보기는 item_texts(195 미구현)를 먼저 쓰고, 없으면 CHG-A03 비교 값을 쓴다. 둘 다 없으면 줄 없이 둔다.
+  const firstText = reviewDetail.data?.item_texts?.find(
+    (text) => text.before_text || text.after_text,
+  )
+  const firstComparison = reviewDetail.data?.comparisons.find(
+    (comparison) =>
+      comparison.target_type === 'DESIGN_ITEM' &&
+      comparison.proposed_content !== undefined,
+  )
+  const preview = firstText
+    ? { before: firstText.before_text, after: firstText.after_text }
+    : firstComparison
+      ? {
+          before:
+            (firstComparison.current_content ?? firstComparison.base_content)
+              ? describeContent(
+                  firstComparison.current_content ??
+                    firstComparison.base_content,
+                )
+              : undefined,
+          after: describeContent(firstComparison.proposed_content),
+        }
+      : undefined
+  // 줄 글은 보드 길이로 짧게: '김동료 · 10분 전 · 설계 항목 3개'. 잘린 글은 title로 전체를 본다.
+  const reviewSummary = proposal
+    ? [
+        nameOfAccount(proposal.proposer_account_id),
+        formatAgo(proposal.created_at),
+        proposal.items.length > 0 && `설계 항목 ${proposal.items.length}개`,
+        proposal.documents.length > 0 && `문서 ${proposal.documents.length}개`,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '승인을 기다리는 제안이 있어요'
+  const firstUnread = unreadItems[0]
+  const firstReady = readyTasks[0]
+  const todos = (
+    [
+      reviewCount > 0 && {
+        key: 'review',
+        mark: '!',
+        tone: 'review',
+        title: firstReview
+          ? `변경 제안 검토 · ${firstReview.title}`
+          : `변경 제안 ${reviewCount}건 검토하기`,
+        detail: reviewSummary,
+        preview,
+        note: reviewImpact.data
+          ? `영향 작업 ${reviewImpact.data.explicit.length} · 승인하면 기준 v${(project.current_baseline?.version_no ?? 0) + 1}`
+          : undefined,
+        action: '검토하러 가기',
+        open: () => openPane('changes', firstReview?.id),
+      },
+      firstUnread && {
+        key: 'unread',
+        mark: String(unreadItems.length),
+        tone: 'alert',
+        title: `읽지 않은 알림 ${unreadItems.length} · ${firstUnread.title}`,
+        detail: `${firstUnread.body} · ${formatAgo(firstUnread.created_at)}`,
+        action: `${targetLabel[firstUnread.target_type]} 열기`,
+        // 벨 팝오버처럼 누르면 그 창으로 가고 그 알림만 읽음 처리한다.
+        open: () => {
+          void inboxApi
+            .markRead({ ids: [firstUnread.id] })
+            .then(() =>
+              queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+            )
+          openPane(targetPane[firstUnread.target_type], firstUnread.target_id)
+        },
+      },
+      firstReady && {
+        key: 'ready',
+        mark: '✓',
+        tone: 'done',
+        title: `${firstReady.key} 시작하기${readyTasks.length > 1 ? ` 외 ${readyTasks.length - 1}건` : ''}`,
+        detail: [
+          `계획 r${firstReady.current_plan_revision.revision_no} 검증 통과`,
+          firstReady.validation?.finished_at &&
+            formatAgo(firstReady.validation.finished_at),
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        action: '작업 열기',
+        open: () => openPane('tasks', firstReady.id),
+      },
+    ] satisfies (Todo | false | undefined)[]
+  ).flatMap((todo) => (todo ? [todo] : []))
   const chips = [
     ...(isLeader ? [['검토할 변경', reviewCount, 'changes'] as const] : []),
     ['진행 중 작업', inProgress, 'tasks'] as const,
@@ -607,7 +715,7 @@ export function WorkspaceHud({
         aria-labelledby="todo-title"
         data-tour="todo"
         hidden={chatOpen}
-        className="pointer-events-auto absolute top-17 right-4 z-10 w-75 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur"
+        className="pointer-events-auto absolute top-17 right-4 z-10 w-85 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur"
       >
         {guideOpen ? (
           <>
@@ -737,24 +845,77 @@ export function WorkspaceHud({
                 {todos.length}
               </span>
             </h2>
-            <ul className="mt-2 grid gap-1">
+            <ul className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-1">
               {todos.map((todo) => (
-                <li key={todo.title}>
-                  <button
-                    type="button"
-                    onClick={() => openPane(todo.pane)}
-                    className="flex w-full items-start gap-2.5 rounded-xl p-2 text-left hover:bg-muted"
+                <li
+                  key={todo.key}
+                  className={cn(
+                    'flex min-w-0 gap-2.5 rounded-xl p-2.5',
+                    todo.tone === 'review' && 'bg-primary/15',
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-extrabold',
+                      todo.tone === 'review' &&
+                        'bg-primary text-primary-foreground',
+                      todo.tone === 'alert' && 'bg-red-100 text-red-700',
+                      todo.tone === 'done' && 'bg-green-100 text-green-700',
+                    )}
                   >
-                    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-bold">
-                      {todo.mark}
+                    {todo.mark}
+                  </span>
+                  <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-1">
+                    <strong
+                      title={todo.title}
+                      className="truncate text-[13px] leading-[18px]"
+                    >
+                      {todo.title}
+                    </strong>
+                    <span
+                      title={todo.detail}
+                      className="truncate text-xs text-muted-foreground"
+                    >
+                      {todo.detail}
                     </span>
-                    <span className="grid">
-                      <strong className="text-sm">{todo.title}</strong>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {todo.detail}
+                    {todo.preview && (
+                      <div className="rounded-lg bg-card px-2 py-1.5 text-xs leading-[17px]">
+                        {todo.preview.before && (
+                          <span
+                            title={todo.preview.before}
+                            className="block truncate text-red-700"
+                          >
+                            − {todo.preview.before}
+                          </span>
+                        )}
+                        {todo.preview.after && (
+                          <span
+                            title={todo.preview.after}
+                            className="block truncate text-green-700"
+                          >
+                            + {todo.preview.after}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {todo.note && (
+                      <span
+                        title={todo.note}
+                        className="truncate text-xs text-muted-foreground"
+                      >
+                        {todo.note}
                       </span>
-                    </span>
-                  </button>
+                    )}
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="justify-self-end"
+                      onClick={todo.open}
+                    >
+                      {todo.action}
+                    </Button>
+                  </div>
                 </li>
               ))}
               {!todos.length && (

@@ -305,3 +305,12 @@ it('반려된 제안을 고치며 항목을 빼면 이번 제안에서 뺐다고
   await user.click(screen.getByRole('button', { name: '항목 1 빼기' }))
   expect(screen.getByText('이번 제안에서 뺐어요')).toBeInTheDocument()
 })
+
+// '지금 할 일' 미리 보기용 항목별 −/+ 문장(item_texts, 195 미구현). 목은 채운다.
+it('목 상세는 항목별 바뀌기 전·뒤 문장을 item_texts로 준다', async () => {
+  const detail = await changesApi.get('101', '71')
+  expect(detail.item_texts?.[0]).toMatchObject({
+    before_text: expect.stringContaining('참여 프로젝트를 조회한다'),
+    after_text: expect.stringContaining('초대를 기다리라는 안내'),
+  })
+})

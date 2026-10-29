@@ -22,6 +22,7 @@ import {
 } from './helpers'
 import type { MockContext, MockReply } from './helpers'
 import { normalizeDocument } from '../features/changes/normalizeDocument'
+import { describeContent } from '../lib/display'
 import { copy, nextId, now } from './state'
 
 function proposalView(
@@ -425,6 +426,22 @@ export function changeRoutes(
           ],
           explicit_candidates: [],
           candidates_truncated: false,
+          // 195 미구현(#218 요청) 항목별 −/+ 문장. 목은 채워 '지금 할 일' 미리 보기를 보여 준다.
+          item_texts: proposal!.items.flatMap((change) => {
+            if (!change.design_item_id) return []
+            const base = change.base_design_item_version_id
+              ? findById(project.items, change.base_design_item_version_id)
+              : undefined
+            return [
+              {
+                design_item_id: change.design_item_id,
+                ...(base ? { before_text: describeContent(base.content) } : {}),
+                ...(change.proposed_content
+                  ? { after_text: describeContent(change.proposed_content) }
+                  : {}),
+              },
+            ]
+          }),
         },
       }
     case 'CHG-A04': {
