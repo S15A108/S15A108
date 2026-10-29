@@ -154,6 +154,7 @@ function Workspace({ projectId }: { projectId: string }) {
               members={data.members.items}
               me={currentUser}
               onboarding={data.onboarding}
+              tasks={data.tasks.items}
               myTasks={data.tasks.items.filter(
                 (task) => task.assignee_member_id === currentUser?.id,
               )}

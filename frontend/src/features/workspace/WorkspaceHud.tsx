@@ -9,6 +9,7 @@ import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { useProjectStart } from '@/features/projects/useProjectStart'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
+import { BibiFace } from '@/components/BibiFace'
 import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
@@ -95,12 +96,19 @@ export function WorkspaceHud({
   members,
   me,
   onboarding,
+  tasks,
   myTasks,
 }: {
   project: Project
   members: Member[]
   me?: Member
   onboarding: OnboardingResponse
+  tasks: {
+    id: string
+    key: string
+    status: string
+    assignee_member_id: string
+  }[]
   myTasks: { status: string; validation_status: string }[]
 }) {
   const navigate = useNavigate()
@@ -334,7 +342,55 @@ export function WorkspaceHud({
         : undefined
   // 비비 대화 창이 열린 동안은 단축 바만 남기고 다른 위젯은 숨긴다(PNL-12 B안).
   const chatOpen = pane === 'chat'
-  const unconnected = members.filter((member) => !member.agent_connected).length
+  // 팀 목록(SCR-06 수정안 · 팀 현황): 사람마다 지금 하는 일, 연결된 에이전트, 비비를 한 줄씩.
+  // API 없음: 접속 점·위치·마지막 접속(MON-A07 presence, PR #42 요청)과 에이전트가 하는 일(MON-A05 보고)은 계약이 생기면 줄에 붙인다.
+  const taskOrder = ['IN_PROGRESS', 'WAITING', 'DRAFT', 'READY']
+  const taskOf = (memberId: string) =>
+    tasks
+      .filter(
+        (task) =>
+          task.assignee_member_id === memberId &&
+          taskOrder.includes(task.status),
+      )
+      .toSorted(
+        (a, b) => taskOrder.indexOf(a.status) - taskOrder.indexOf(b.status),
+      )[0]
+  const taskText = {
+    IN_PROGRESS: '작업 중',
+    WAITING: '대기 중',
+    DRAFT: '계획 작성 중',
+    READY: '시작 전',
+  } as Record<string, string>
+  const teamRows = [
+    ...members
+      .toSorted((a, b) => Number(b.id === me?.id) - Number(a.id === me?.id))
+      .map((member) => {
+        const task = taskOf(member.id)
+        return {
+          key: member.id,
+          initial: member.name.slice(0, 1),
+          color: member.color,
+          name: `${member.name}${member.id === me?.id ? ' · 나' : ''}`,
+          detail: task
+            ? `${task.key} ${taskText[task.status]}`
+            : [member.role === 'LEADER' ? '인간 팀장' : '팀원', member.domain]
+                .filter(Boolean)
+                .join(' · '),
+          open: () =>
+            task ? openPane('tasks', task.id) : openPane('settings', 'team'),
+        }
+      }),
+    ...members
+      .filter((member) => member.agent_connected)
+      .map((member) => ({
+        key: `agent:${member.id}`,
+        initial: 'AI',
+        color: undefined,
+        name: `${member.name}의 에이전트`,
+        detail: '연결됨',
+        open: () => openPane('dashboard'),
+      })),
+  ]
   const approved =
     counts.data?.documents.by_kind.reduce(
       (sum, item) => sum + item.approved_count,
@@ -433,71 +489,95 @@ export function WorkspaceHud({
                 onClick={() => openPane(pane)}
                 className="grid rounded-xl border bg-muted/40 px-2.5 py-2 text-left hover:bg-muted"
               >
+                <strong className="text-2xl leading-8">{value}</strong>
                 <span className="text-[11px] text-muted-foreground">
                   {label}
                 </span>
-                <strong className="text-xl">{value}</strong>
               </button>
             ))}
           </div>
         )}
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            aria-label="팀 보기"
-            onClick={() => openPane('settings', 'team')}
-            className="flex items-center gap-2"
-          >
-            <span className="flex -space-x-1.5">
-              {members.slice(0, 5).map((member) => (
-                <span
-                  key={member.id}
-                  aria-hidden="true"
-                  className="grid size-7 place-items-center rounded-full border-2 border-card text-[11px] font-bold"
-                  style={{
-                    backgroundColor: `${member.color ?? '#e5b743'}30`,
-                    color: member.color ?? '#a98419',
-                  }}
-                >
-                  {member.name.slice(0, 1)}
-                </span>
-              ))}
-              <span
-                aria-hidden="true"
-                className="grid size-7 place-items-center rounded-full border-2 border-card bg-primary text-[11px] font-bold text-primary-foreground"
-              >
-                비
+        <div className="grid gap-1 border-t pt-2.5">
+          <div className="flex items-center justify-between gap-2 px-0.5">
+            <span className="text-xs font-semibold">
+              팀{' '}
+              <span className="font-normal text-muted-foreground">
+                {teamRows.length + 1}
               </span>
+              {members.length <= 1 && (
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  아직 혼자예요
+                </span>
+              )}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {members.length <= 1
-                ? '아직 혼자예요'
-                : !isLeader
-                  ? onboarding.my_agent_connected
-                    ? '내 에이전트 연결됨'
-                    : '내 에이전트 연결 전'
-                  : unconnected
-                    ? `에이전트 ${unconnected}개 미확인`
-                    : '에이전트 모두 연결됨'}
-            </span>
-          </button>
-          {isLeader && members.length <= 1 ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => openPane('settings', 'team')}
-            >
-              + 팀원 초대
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => openPane('settings', 'team')}
-            >
-              {isLeader ? '팀 관리' : '팀 보기'}
-            </Button>
-          )}
+            {isLeader && members.length <= 1 ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => openPane('settings', 'team')}
+              >
+                + 팀원 초대
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => openPane('settings', 'team')}
+              >
+                {isLeader ? '팀 관리' : '팀 보기'}
+              </Button>
+            )}
+          </div>
+          <ul
+            aria-label="팀 목록"
+            className="grid max-h-64 gap-0.5 overflow-y-auto"
+          >
+            {teamRows.map((row) => (
+              <li key={row.key}>
+                <button
+                  type="button"
+                  onClick={row.open}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-muted"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+                    style={{
+                      backgroundColor: `${row.color ?? '#8a8378'}26`,
+                      color: row.color ?? '#57534e',
+                    }}
+                  >
+                    {row.initial}
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-xs">
+                      {row.name}
+                    </strong>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {row.detail}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={() => openPane('chat')}
+                className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-muted"
+              >
+                <BibiFace className="size-7 shrink-0" />
+                <span className="min-w-0">
+                  <strong className="block truncate text-xs">
+                    비비 · AI 팀장
+                  </strong>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    질문을 기다려요
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ul>
         </div>
       </section>
       <Hotbar

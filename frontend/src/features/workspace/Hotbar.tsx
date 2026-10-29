@@ -6,9 +6,9 @@ import {
   GitBranch,
   Lock,
   Network,
-  Sparkles,
   Users,
 } from 'lucide-react'
+import { BibiFace } from '@/components/BibiFace'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePane } from '@/stores/workspaceStore'
@@ -72,13 +72,13 @@ export function Hotbar({
         title={isLocked ? lockedReason : undefined}
         onClick={() => !isLocked && openPane(item.pane)}
         className={cn(
-          'relative grid size-15 content-center justify-items-center gap-1 rounded-xl border bg-muted/40 text-[10.5px] font-medium whitespace-nowrap transition hover:bg-muted',
+          'relative grid size-19 content-center justify-items-center gap-1.5 rounded-2xl border bg-muted/40 text-xs font-semibold whitespace-nowrap transition hover:bg-muted',
           pane === item.pane && 'border-foreground bg-muted',
           isLocked && 'cursor-not-allowed opacity-45 hover:bg-muted/40',
           highlight === item.pane && 'ring-2 ring-primary',
         )}
       >
-        <span className="absolute top-0.5 left-1.5 text-[9px] font-semibold text-muted-foreground">
+        <span className="absolute top-1 left-2 text-[10px] font-semibold text-muted-foreground">
           {index + 1}
         </span>
         {highlight === item.pane && (
@@ -92,9 +92,9 @@ export function Hotbar({
           </span>
         ) : null}
         {isLocked ? (
-          <Lock className="size-5" />
+          <Lock className="size-6" />
         ) : (
-          <item.icon className="size-5" />
+          <item.icon className="size-6" />
         )}
         {item.label}
       </button>
@@ -104,7 +104,7 @@ export function Hotbar({
     <nav
       aria-label="프로젝트 메뉴 단축 바"
       data-tour="hotbar"
-      className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-2xl border bg-card/95 p-1.5 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-3xl border bg-card/95 p-2 shadow-lg backdrop-blur"
     >
       {hotbarSlots.slice(0, 3).map(slot)}
       <button
@@ -113,16 +113,16 @@ export function Hotbar({
         data-tour="bibi"
         aria-pressed={pane === 'chat'}
         onClick={() => openPane(pane === 'chat' ? null : 'chat')}
-        className="relative mx-1.5 grid w-21 justify-items-center gap-0.5 text-[10.5px] font-bold"
+        className="relative mx-2 grid w-26 justify-items-center gap-1 text-xs font-bold"
       >
         {bubble && !pane && (
-          <span className="absolute bottom-full left-1/2 mb-10 w-64 -translate-x-1/2 rounded-xl border bg-card px-3 py-2 text-left text-xs leading-5 font-normal shadow-lg">
+          <span className="absolute bottom-full left-1/2 mb-14 w-64 -translate-x-1/2 rounded-xl border bg-card px-3 py-2 text-left text-xs leading-5 font-normal shadow-lg">
             <strong className="block">비비</strong>
             {bubble}
           </span>
         )}
-        <span className="-mt-8 grid size-17 place-items-center rounded-full bg-primary shadow-[0_0_0_3px_var(--foreground)]">
-          <Sparkles className="size-8 text-primary-foreground" />
+        <span className="-mt-11 grid size-23 place-items-center rounded-full bg-white shadow-[0_0_0_3px_var(--primary),0_10px_18px_-6px_rgb(0_0_0/0.3)]">
+          <BibiFace className="size-21" />
         </span>
         비비
       </button>

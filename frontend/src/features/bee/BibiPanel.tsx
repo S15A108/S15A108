@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Sparkles } from 'lucide-react'
+import { BibiFace } from '@/components/BibiFace'
 import { beeApi } from '@/api/services'
 import type { Generation } from '@/api/contracts/common'
 import { getApiErrorMessage } from '@/api/error'
@@ -29,9 +29,7 @@ export function BibiPanel({ projectId }: { projectId: string }) {
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <div className="grid min-w-0 content-start gap-4">
         <div className="flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-full bg-primary">
-            <Sparkles className="size-5 text-primary-foreground" />
-          </span>
+          <BibiFace className="size-12 shrink-0" />
           <div>
             <h3 className="font-bold">
               비비{' '}

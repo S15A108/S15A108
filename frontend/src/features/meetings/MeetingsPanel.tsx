@@ -4,6 +4,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, Sparkles } from 'lucide-react'
+import { BibiFace } from '@/components/BibiFace'
 import { meetingsApi, membersApi } from '@/api/services'
 import type { MeetingEntry, Member } from '@/api/contracts/common'
 import { ActionForm } from '@/components/ActionForm'
@@ -496,9 +497,7 @@ function Bubble({
   if (entry.kind !== 'TEXT')
     return (
       <div className="flex items-start gap-2.5">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary">
-          <Sparkles className="size-3.5 text-primary-foreground" />
-        </span>
+        <BibiFace className="size-8 shrink-0" />
         <div className="max-w-[80%] min-w-0">
           <p className="text-xs text-muted-foreground">
             <strong className="text-foreground">비비</strong> · {time}
