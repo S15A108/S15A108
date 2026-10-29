@@ -8,3 +8,11 @@ export const FEATURE_LABELS: Record<string, string> = {
   TASK_ASSIGNMENT: '작업 배정 추천',
   MEETING_ANALYSIS: '회의 분석',
 }
+
+export const dashboardTabs = [
+  ['overview', '한눈에 보기'],
+  ['timeline', '활동 타임라인'],
+  ['agents', '에이전트 현황'],
+  ['usage', '사용량·비용'],
+] as const
+export type DashboardTab = (typeof dashboardTabs)[number][0]

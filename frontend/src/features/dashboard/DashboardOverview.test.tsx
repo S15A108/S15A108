@@ -60,6 +60,7 @@ function mount(calls: number) {
         work={query(noWork)}
         members={[]}
         actorName={() => '시스템'}
+        onTab={() => undefined}
       />
     </QueryClientProvider>,
   )

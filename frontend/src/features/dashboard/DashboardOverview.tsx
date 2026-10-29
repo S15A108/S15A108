@@ -7,6 +7,7 @@ import { statusLabel } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { FEATURE_LABELS } from './labels'
+import type { DashboardTab } from './labels'
 import type {
   ActivitiesResponse,
   AgentWorkResponse,
@@ -21,6 +22,7 @@ export function DashboardOverview({
   work,
   members,
   actorName,
+  onTab,
 }: {
   projectId: string
   usage: UseQueryResult<UsageResponse>
@@ -28,6 +30,7 @@ export function DashboardOverview({
   work: UseQueryResult<AgentWorkResponse>
   members: Member[]
   actorName: (accountId?: string) => string
+  onTab: (tab: DashboardTab) => void
 }) {
   const openPane = useWorkspaceStore((state) => state.openPane)
   // API 없음: 대시보드 숫자를 한 번에 주는 요약 응답(백엔드 메모 8). 지금은 작업·변경 제안 집계를 따로 부른다.
@@ -72,12 +75,12 @@ export function DashboardOverview({
     {
       label: '선택 기간 AI 호출',
       value: `${calls.toLocaleString('ko-KR')}회 · ${cost}`,
-      href: '#dashboard-usage',
+      onClick: () => onTab('usage'),
     },
     {
       label: '에이전트 연결',
       value: `${connected} / ${members.length}`,
-      href: '#dashboard-agents',
+      onClick: () => onTab('agents'),
     },
   ]
   return (
@@ -105,11 +108,7 @@ export function DashboardOverview({
             'rounded-xl border bg-muted/30 p-4 text-left hover:bg-muted/60',
             empty && 'opacity-60',
           )
-          return metric.href ? (
-            <a key={metric.label} href={metric.href} className={className}>
-              {body}
-            </a>
-          ) : (
+          return (
             <button
               key={metric.label}
               type="button"
@@ -187,9 +186,13 @@ export function DashboardOverview({
                   최근 활동이 없어요.
                 </p>
               )}
-              <a href="#dashboard-timeline" className="text-xs underline">
+              <button
+                type="button"
+                className="justify-self-start text-xs underline"
+                onClick={() => onTab('timeline')}
+              >
                 활동 타임라인에서 더 보기
-              </a>
+              </button>
             </div>
             <div className="grid gap-1.5 rounded-xl border p-4">
               <h4 className="text-sm font-semibold">에이전트</h4>
@@ -208,9 +211,13 @@ export function DashboardOverview({
                   연결된 에이전트가 없어요.
                 </p>
               )}
-              <a href="#dashboard-agents" className="text-xs underline">
+              <button
+                type="button"
+                className="justify-self-start text-xs underline"
+                onClick={() => onTab('agents')}
+              >
                 에이전트 현황에서 더 보기
-              </a>
+              </button>
             </div>
           </div>
         </div>
