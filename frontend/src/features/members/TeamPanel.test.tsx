@@ -62,3 +62,43 @@ it('validates an invitation form and displays the created invitation link', asyn
   expect(link.value).toContain('mock-invite-')
   expect(await screen.findByText('colleague@beez.local')).toBeInTheDocument()
 })
+
+function renderTeam() {
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TeamPanel projectId="101" isLeader />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+it('여러 이메일을 한 줄에 하나씩 넣으면 사람마다 초대를 만든다', async () => {
+  const user = userEvent.setup()
+  renderTeam()
+  await screen.findByText('김동료')
+  await user.click(screen.getByRole('button', { name: '팀원 초대' }))
+  const dialog = screen.getByRole('dialog')
+  await user.type(
+    within(dialog).getByLabelText(/팀원 이메일/),
+    'one@beez.local{enter}two@beez.local',
+  )
+  await user.click(
+    within(dialog).getByRole('button', { name: '초대 링크 만들기' }),
+  )
+  expect(await screen.findAllByLabelText('팀원 초대 링크')).toHaveLength(2)
+  expect(screen.getByText('one@beez.local')).toBeInTheDocument()
+  expect(screen.getByText('two@beez.local')).toBeInTheDocument()
+})
+
+it('추방할 때 그 팀원이 맡은 작업을 넘길 작업으로 보여 준다', async () => {
+  const user = userEvent.setup()
+  renderTeam()
+  await screen.findByText('김동료')
+  await user.click(screen.getByRole('button', { name: '김동료 더보기' }))
+  await user.click(await screen.findByRole('menuitem', { name: '추방' }))
+  const list = await screen.findByRole('region', { name: '넘길 작업' })
+  expect(
+    await within(list).findByText(/TASK-002 · 초대 화면 정보 바꾸기/),
+  ).toBeInTheDocument()
+})

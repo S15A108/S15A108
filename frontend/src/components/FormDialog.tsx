@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { ActionForm } from '@/components/ActionForm'
 import type { FormField } from '@/components/ActionForm'
 import {
@@ -17,6 +18,7 @@ export function FormDialog({
   onClose,
   submitLabel = '저장',
   destructive,
+  children,
 }: {
   title: string
   description?: string
@@ -25,6 +27,8 @@ export function FormDialog({
   onClose: () => void
   submitLabel?: string
   destructive?: boolean
+  /** 설명과 입력 칸 사이에 둘 내용(예: 넘길 작업 목록) */
+  children?: ReactNode
 }) {
   const [busy, setBusy] = useState(false)
   return (
@@ -49,6 +53,7 @@ export function FormDialog({
             {description ?? '입력한 내용을 확인한 뒤 저장해 주세요.'}
           </DialogDescription>
         </DialogHeader>
+        {children}
         <ActionForm
           fields={fields}
           onSubmit={onSubmit}

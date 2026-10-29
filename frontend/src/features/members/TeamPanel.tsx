@@ -5,9 +5,10 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
+import { z } from 'zod'
 import { Copy, Ellipsis, MailPlus, Pencil, TriangleAlert } from 'lucide-react'
 import type { Member } from '@/api/contracts/common'
-import { membersApi, projectsApi } from '@/api/services'
+import { membersApi, projectsApi, tasksApi } from '@/api/services'
 import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
@@ -26,6 +27,7 @@ import { useSession } from '@/features/auth/useSession'
 import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { projectPlacements } from '@/features/projects/placements'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
+import { lines } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
 import { placementKey, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { BuildingDesign } from '@/stores/workspaceStore'
@@ -57,7 +59,7 @@ export function TeamPanel({
     placements[placementKey(accountId, projectId)]?.design ?? 'modern',
   )
   const [dialog, setDialog] = useState<DialogAction | null>(null)
-  const [fresh, setFresh] = useState<{ id: string; url: string } | null>(null)
+  const [fresh, setFresh] = useState<{ id: string; url: string }[]>([])
   const [copyMessage, setCopyMessage] = useState('')
   const [viewTime] = useState(() => Date.now())
   const project = useQuery({
@@ -81,6 +83,21 @@ export function TeamPanel({
     enabled: isLeader && view === 'team',
   })
   const people = members.data?.pages.flatMap((page) => page.items) ?? []
+  const removing =
+    typeof dialog === 'object' && dialog?.action === 'remove'
+      ? dialog.member
+      : undefined
+  const tasks = useQuery({
+    queryKey: ['projects', projectId, 'team-tasks'],
+    queryFn: () => tasksApi.list(projectId, { limit: 100 }),
+    enabled: !!removing,
+  })
+  const handover =
+    tasks.data?.items.filter(
+      (task) =>
+        task.assignee_member_id === removing?.id &&
+        !['COMPLETED', 'CANCELLED'].includes(task.status),
+    ) ?? []
   const otherMembers = people.filter(
     (member) => member.account_id !== session.data?.id,
   )
@@ -278,7 +295,7 @@ export function TeamPanel({
                               {invitation.invited_email ?? '초대 링크'}
                             </b>
                             <small className="mt-1 block text-muted-foreground">
-                              {fresh?.id === invitation.id
+                              {fresh.some((item) => item.id === invitation.id)
                                 ? '팀원 · 방금 초대 · '
                                 : ''}
                               {invitation.accepted_at
@@ -291,12 +308,16 @@ export function TeamPanel({
                             </small>
                           </span>
                           {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
-                          {fresh?.id === invitation.id && (
+                          {fresh.some((item) => item.id === invitation.id) && (
                             <span className="flex w-full gap-2">
                               <Input
                                 aria-label="팀원 초대 링크"
                                 readOnly
-                                value={fresh.url}
+                                value={
+                                  fresh.find(
+                                    (item) => item.id === invitation.id,
+                                  )!.url
+                                }
                                 className="min-w-48 flex-1"
                                 onFocus={(event) =>
                                   event.currentTarget.select()
@@ -307,7 +328,11 @@ export function TeamPanel({
                                 variant="outline"
                                 onClick={() =>
                                   void navigator.clipboard
-                                    .writeText(fresh.url)
+                                    .writeText(
+                                      fresh.find(
+                                        (item) => item.id === invitation.id,
+                                      )!.url,
+                                    )
                                     .then(() =>
                                       setCopyMessage('초대 링크를 복사했어요.'),
                                     )
@@ -516,20 +541,40 @@ export function TeamPanel({
           fields={[
             {
               name: 'email',
-              label: '팀원 이메일',
-              type: 'email',
+              label: '팀원 이메일 · 여러 명이면 한 줄에 하나씩',
+              type: 'textarea',
               required: true,
+              check: (value) =>
+                lines(value).every(
+                  (email) => z.email().safeParse(email).success,
+                )
+                  ? undefined
+                  : '이메일 형식을 확인해 주세요.',
             },
           ]}
           submitLabel="초대 링크 만들기"
           onClose={() => setDialog(null)}
           onSubmit={async (values) => {
-            await action.run(async () => {
-              const result = await membersApi.createInvitation(projectId, {
-                email: values.email,
-              })
-              setFresh({ id: result.invitation.id, url: result.invite_url })
-            }, '초대 링크를 만들었어요.')
+            const emails = lines(values.email)
+            // API 없음: 초대 메일 발송. 여러 명은 초대를 한 명씩 만든다.
+            await action.run(
+              async () => {
+                const created = []
+                for (const email of emails) {
+                  const result = await membersApi.createInvitation(projectId, {
+                    email,
+                  })
+                  created.push({
+                    id: result.invitation.id,
+                    url: result.invite_url,
+                  })
+                }
+                setFresh(created)
+              },
+              emails.length > 1
+                ? `초대 링크 ${emails.length}개를 만들었어요.`
+                : '초대 링크를 만들었어요.',
+            )
             setDialog(null)
           }}
         />
@@ -619,7 +664,23 @@ export function TeamPanel({
             )
             setDialog(null)
           }}
-        />
+        >
+          {/* 넘길 작업을 목록으로 보여 주고 넘겨받을 동료를 고른다(L9). */}
+          <section aria-label="넘길 작업" className="grid gap-1.5 text-sm">
+            <p className="font-semibold">넘길 작업</p>
+            {handover.length ? (
+              <ul className="grid gap-1">
+                {handover.map((task) => (
+                  <li key={task.id} className="rounded-lg border px-3 py-2">
+                    {task.key} · {task.current_plan_revision.plan.title}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">넘길 작업이 없어요.</p>
+            )}
+          </section>
+        </FormDialog>
       )}
     </section>
   )
