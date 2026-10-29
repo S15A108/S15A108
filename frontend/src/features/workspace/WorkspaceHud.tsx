@@ -91,7 +91,8 @@ export function WorkspaceHud({
   const leaderSteps: Step[] = [
     {
       title: '문서 초안 4종 올리기',
-      detail: '4종이 모두 올라가면 프로젝트가 시작돼요. 초안이어도 괜찮아요.',
+      detail:
+        '초안이어도 괜찮아요. 4종을 올려야 승인과 기준 v1을 만들 수 있어요.',
       done: allUploaded,
       children: !allUploaded && (
         <ul className="mt-2 grid gap-1">
@@ -117,8 +118,8 @@ export function WorkspaceHud({
             </li>
           ))}
           <li className="text-right text-[11px] text-muted-foreground">
-            {uploaded} / 4 올림 · 변경 제안 · 작업 현황 · 설계 관계는 4종을
-            올리면 열려요
+            {uploaded} / 4 올림 · 변경 제안 · 작업 현황 · 설계 관계는 기준 v1이
+            생기면 열려요
           </li>
         </ul>
       ),
@@ -135,7 +136,10 @@ export function WorkspaceHud({
     },
     {
       title: '승인해서 기준 v1 만들기',
-      detail: '팀장이 4종을 승인하면 기준 v1이 되고 팀 작업이 시작돼요.',
+      detail:
+        '4종을 하나씩 승인하고 색인이 끝나면 기준 만들기로 기준 v1을 만들어요. 이때 프로젝트가 시작돼요.',
+      // 프로젝트 시작 = 최초 기준 설계 생성(PLN-A10). 시작 여부는 onboarding.baseline_published로 본다(dev 89b2c60).
+      // API 없음: 문서별 색인 완료(index_ready)가 dev 명세에 없어 이 단계를 열 시점은 업로드 기준으로 둔다(PR #42 요청 중).
       done: onboarding.baseline_published,
       // 문서함 승인 흐름(PNL-02-m)이 들어오기 전까지는 기존 기획 분석 창에서 발행한다.
       locked: !allUploaded,
@@ -258,9 +262,11 @@ export function WorkspaceHud({
               {isLeader ? '인간 팀장' : '팀원'} ·{' '}
               {project.current_baseline
                 ? `기준 v${project.current_baseline.version_no}`
-                : allUploaded
-                  ? '시작됨 · 비비 검토 중'
-                  : '준비 중'}
+                : onboarding.baseline_published
+                  ? '시작됨'
+                  : allUploaded
+                    ? '준비 중 · 승인 기다림'
+                    : '준비 중'}
             </p>
           </div>
         </div>
@@ -339,7 +345,10 @@ export function WorkspaceHud({
         </div>
       </section>
       <Hotbar
-        locked={allUploaded ? [] : ['changes', 'tasks', 'relations']}
+        locked={
+          onboarding.baseline_published ? [] : ['changes', 'tasks', 'relations']
+        }
+        lockedReason="기준 v1이 생기면 열려요"
         badges={{ changes: reviewCount }}
         highlight={isLeader && !allUploaded ? 'documents' : undefined}
       />

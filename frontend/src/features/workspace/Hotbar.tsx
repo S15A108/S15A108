@@ -26,9 +26,12 @@ export function Hotbar({
   locked,
   badges,
   highlight,
+  lockedReason = '문서 4종을 올리면 열려요',
 }: {
-  /** 문서 4종을 올리기 전에 잠그는 칸 */
+  /** 프로젝트가 시작되기 전에 잠그는 칸 */
   locked: WorkspacePane[]
+  /** 잠긴 칸을 눌렀을 때 알려 줄 이유 */
+  lockedReason?: string
   badges: Partial<Record<WorkspacePane, number>>
   /** '여기부터 시작' 표시를 붙일 칸 */
   highlight?: WorkspacePane
@@ -63,7 +66,7 @@ export function Hotbar({
         type="button"
         aria-label={item.label}
         aria-disabled={isLocked || undefined}
-        title={isLocked ? '문서 4종을 올리면 열려요' : undefined}
+        title={isLocked ? lockedReason : undefined}
         onClick={() => !isLocked && openPane(item.pane)}
         className={cn(
           'relative grid size-15 content-center justify-items-center gap-1 rounded-xl border bg-muted/40 text-[10.5px] font-medium whitespace-nowrap transition hover:bg-muted',

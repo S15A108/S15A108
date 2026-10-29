@@ -115,6 +115,8 @@ export function PlanningPanel({ projectId, isLeader }: Props) {
   const analysesReady =
     versions.length > 0 &&
     analyses.every((query) => query.data?.status === 'COMPLETED')
+  // 최초 기준 설계 생성(PLN-A10)이 프로젝트 시작이다. 서버 거절 코드(analysis_not_completed·document_not_approved·baseline_exists)는 승인 창이 알려 준다.
+  // API 없음: 문서별 색인 완료(index_ready)가 dev 명세에 없어 분석 완료(analysesReady)로 대신 판단한다(PR #42 요청 중).
   const canPublish =
     isLeader &&
     !baseline.data &&

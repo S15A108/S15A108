@@ -38,6 +38,13 @@ const messages: Record<string, string> = {
   leader_transfer_required: '인간 팀장을 먼저 위임해 주세요.',
   active_tasks_exist: '진행 중인 작업의 담당자를 먼저 정리해 주세요.',
   project_membership_remaining: '참여 중인 프로젝트를 먼저 정리해 주세요.',
+  analysis_not_completed:
+    '문서 4종의 색인이 아직 끝나지 않았어요. 색인이 끝난 뒤 다시 기준을 만들어 주세요.',
+  document_not_approved:
+    '아직 승인하지 않은 문서가 있어요. 4종을 모두 승인한 뒤 기준을 만들어 주세요.',
+  baseline_exists:
+    '이미 기준 v1이 있어요. 새로고침해서 지금 기준을 확인해 주세요.',
+  required_documents_missing: '필수 문서 4종을 먼저 올려 주세요.',
   agent_limit_reached:
     '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
 }

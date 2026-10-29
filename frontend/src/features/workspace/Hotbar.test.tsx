@@ -23,3 +23,17 @@ it('잠긴 칸을 눌러도 창이 열리지 않고 이유를 알려 준다', as
   await userEvent.click(screen.getByRole('button', { name: '비비와 대화' }))
   expect(useWorkspaceStore.getState().pane).toBe('chat')
 })
+
+it('잠긴 칸의 이유는 부르는 쪽이 정한다', () => {
+  render(
+    <Hotbar
+      locked={['tasks']}
+      badges={{}}
+      lockedReason="기준 v1이 생기면 열려요"
+    />,
+  )
+  expect(screen.getByRole('button', { name: '작업 현황' })).toHaveAttribute(
+    'title',
+    '기준 v1이 생기면 열려요',
+  )
+})
