@@ -38,6 +38,8 @@ const messages: Record<string, string> = {
   leader_transfer_required: '인간 팀장을 먼저 위임해 주세요.',
   active_tasks_exist: '진행 중인 작업의 담당자를 먼저 정리해 주세요.',
   project_membership_remaining: '참여 중인 프로젝트를 먼저 정리해 주세요.',
+  agent_limit_reached:
+    '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
 }
 export function getApiErrorMessage(error: unknown): string {
   if (error instanceof z.ZodError)

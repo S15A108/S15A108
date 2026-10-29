@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { authApi } from '@/api/services'
+import { agentsApi, authApi } from '@/api/services'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -49,4 +49,24 @@ it('토큰을 한 번만 보여 주고, 연결 확인에 보고가 없으면 연
   expect(
     screen.getByText(/토큰과 MCP 주소를 확인하고 Claude Code를 다시 시작/),
   ).toBeInTheDocument()
+})
+
+it('활성 토큰이 5개면 토큰 이름 폼에 한도와 할 일을 알려 준다', async () => {
+  for (let index = 0; index < 5; index++)
+    await agentsApi.issueToken('101', { label: `PC ${index}` })
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <AgentsPanel projectId="101" />
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText('PC 0')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '토큰 발급' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
+  )
 })

@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { agentsApi, membersApi } from '@/api/services'
 import type { IssueTokenResponse } from './schemas'
+import { allTokens } from './allTokens'
+import { getApiErrorMessage } from '@/api/error'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { useSession } from '@/features/auth/useSession'
 import { AsyncState } from '@/components/AsyncState'
@@ -59,12 +61,14 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
   const action = useProjectAction(projectId)
   const [fresh, setFresh] = useState<IssueTokenResponse | null>(null)
   const [revoking, setRevoking] = useState<string | null>(null)
+  // 발급 오류(예: 활성 토큰 5개 한도)는 토큰 이름 폼이 알려 주고, 폐기 오류는 폐기 확인 상자에 둔다.
+  const [revokeError, setRevokeError] = useState('')
   const [checked, setChecked] = useState(false)
   const query = useQuery({
     queryKey: ['projects', projectId, 'agent-settings'],
     queryFn: async () => {
       const [tokens, guide, agents, members] = await Promise.all([
-        agentsApi.myTokens({ project_id: projectId }),
+        allTokens(projectId),
         agentsApi.connectionGuide(projectId),
         agentsApi.list(projectId),
         membersApi.list(projectId),
@@ -89,7 +93,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
           const mine = data.agents.items.find(
             (agent) => agent.member_id === me?.id,
           )
-          const tokens = data.tokens.items.filter((token) => !token.revoked_at)
+          const tokens = data.tokens.filter((token) => !token.revoked_at)
           const state = mine?.connected
             ? mine.status_check_required
               ? 'recheck'
@@ -219,6 +223,11 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                                 폐기하면 이 토큰의 연결이 바로 끊기고 되돌릴 수
                                 없어요. 지금까지의 기록은 남아요.
                               </p>
+                              {revokeError && (
+                                <p role="alert" className="text-destructive">
+                                  {revokeError}
+                                </p>
+                              )}
                               <span className="flex gap-2">
                                 <Button
                                   size="sm"
@@ -235,7 +244,11 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                                         if (fresh?.token_info.id === token.id)
                                           setFresh(null)
                                       })
-                                      .catch(() => undefined)
+                                      .catch((error) =>
+                                        setRevokeError(
+                                          getApiErrorMessage(error),
+                                        ),
+                                      )
                                   }
                                 >
                                   폐기하기
@@ -254,7 +267,10 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                               size="sm"
                               variant="outline"
                               disabled={action.busy}
-                              onClick={() => setRevoking(token.id)}
+                              onClick={() => {
+                                setRevokeError('')
+                                setRevoking(token.id)
+                              }}
                             >
                               폐기
                             </Button>
@@ -294,11 +310,6 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                 {apiMode === 'mock' &&
                   ' 예시 화면은 실제 Claude Code 연결을 하지 않아요.'}
               </p>
-              {action.error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {action.error}
-                </p>
-              )}
               {action.message && <p className="text-sm">{action.message}</p>}
             </>
           )

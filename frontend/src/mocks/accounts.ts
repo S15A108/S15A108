@@ -403,24 +403,28 @@ export async function accountRoutes(
     case 'AGT-A01': {
       const project = requireProject(context)
       const account = requireAccount(context)
+      // 서버(PR #38)와 같게: 계정·프로젝트마다 폐기 안 된 토큰은 5개까지, label은 앞뒤 공백을 빼고 비면 뺀다.
+      const label = typeof body.label === 'string' ? body.label.trim() : ''
+      if (label.length > 100)
+        fail(400, 'validation_failed', '토큰 이름은 100자까지예요.')
       if (
-        database.tokens.some(
+        database.tokens.filter(
           (token) =>
             token.account_id === account.id &&
             token.project_id === project.project.id &&
             !token.revoked_at,
-        )
+        ).length >= 5
       )
         fail(
           409,
-          'active_token_exists',
-          '기존 예시 토큰을 폐기한 뒤 발급해 주세요.',
+          'agent_limit_reached',
+          '활성 토큰은 프로젝트당 5개까지입니다. 쓰지 않는 토큰을 폐기한 뒤 다시 발급하세요',
         )
       const token = {
         id: nextId(database),
         project_id: project.project.id,
         account_id: account.id,
-        label: typeof body.label === 'string' ? body.label : '예시 토큰',
+        ...(label ? { label } : {}),
         created_at: now(),
       }
       database.tokens.push(token)
@@ -439,8 +443,14 @@ export async function accountRoutes(
     case 'AGT-A02':
       return {
         data: page(
+          // 폐기한 토큰도 revoked_at과 함께 준다. page()가 id 내림차순으로 자른다.
           database.tokens
-            .filter((token) => token.account_id === requireAccount(context).id)
+            .filter(
+              (token) =>
+                token.account_id === requireAccount(context).id &&
+                (!query.get('project_id') ||
+                  token.project_id === query.get('project_id')),
+            )
             .map((token) => omit(token, 'account_id')),
           query,
         ),
