@@ -51,13 +51,13 @@ export function WorkspaceHud({
   members,
   me,
   onboarding,
-  myTaskCount,
+  myTasks,
 }: {
   project: Project
   members: Member[]
   me?: Member
   onboarding: OnboardingResponse
-  myTaskCount: number
+  myTasks: { status: string; validation_status: string }[]
 }) {
   const navigate = useNavigate()
   const openPane = useWorkspaceStore((state) => state.openPane)
@@ -179,7 +179,7 @@ export function WorkspaceHud({
       detail: onboarding.baseline_published
         ? '작업 현황에서 첫 계획을 올려요.'
         : '기준 v1이 생긴 뒤에 할 수 있어요.',
-      done: myTaskCount > 0,
+      done: myTasks.length > 0,
       locked: !onboarding.baseline_published,
       action: { label: '작업 현황', pane: 'tasks' },
     },
@@ -202,9 +202,10 @@ export function WorkspaceHud({
   const inProgress =
     counts.data?.tasks.by_status.find((item) => item.status === 'IN_PROGRESS')
       ?.count ?? 0
-  const ready =
-    counts.data?.tasks.by_status.find((item) => item.status === 'READY')
-      ?.count ?? 0
+  // 내 작업 중 계획 검증을 통과해 바로 시작할 수 있는 것만 센다.
+  const ready = myTasks.filter(
+    (task) => task.status === 'READY' && task.validation_status === 'PASS',
+  ).length
   const unreadCount = unread.data?.items.length ?? 0
   const todos = [
     reviewCount > 0 && {

@@ -42,7 +42,12 @@ const rectOf = (target: string) =>
   document.querySelector(`[data-tour="${target}"]`)?.getBoundingClientRect()
 
 // 설명 상자는 영역 바깥쪽(아래, 자리가 없으면 위)에 두어 영역을 가리지 않는다.
-function besideStyle(rect: DOMRect | undefined, width: number): CSSProperties {
+// shift는 화면 안내에서 겹치는 상자(단축 바 안의 비비, 화면 전체인 사무실)를 위아래로 비킨다.
+function besideStyle(
+  rect: DOMRect | undefined,
+  width: number,
+  shift = 0,
+): CSSProperties {
   if (!rect)
     return { top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }
   const left = Math.min(
@@ -50,11 +55,17 @@ function besideStyle(rect: DOMRect | undefined, width: number): CSSProperties {
     window.innerWidth - width - 16,
   )
   if (rect.height > window.innerHeight * 0.7)
-    return { top: '50%', left, transform: 'translateY(-50%)', width }
+    return {
+      top: `calc(50% + ${shift}px)`,
+      left,
+      transform: 'translateY(-50%)',
+      width,
+    }
   return rect.bottom + 200 < window.innerHeight
-    ? { top: rect.bottom + 12, left, width }
-    : { bottom: window.innerHeight - rect.top + 12, left, width }
+    ? { top: rect.bottom + 12 + shift, left, width }
+    : { bottom: window.innerHeight - rect.top + 12 + shift, left, width }
 }
+const mapShift: Record<string, number> = { office: 110, bibi: 64 }
 
 // 공용 가이드: 환영 → 둘러보기 1~6 → ? 키 화면 안내. 팀장·팀원 모두 같다.
 // API 없음: 봤는지를 계정 기준으로 서버에 저장하는 필드가 없어 이 브라우저에만 남긴다(백엔드 메모 1).
@@ -156,7 +167,7 @@ export function TourGuide({
               />
               <p
                 className="absolute rounded-xl bg-card px-3 py-2 text-xs shadow-lg"
-                style={besideStyle(rect, 220)}
+                style={besideStyle(rect, 220, mapShift[step.target])}
               >
                 <strong className="mr-1 inline-grid size-5 place-items-center rounded-full bg-primary text-primary-foreground">
                   {index + 1}
@@ -214,7 +225,8 @@ export function TourGuide({
         aria-modal="true"
         aria-labelledby="tour-step-title"
         className="absolute grid gap-3 rounded-2xl bg-card p-4 shadow-2xl"
-        style={besideStyle(rect, 320)}
+        // 비비 버튼이 단축 바 위로 솟아 있어 단축 바 단계는 상자를 더 띄운다.
+        style={besideStyle(rect, 320, step.target === 'hotbar' ? 36 : 0)}
       >
         <p className="text-xs font-semibold text-muted-foreground">
           둘러보기 {mode + 1}/{steps.length}

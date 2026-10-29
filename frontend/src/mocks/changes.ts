@@ -322,17 +322,18 @@ export function changeRoutes(
       )
       return {
         data: {
-          explicit: project.tasks
-            .filter((task) =>
-              task.current_plan_revision.plan.design_refs.some((reference) =>
-                itemIds.has(reference.design_item_id),
-              ),
-            )
-            .map((task) => ({
-              task_id: task.id,
-              member_id: task.assignee_member_id,
-              ...(task.validation ? { validation_id: task.validation.id } : {}),
-            })),
+          explicit: project.tasks.flatMap((task) =>
+            task.current_plan_revision.plan.design_refs
+              .filter((reference) => itemIds.has(reference.design_item_id))
+              .map((reference) => ({
+                task_id: task.id,
+                member_id: task.assignee_member_id,
+                design_item_id: reference.design_item_id,
+                ...(task.validation
+                  ? { validation_id: task.validation.id }
+                  : {}),
+              })),
+          ),
           candidates: [],
           analysis_status: 'COMPLETED',
           generation: templateGeneration(

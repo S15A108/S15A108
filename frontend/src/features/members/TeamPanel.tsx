@@ -71,7 +71,8 @@ export function TeamPanel({
     queryFn: () => projectsApi.get(projectId),
   })
   const members = useInfiniteQuery({
-    queryKey: ['projects', projectId, 'members'],
+    // 다른 창은 같은 팀원 목록을 useQuery로 ['projects', id, 'members']에 담는다. 모양이 달라 키를 나눈다.
+    queryKey: ['projects', projectId, 'team-members'],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
       membersApi.list(projectId, { limit: 100, cursor: pageParam }),
