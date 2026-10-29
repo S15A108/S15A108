@@ -15,8 +15,11 @@ import {
   Play,
   Plus,
   Search,
+  Upload,
+  X,
 } from 'lucide-react'
 import { documentsApi } from '@/api/services/documents'
+import { getApiErrorCode, getApiErrorMessage } from '@/api/error'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
 import { FormDialog } from '@/components/FormDialog'
@@ -94,7 +97,7 @@ function Chip({ tone, children }: { tone: string; children: ReactNode }) {
 type View =
   | { name: 'list' }
   | { name: 'detail'; id: string }
-  | { name: 'upload'; kind?: Kind }
+  | { name: 'upload'; kind: Kind }
   | { name: 'review'; id: string }
 
 export function DocumentsPanel({
@@ -108,12 +111,13 @@ export function DocumentsPanel({
   // 알림·근거·가이드에서 들어오면 그 문서(또는 'upload:종류' 등록 화면)를 바로 연다.
   const [view, setView] = useState<View>(() => {
     const focus = useWorkspaceStore.getState().focusId
-    if (focus?.startsWith('upload:'))
+    // 시작 가이드의 '올리기'는 'upload:종류'로 들어온다. 종류는 그 칸으로 고정한다.
+    if (focus?.startsWith('upload:') && KINDS.includes(focus.slice(7) as Kind))
       return { name: 'upload', kind: focus.slice(7) as Kind }
     return focus ? { name: 'detail', id: focus } : { name: 'list' }
   })
   const [query, setQuery] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<{ title: string; text: string }>()
   const documents = useQuery({
     queryKey: ['projects', projectId, 'planning-documents'],
     queryFn: () => documentsApi.list(projectId, { limit: 100 }),
@@ -150,6 +154,13 @@ export function DocumentsPanel({
     .filter((document) => document.approved_version)
     .toSorted((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind))
 
+  const toast = notice && (
+    <Toast key={notice.title + notice.text}>
+      <strong className="block">{notice.title}</strong>
+      {notice.text}
+    </Toast>
+  )
+
   const back = (
     <Button
       variant="ghost"
@@ -168,10 +179,14 @@ export function DocumentsPanel({
         projectId={projectId}
         kind={view.kind}
         onCancel={() => setView({ name: 'list' })}
-        onDone={(id) => {
+        onDone={(id, title) => {
           openPane('documents', id)
           // 등록하면 바로 ① 비비 검토 단계로 잇는다.
           setView({ name: 'review', id })
+          setNotice({
+            title: '문서를 등록했어요',
+            text: `${title} · 비비가 검토하고 있어요. 창을 닫아도 검토는 이어져요.`,
+          })
         }}
       />
     )
@@ -179,6 +194,7 @@ export function DocumentsPanel({
     const document = docs.find((item) => item.id === view.id)
     return (
       <div className="grid gap-4">
+        {toast}
         {back}
         <DocumentReview
           key={view.id}
@@ -216,15 +232,11 @@ export function DocumentsPanel({
           </Chip>
           프로젝트에서 함께 보는 설계 문서
         </p>
-        {started ? (
+        {/* 시작 전에는 '문서 등록' 버튼 없이 필수 문서 빈 칸을 눌러 등록한다(10-29 사용자 코멘트). */}
+        {started && (
           <Button onClick={() => openPane('changes', 'new')}>
             <Plus />
             변경 제안 쓰기
-          </Button>
-        ) : (
-          <Button onClick={() => setView({ name: 'upload' })}>
-            <Plus />
-            문서 등록
           </Button>
         )}
       </div>
@@ -313,10 +325,10 @@ export function DocumentsPanel({
                     <li
                       key={kind}
                       className={cn(
-                        'grid gap-3 rounded-xl p-3.5',
+                        'relative grid gap-3 rounded-xl p-3.5',
                         document
                           ? 'border'
-                          : 'border-[1.5px] border-dashed bg-muted/30',
+                          : 'border-[1.5px] border-dashed bg-muted/30 hover:bg-muted/60',
                       )}
                     >
                       <div className="flex min-w-0 items-center gap-2.5">
@@ -352,7 +364,7 @@ export function DocumentsPanel({
                           <button
                             type="button"
                             aria-label={`${statusLabel(kind)} 올리기`}
-                            className="text-sm font-semibold text-amber-800 hover:underline"
+                            className="text-sm font-semibold text-amber-800 after:absolute after:inset-0 after:content-[''] hover:underline"
                             onClick={() => setView({ name: 'upload', kind })}
                           >
                             올리기 ›
@@ -389,7 +401,12 @@ export function DocumentsPanel({
                       onClick={() =>
                         void start
                           .start()
-                          .then(() => setNotice('프로젝트를 시작했어요'))
+                          .then(() =>
+                            setNotice({
+                              title: '프로젝트를 시작했어요',
+                              text: '기준 v1이 발행됐어요. 이제 문서 수정은 변경 제안으로 해요.',
+                            }),
+                          )
                           .catch(() => undefined)
                       }
                     >
@@ -481,12 +498,7 @@ export function DocumentsPanel({
           </section>
         </>
       )}
-      {notice && (
-        <Toast key={notice}>
-          <strong className="block">{notice}</strong>
-          기준 v1이 발행됐어요. 이제 문서 수정은 변경 제안으로 해요.
-        </Toast>
-      )}
+      {toast}
     </div>
   )
 }
@@ -625,20 +637,42 @@ function SearchResults({
   )
 }
 
+const MAX_FILE_BYTES = 1024 * 1024
 const uploadSchema = z.object({
   file: z
     .instanceof(File, { error: '등록할 파일을 선택해 주세요.' })
     .refine((file) => /\.md$/i.test(file.name), {
       error: '지원하지 않는 형식이에요. Markdown(.md) 파일만 올릴 수 있어요.',
+    })
+    .refine((file) => file.size <= MAX_FILE_BYTES, {
+      error: '파일이 너무 커요. 1 MiB 이하 Markdown 파일만 올릴 수 있어요.',
     }),
-  kind: z.enum(KINDS),
   title: z.string().trim().min(1, '문서 제목을 입력해 주세요.'),
   domain: z.string(),
 })
 type UploadValues = z.infer<typeof uploadSchema>
 const reviewSteps = ['파일 등록', '비비 검토', '수정 제안 반영', '팀장 승인']
+// 서버가 거절한 이유를 등록 화면 문구로(DOC-A01 오류). 파일 문제는 파일 줄 아래, 나머지는 아래 줄에 보인다.
+const uploadFailure: Record<string, { file?: true; text: string }> = {
+  unsupported_media_type: {
+    file: true,
+    text: '지원하지 않는 형식이에요. Markdown(.md) 파일만 올릴 수 있어요.',
+  },
+  file_too_large: {
+    file: true,
+    text: '파일이 너무 커요. 1 MiB 이하 Markdown 파일만 올릴 수 있어요.',
+  },
+  document_kind_exists: {
+    text: '이 종류의 문서는 이미 있어요. 공용 문서함에서 그 칸을 눌러 열어 주세요.',
+  },
+  change_proposal_required: {
+    text: '기준 v1이 생긴 뒤에는 문서를 새로 올리지 않아요. 변경 제안으로 요청해 주세요.',
+  },
+}
 
-// 문서 등록 (F-19) · 같은 창이 등록 화면으로 바뀐다. 등록하면 바로 ① 비비 검토로 잇는다.
+// 문서 등록 (F-19, PNL-02 모달안) · 같은 창이 등록 화면으로 바뀐다.
+// 공용 문서함 시작 칸이나 시작 가이드의 '올리기'로만 열고, 누른 칸의 종류로 유형을 고정한다(10-29 사용자 코멘트).
+// 등록하면 바로 ① 비비 검토로 잇는다.
 function UploadDocument({
   projectId,
   kind,
@@ -646,33 +680,50 @@ function UploadDocument({
   onDone,
 }: {
   projectId: string
-  kind?: Kind
+  kind: Kind
   onCancel: () => void
-  onDone: (id: string) => void
+  onDone: (id: string, title: string) => void
 }) {
+  const openPane = useWorkspaceStore((state) => state.openPane)
   const action = useProjectAction(projectId)
+  const [failure, setFailure] = useState<string>()
+  const [proposalRequired, setProposalRequired] = useState(false)
+  const label = statusLabel(kind)
   const {
     register,
     handleSubmit,
     control,
+    setError,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<UploadValues>({
     resolver: zodResolver(uploadSchema),
-    defaultValues: { kind: kind ?? 'PLAN', title: '', domain: '' },
+    defaultValues: { title: label, domain: '' },
   })
   const submit = handleSubmit(async (values) => {
+    setFailure(undefined)
+    setProposalRequired(false)
     try {
       let documentId: string | undefined
       await action.run(async () => {
         const result = await documentsApi.upload(projectId, {
           ...values,
+          kind,
           domain: values.domain.trim() || undefined,
         })
         documentId = result.document.id
       }, '문서를 등록했어요.')
-      if (documentId) onDone(documentId)
-    } catch {
-      // 고른 파일과 입력값을 그대로 두고 다시 시도하게 한다.
+      if (documentId) onDone(documentId, values.title.trim())
+    } catch (cause) {
+      // 고른 파일과 입력값을 그대로 두고 원인을 알린다.
+      const code = getApiErrorCode(cause)
+      const known = code ? uploadFailure[code] : undefined
+      if (known?.file) setError('file', { message: known.text })
+      else
+        setFailure(
+          `등록하지 못했어요 · ${known?.text ?? getApiErrorMessage(cause)}`,
+        )
+      setProposalRequired(code === 'change_proposal_required')
     }
   })
   return (
@@ -693,16 +744,17 @@ function UploadDocument({
           <ChevronLeft />
         </Button>
         <div>
-          <h3 className="font-semibold">문서 등록</h3>
+          <h3 className="font-semibold">{label} 등록</h3>
           <p className="text-xs text-muted-foreground">
-            공용 문서함 · 등록 → 비비 검토 → 팀장 승인
+            필수 문서 · 유형 {label} · 등록 → 비비 검토 → 팀장 승인
           </p>
         </div>
       </div>
-      <ol className="flex flex-wrap gap-2 text-xs">
+      <ol aria-label="문서 등록 단계" className="flex flex-wrap gap-2 text-xs">
         {reviewSteps.map((step, index) => (
           <li
             key={step}
+            aria-current={index === 0 ? 'step' : undefined}
             className={cn(
               'flex items-center gap-1.5 rounded-full px-2.5 py-1',
               index === 0
@@ -715,34 +767,103 @@ function UploadDocument({
         ))}
       </ol>
       <div className="grid w-full max-w-180 gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="document-file">원본 파일 *</Label>
-          <Controller
-            name="file"
-            control={control}
-            render={({ field }) => (
-              <Input
-                id="document-file"
-                type="file"
-                accept=".md"
-                name={field.name}
-                ref={field.ref}
-                onBlur={field.onBlur}
-                disabled={isSubmitting}
-                aria-invalid={!!errors.file}
-                onChange={(event) => field.onChange(event.target.files?.[0])}
-              />
-            )}
-          />
-          <p className="text-xs text-muted-foreground">
-            지원 형식: Markdown (.md) · 파일 1 MiB 이하
-          </p>
-          {errors.file && (
-            <p className="text-sm text-destructive" role="alert">
-              {errors.file.message}
-            </p>
-          )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-muted/50 px-4 py-3 text-sm">
+          <span className="text-muted-foreground">문서 유형</span>
+          <span className="flex items-center gap-2 font-semibold">
+            <KindTile kind={kind} />
+            {label}
+          </span>
+          <span className="basis-full text-xs text-muted-foreground">
+            공용 문서함에서 누른 칸의 종류라 바꿀 수 없어요
+          </span>
         </div>
+        <Controller
+          name="file"
+          control={control}
+          render={({ field }) => {
+            const pick = (file?: File) => {
+              field.onChange(file)
+              void trigger('file')
+              setFailure(undefined)
+            }
+            return (
+              <div className="grid gap-2">
+                <Label htmlFor="document-file">원본 파일 *</Label>
+                <div
+                  className={cn(
+                    'grid justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed px-4 py-6 text-center text-sm',
+                    errors.file && 'border-destructive',
+                  )}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    if (!isSubmitting) pick(event.dataTransfer.files[0])
+                  }}
+                >
+                  <Upload className="size-5 text-muted-foreground" />
+                  <p>
+                    파일을 여기로 끌어 놓거나{' '}
+                    <label
+                      htmlFor="document-file"
+                      className="cursor-pointer font-semibold underline"
+                    >
+                      파일 선택
+                    </label>
+                  </p>
+                  <input
+                    id="document-file"
+                    type="file"
+                    accept=".md"
+                    className="sr-only"
+                    name={field.name}
+                    ref={field.ref}
+                    onBlur={field.onBlur}
+                    disabled={isSubmitting}
+                    aria-invalid={!!errors.file}
+                    onChange={(event) => {
+                      pick(event.target.files?.[0])
+                      event.target.value = ''
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    지원 형식: Markdown (.md) · 1 MiB 이하
+                  </p>
+                </div>
+                {field.value && (
+                  <div
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm',
+                      errors.file && 'border-destructive',
+                    )}
+                  >
+                    <FileText className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {field.value.name}
+                    </span>
+                    {!errors.file && (
+                      <span className="text-xs text-green-700">선택됨</span>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="선택한 파일 빼기"
+                      disabled={isSubmitting}
+                      onClick={() => pick(undefined)}
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                )}
+                {errors.file && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {errors.file.message}
+                  </p>
+                )}
+              </div>
+            )
+          }}
+        />
         <div className="grid gap-2">
           <Label htmlFor="document-title">문서 제목 *</Label>
           <Input
@@ -757,25 +878,6 @@ function UploadDocument({
             </p>
           )}
         </div>
-        <fieldset className="grid gap-2">
-          <legend className="mb-2 text-sm font-medium">문서 유형 *</legend>
-          <div className="grid gap-2 sm:grid-cols-4">
-            {KINDS.map((value) => (
-              <label
-                key={value}
-                className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-primary/10 has-checked:font-semibold"
-              >
-                <input
-                  type="radio"
-                  value={value}
-                  disabled={isSubmitting}
-                  {...register('kind')}
-                />
-                {statusLabel(value)}
-              </label>
-            ))}
-          </div>
-        </fieldset>
         <div className="grid gap-2">
           <Label htmlFor="document-domain">담당 영역 (선택)</Label>
           <Input
@@ -784,12 +886,28 @@ function UploadDocument({
             {...register('domain')}
             disabled={isSubmitting}
           />
+          <p className="text-xs text-muted-foreground">
+            목록과 검색에서 담당 영역별로 모아 볼 수 있어요.
+          </p>
         </div>
       </div>
-      {action.error && (
-        <p className="text-sm text-destructive" role="alert">
-          등록하지 못했어요 · 다시 시도해 주세요.
-        </p>
+      {failure && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+        >
+          {failure}
+          {proposalRequired && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => openPane('changes', 'new')}
+            >
+              변경 제안 쓰기
+            </Button>
+          )}
+        </div>
       )}
       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
         <p className="mr-auto text-xs text-muted-foreground">
@@ -803,7 +921,7 @@ function UploadDocument({
         >
           취소
         </Button>
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" disabled={isSubmitting || !!errors.file}>
           {isSubmitting ? '등록 중…' : '등록하고 비비 검토 받기'}
         </Button>
       </div>

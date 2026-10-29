@@ -32,6 +32,7 @@ const messages: Record<string, string> = {
   ai_timeout: '분석 시간이 초과되었습니다. 다시 시도해 주세요.',
   rate_limited: '요청이 많습니다. 잠시 후 다시 시도해 주세요.',
   file_too_large: '파일 용량이 허용 범위를 초과했습니다.',
+  document_kind_exists: '같은 종류의 문서가 이미 있어요.',
   unsupported_media_type: '지원하지 않는 파일 형식입니다.',
   invitation_expired: '초대 링크가 만료되었습니다.',
   reset_token_expired: '비밀번호 재설정 링크가 만료되었습니다.',

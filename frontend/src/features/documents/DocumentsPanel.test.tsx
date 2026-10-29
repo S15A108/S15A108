@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { AxiosError } from 'axios'
 import { documentsApi } from '@/api/services/documents'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { DocumentVersion } from '@/api/contracts/common'
@@ -136,7 +137,9 @@ it('등록 중 닫기를 막고 같은 제목의 기존 문서 대신 응답 문
   )
   mount()
   // 수정안(PNL-02 모달안): 등록은 겹친 창이 아니라 같은 창 안의 등록 화면이다.
-  await user.click(await screen.findByRole('button', { name: '문서 등록' }))
+  // 시작 전에는 '문서 등록' 버튼 없이 필수 문서 빈 칸으로 등록 화면을 연다(사용자 승인으로 누르는 곳을 바꿈).
+  await user.click(await screen.findByRole('button', { name: '기획안 올리기' }))
+  await user.clear(screen.getByLabelText(/문서 제목/))
   await user.type(screen.getByLabelText(/문서 제목/), '같은 제목')
   await user.upload(
     screen.getByLabelText(/원본 파일/),
@@ -146,6 +149,10 @@ it('등록 중 닫기를 막고 같은 제목의 기존 문서 대신 응답 문
     screen.getByRole('button', { name: '등록하고 비비 검토 받기' }),
   )
   await waitFor(() => expect(documentsApi.upload).toHaveBeenCalledTimes(1))
+  expect(documentsApi.upload).toHaveBeenCalledWith(
+    '10',
+    expect.objectContaining({ kind: 'PLAN', title: '같은 제목' }),
+  )
   expect(screen.getByRole('button', { name: '취소' })).toBeDisabled()
   expect(
     screen.getByRole('button', { name: '이전 화면으로 돌아가기' }),
@@ -184,5 +191,69 @@ it('시작 전에는 필수 문서 4종 칸과 잠긴 프로젝트 시작을 보
   expect(screen.getByRole('button', { name: '프로젝트 시작' })).toBeDisabled()
   expect(screen.getAllByText('승인 v1')).toHaveLength(2)
   await user.click(screen.getByRole('button', { name: '기획안 올리기' }))
-  expect(screen.getByRole('radio', { name: '기획안' })).toBeChecked()
+  // 유형은 고르지 않고 누른 칸의 종류로 고정해 보인다(사용자 승인으로 라디오 확인을 바꿈).
+  expect(
+    screen.getByRole('heading', { name: '기획안 등록' }),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText('공용 문서함에서 누른 칸의 종류라 바꿀 수 없어요'),
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+})
+
+it('시작 전에는 문서 등록 버튼이 없고, 형식이 다르면 파일 줄에 알리고 등록 버튼을 끈다', async () => {
+  const user = userEvent.setup({ applyAccept: false })
+  mount()
+  await screen.findByText('팀장 승인 0 / 4')
+  expect(
+    screen.queryByRole('button', { name: '문서 등록' }),
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '기획안 올리기' }))
+  await user.upload(
+    screen.getByLabelText(/원본 파일/),
+    new File(['png'], 'erd_diagram.png', { type: 'image/png' }),
+  )
+  expect(
+    await screen.findByText(
+      '지원하지 않는 형식이에요. Markdown(.md) 파일만 올릴 수 있어요.',
+    ),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: '등록하고 비비 검토 받기' }),
+  ).toBeDisabled()
+  expect(documentsApi.upload).not.toHaveBeenCalled()
+})
+
+it('서버가 거절하면 원인별로 알리고 입력값을 남긴다', async () => {
+  const user = userEvent.setup()
+  const rejectWith = (status: number, code: string) =>
+    new AxiosError('rejected', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status,
+      data: { error: { code } },
+    } as never)
+  vi.mocked(documentsApi.upload)
+    .mockRejectedValueOnce(rejectWith(409, 'document_kind_exists'))
+    .mockRejectedValueOnce(rejectWith(409, 'change_proposal_required'))
+  mount()
+  await user.click(await screen.findByRole('button', { name: '기획안 올리기' }))
+  await user.upload(
+    screen.getByLabelText(/원본 파일/),
+    new File(['# 기획안'], 'plan.md', { type: 'text/markdown' }),
+  )
+  await user.click(
+    screen.getByRole('button', { name: '등록하고 비비 검토 받기' }),
+  )
+  expect(
+    await screen.findByText(/등록하지 못했어요 · 이 종류의 문서는 이미 있어요/),
+  ).toBeInTheDocument()
+  expect(screen.getByLabelText(/문서 제목/)).toHaveValue('기획안')
+  await user.click(
+    screen.getByRole('button', { name: '등록하고 비비 검토 받기' }),
+  )
+  expect(
+    await screen.findByText(/기준 v1이 생긴 뒤에는 문서를 새로 올리지 않아요/),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: '변경 제안 쓰기' }),
+  ).toBeInTheDocument()
 })
