@@ -82,7 +82,16 @@ export function TeamPanel({
     getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
     enabled: isLeader && view === 'team',
   })
-  const people = members.data?.pages.flatMap((page) => page.items) ?? []
+  // 서버는 최근 들어온 순(PR #50 MEM-A06)이다. 팀장을 맨 위, 다음은 나, 나머지는 서버 순서로 그린다.
+  const teamOrder = (member: Member) =>
+    member.role === 'LEADER'
+      ? 0
+      : member.account_id === session.data?.id
+        ? 1
+        : 2
+  const people = (
+    members.data?.pages.flatMap((page) => page.items) ?? []
+  ).toSorted((a, b) => teamOrder(a) - teamOrder(b))
   const removing =
     typeof dialog === 'object' && dialog?.action === 'remove'
       ? dialog.member
@@ -154,6 +163,7 @@ export function TeamPanel({
               <ul className="divide-y border-y">
                 {data.pages
                   .flatMap((page) => page.items)
+                  .toSorted((a, b) => teamOrder(a) - teamOrder(b))
                   .map((member) => {
                     const mine = member.account_id === session.data?.id
                     return (
@@ -637,9 +647,14 @@ export function TeamPanel({
               name: 'role_label',
               label: '표시 역할',
               value: dialog.member.role_label,
-              max: 40,
+              max: 50,
             },
-            { name: 'domain', label: '담당 영역', value: dialog.member.domain },
+            {
+              name: 'domain',
+              label: '담당 영역',
+              value: dialog.member.domain,
+              max: 50,
+            },
             {
               name: 'color',
               label: '표시 색',
@@ -650,7 +665,13 @@ export function TeamPanel({
           onClose={() => setDialog(null)}
           onSubmit={async (values) => {
             await action.run(
-              () => membersApi.update(projectId, dialog.member.id, values),
+              // 비운 칸은 ""로 보내 지운다(PR #50). 앞뒤 공백은 스키마가 뺀다.
+              () =>
+                membersApi.update(projectId, dialog.member.id, {
+                  role_label: values.role_label,
+                  domain: values.domain,
+                  color: values.color,
+                }),
               '역할과 담당 영역을 저장했어요.',
             )
             setDialog(null)

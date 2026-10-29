@@ -371,8 +371,21 @@ export async function accountRoutes(
       const member = findById(requireProject(context).members, params.member_id)
       if (member.account_id !== requireAccount(context).id)
         requireLeader(context)
-      for (const field of ['domain', 'role_label', 'color'] as const)
-        if (typeof body[field] === 'string') member[field] = body[field]
+      // 서버(PR #50)처럼: 생략은 유지, ""는 지우기, 글은 앞뒤 공백을 빼고 50자, 색은 #RRGGBB를 대문자로.
+      for (const field of ['domain', 'role_label'] as const) {
+        if (typeof body[field] !== 'string') continue
+        const value = body[field].trim()
+        if (value.length > 50)
+          fail(400, 'validation_failed', '50자까지 쓸 수 있어요.')
+        if (value) member[field] = value
+        else delete member[field]
+      }
+      if (typeof body.color === 'string') {
+        if (body.color && !/^#[0-9a-fA-F]{6}$/.test(body.color))
+          fail(400, 'validation_failed', '색은 #RRGGBB 형식이에요.')
+        if (body.color) member.color = body.color.toUpperCase()
+        else delete member.color
+      }
       return { data: member }
     }
     case 'MEM-A08': {
@@ -382,9 +395,11 @@ export async function accountRoutes(
         project.members,
         requiredString(body, 'target_member_id'),
       )
+      if (target.id === context.member!.id)
+        fail(409, 'invalid_transfer_target', '나 자신에게는 위임할 수 없어요.')
       context.member!.role = 'MEMBER'
       target.role = 'LEADER'
-      return { data: { members: project.members } }
+      return { data: { members: [context.member!, target] } }
     }
     case 'MEM-A09':
     case 'MEM-A10': {
@@ -397,16 +412,23 @@ export async function accountRoutes(
       if (member.role === 'LEADER')
         fail(409, 'leader_transfer_required', '먼저 인간 팀장을 위임해 주세요.')
       const reassigned = body.reassign_to_member_id
-      if (typeof reassigned === 'string') findById(project.members, reassigned)
+      // 인계 대상이 떠나는 본인이거나 활성 멤버가 아니면 400(PR #50).
+      if (
+        typeof reassigned === 'string' &&
+        (reassigned === member.id ||
+          !project.members.some((item) => item.id === reassigned))
+      )
+        fail(
+          400,
+          'validation_failed',
+          '작업을 넘겨받을 팀원을 다시 골라 주세요.',
+        )
       const activeTasks = project.tasks.filter(
         (task) =>
           task.assignee_member_id === member.id &&
           !['COMPLETED', 'CANCELLED'].includes(task.status),
       )
-      if (
-        activeTasks.length &&
-        (typeof reassigned !== 'string' || reassigned === member.id)
-      )
+      if (activeTasks.length && typeof reassigned !== 'string')
         fail(
           409,
           'active_tasks_exist',

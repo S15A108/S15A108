@@ -102,3 +102,24 @@ it('추방할 때 그 팀원이 맡은 작업을 넘길 작업으로 보여 준�
     await within(list).findByText(/TASK-002 · 초대 화면 정보 바꾸기/),
   ).toBeInTheDocument()
 })
+
+// PR #50 MEM-A06은 최근 들어온 순이라 팀장이 맨 아래로 온다. 화면은 팀장, 나, 나머지 순으로 그린다.
+it('팀 목록은 팀장을 맨 위, 다음에 나, 나머지는 서버 순서로 보여 준다', async () => {
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TeamPanel projectId="101" isLeader={false} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await screen.findByText('김동료 · 나')
+  expect(screen.getAllByRole('listitem').map((row) => row.textContent)).toEqual(
+    [
+      expect.stringContaining('이팀장'),
+      expect.stringContaining('김동료 · 나'),
+      expect.stringContaining('박팀원'),
+      expect.stringContaining('최팀원'),
+    ],
+  )
+})
