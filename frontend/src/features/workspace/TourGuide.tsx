@@ -127,7 +127,7 @@ export function TourGuide({
           </p>
           <div className="rounded-xl bg-muted/50 p-4 text-sm">
             <p className="font-semibold">
-              프로젝트는 문서 초안 4종을 올리면서 시작해요
+              문서 초안 4종이 승인되면 프로젝트가 시작돼요
             </p>
             <p className="mt-1 text-muted-foreground">
               기획안 · ERD · 요구사항 명세서 · API 명세서

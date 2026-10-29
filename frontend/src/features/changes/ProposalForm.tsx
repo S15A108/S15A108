@@ -23,6 +23,8 @@ interface Props {
   submitLabel: string
   items: DesignItemVersion[]
   tasks: TaskDetail[]
+  /** 고칠 수 있는 현재 문서(기준 원문 포함) */
+  documents?: { id: string; label: string; content: string }[]
   defaultValues?: ProposalFormValues
   // 제안 고치기 · 고쳐서 새로 올리기에서 쓴다.
   status?: ReactNode
@@ -44,17 +46,18 @@ function FieldError({ message }: { message?: string }) {
   ) : null
 }
 
-// 새 변경 제안 · 창 안에서. 필수는 제목, 이유, 바꿀 설계 항목 하나 이상. 문서는 공용 문서함에서 새 버전을 올린다.
+// 새 변경 제안 · 창 안에서. 필수는 제목, 이유, 그리고 바꿀 설계 항목이나 고칠 문서 중 하나(PNL-04 수정안 문서 원문 포함).
 // 제안 고치기는 같은 폼에 지금 내용을 채우고, 받은 의견을 옆에 두고, 고친 항목에 처음 올린 문장을 보여 준다.
 export function ProposalForm({
   heading,
   submitLabel,
   items,
   tasks,
+  documents = [],
   defaultValues,
   status,
   description,
-  footnote = '문서를 고치려면 공용 문서함에서 새 버전을 올려 주세요. 제출만으로 기준이 바뀌지는 않아요.',
+  footnote = '올리면 관련 팀원에게 알림이 가고 AI 영향 분석이 시작돼요. 제출만으로 기준이 바뀌지는 않아요.',
   original,
   comments,
   baselineVersion,
@@ -66,6 +69,7 @@ export function ProposalForm({
     register,
     control,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<ProposalFormValues>({
     resolver: zodResolver(proposalFormSchema),
@@ -74,10 +78,13 @@ export function ProposalForm({
       reason: '',
       task_id: '',
       items: [emptyRow],
+      document_id: '',
+      after_content: '',
     },
   })
   const rows = useFieldArray({ control, name: 'items' })
   const values = useWatch({ control, name: 'items' })
+  const documentId = useWatch({ control, name: 'document_id' })
   return (
     <form
       noValidate
@@ -147,6 +154,49 @@ export function ProposalForm({
               </p>
             </section>
           )}
+          {documents.length > 0 && (
+            <div className="grid gap-2 rounded-xl border p-3">
+              <Label htmlFor="proposal-document">
+                고칠 문서{' '}
+                <span className="text-xs font-normal text-muted-foreground">
+                  선택
+                </span>
+              </Label>
+              <NativeSelect
+                id="proposal-document"
+                {...register('document_id', {
+                  onChange: (event) =>
+                    setValue(
+                      'after_content',
+                      documents.find((item) => item.id === event.target.value)
+                        ?.content ?? '',
+                    ),
+                })}
+              >
+                <NativeSelectOption value="">고치지 않음</NativeSelectOption>
+                {documents.map((item) => (
+                  <NativeSelectOption key={item.id} value={item.id}>
+                    {item.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              {documentId && (
+                <>
+                  <Textarea
+                    aria-label="고친 글"
+                    rows={6}
+                    aria-invalid={!!errors.after_content}
+                    {...register('after_content')}
+                  />
+                  <FieldError message={errors.after_content?.message} />
+                  {/* API 없음: '파일 올리기'(DOC-A12 변경용 원문 → proposed_document_version_id)는 화면만 정해져 있어 고친 글 쓰기만 둔다. */}
+                  <p className="text-xs text-muted-foreground">
+                    올리면 지금 기준 원문과 비교해 보여 줘요.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           <details className="rounded-xl border p-3 text-sm">
             <summary className="cursor-pointer font-medium">
               관련 작업 연결 (선택)
@@ -167,7 +217,7 @@ export function ProposalForm({
           </details>
         </div>
         <fieldset className="grid content-start gap-3">
-          <legend className="mb-2 text-sm font-medium">바꿀 설계 항목 *</legend>
+          <legend className="mb-2 text-sm font-medium">바꿀 설계 항목</legend>
           {rows.fields.map((field, index) => {
             const row = values?.[index] ?? field
             const rowErrors = errors.items?.[index]
@@ -236,7 +286,7 @@ export function ProposalForm({
                       고친 항목
                     </span>
                   )}
-                  {rows.fields.length > 1 && (
+                  {(rows.fields.length > 1 || !!documentId) && (
                     <Button
                       type="button"
                       size="icon-sm"

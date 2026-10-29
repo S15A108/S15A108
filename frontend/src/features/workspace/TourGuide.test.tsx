@@ -26,7 +26,7 @@ it('? 키로 화면 안내를 열고 처음부터 둘러보기 6단계를 마치
   expect(screen.getByRole('dialog', { name: '화면 안내' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '처음부터 둘러보기' }))
   expect(
-    screen.getByText('프로젝트는 문서 초안 4종을 올리면서 시작해요'),
+    screen.getByText('문서 초안 4종이 승인되면 프로젝트가 시작돼요'),
   ).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '1분 둘러보기' }))
   expect(screen.getByText('둘러보기 1/6')).toBeInTheDocument()

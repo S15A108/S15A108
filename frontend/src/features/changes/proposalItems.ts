@@ -43,20 +43,38 @@ const rowSchema = z
       })
   })
 
-export const proposalFormSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1, '제목을 입력해 주세요.')
-    .max(120, '120자까지 쓸 수 있어요.'),
-  reason: z
-    .string()
-    .trim()
-    .min(1, '이유를 입력해 주세요.')
-    .max(2000, '2000자까지 쓸 수 있어요.'),
-  task_id: z.string(),
-  items: rowSchema.array().min(1, '바꿀 설계 항목을 하나 이상 넣어 주세요.'),
-})
+export const proposalFormSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, '제목을 입력해 주세요.')
+      .max(120, '120자까지 쓸 수 있어요.'),
+    reason: z
+      .string()
+      .trim()
+      .min(1, '이유를 입력해 주세요.')
+      .max(2000, '2000자까지 쓸 수 있어요.'),
+    task_id: z.string(),
+    items: rowSchema.array(),
+    // 고칠 문서(선택): 고친 글을 after_content로 보낸다(CHG-A01 documents).
+    document_id: z.string().optional(),
+    after_content: z.string().optional(),
+  })
+  .superRefine((form, context) => {
+    if (!form.items.length && !form.document_id)
+      context.addIssue({
+        code: 'custom',
+        path: ['items'],
+        message: '바꿀 설계 항목을 하나 이상 넣어 주세요.',
+      })
+    if (form.document_id && !form.after_content?.trim())
+      context.addIssue({
+        code: 'custom',
+        path: ['after_content'],
+        message: '고친 글을 입력해 주세요.',
+      })
+  })
 export type ProposalFormValues = z.infer<typeof proposalFormSchema>
 export type ProposalRow = ProposalFormValues['items'][number]
 

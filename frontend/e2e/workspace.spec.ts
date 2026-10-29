@@ -91,7 +91,9 @@ test('문서와 작업 검증, 비비의 근거 응답을 같은 사무실에서
   await expect(
     dialog.getByRole('heading', { name: '공용 문서함', exact: true }).first(),
   ).toBeVisible()
-  await expect(dialog.getByText('버전 이력', { exact: true })).toBeVisible()
+  await expect(
+    dialog.getByRole('heading', { name: '현재 문서', exact: true }),
+  ).toBeVisible()
   await dialog.getByLabel('검색어').fill('로그인')
   await dialog.getByRole('button', { name: '검색', exact: true }).click()
   await expect(dialog.getByRole('heading', { name: '검색 결과' })).toBeVisible()

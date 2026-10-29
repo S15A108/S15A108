@@ -27,7 +27,10 @@ export function Hotbar({
   badges,
   highlight,
   lockedReason = '문서 4종을 올리면 열려요',
+  bubble,
 }: {
+  /** 시작 가이드 동안 비비가 말풍선으로 알려 줄 말 */
+  bubble?: string
   /** 프로젝트가 시작되기 전에 잠그는 칸 */
   locked: WorkspacePane[]
   /** 잠긴 칸을 눌렀을 때 알려 줄 이유 */
@@ -101,7 +104,7 @@ export function Hotbar({
     <nav
       aria-label="프로젝트 메뉴 단축 바"
       data-tour="hotbar"
-      className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-2xl border bg-card/95 p-1.5 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-2xl border bg-card/95 p-1.5 shadow-lg backdrop-blur"
     >
       {hotbarSlots.slice(0, 3).map(slot)}
       <button
@@ -110,8 +113,14 @@ export function Hotbar({
         data-tour="bibi"
         aria-pressed={pane === 'chat'}
         onClick={() => openPane(pane === 'chat' ? null : 'chat')}
-        className="mx-1.5 grid w-21 justify-items-center gap-0.5 text-[10.5px] font-bold"
+        className="relative mx-1.5 grid w-21 justify-items-center gap-0.5 text-[10.5px] font-bold"
       >
+        {bubble && !pane && (
+          <span className="absolute bottom-full left-1/2 mb-10 w-64 -translate-x-1/2 rounded-xl border bg-card px-3 py-2 text-left text-xs leading-5 font-normal shadow-lg">
+            <strong className="block">비비</strong>
+            {bubble}
+          </span>
+        )}
         <span className="-mt-8 grid size-17 place-items-center rounded-full bg-primary shadow-[0_0_0_3px_var(--foreground)]">
           <Sparkles className="size-8 text-primary-foreground" />
         </span>

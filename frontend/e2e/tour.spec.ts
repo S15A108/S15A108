@@ -14,7 +14,7 @@ test('워크스페이스에 처음 들어오면 환영 창이 한 번 뜨고 ? �
   })
   await expect(welcome).toBeVisible()
   await expect(
-    welcome.getByText('프로젝트는 문서 초안 4종을 올리면서 시작해요'),
+    welcome.getByText('문서 초안 4종이 승인되면 프로젝트가 시작돼요'),
   ).toBeVisible()
   await welcome.getByRole('button', { name: '건너뛰고 바로 시작하기' }).click()
   await expect(welcome).toHaveCount(0)

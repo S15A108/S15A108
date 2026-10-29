@@ -40,7 +40,13 @@ type Mode =
   | { kind: 'approve' }
   | { kind: 'reject' }
   | { kind: 'history' }
-  | { kind: 'form'; source?: ChangeProposal; update?: boolean }
+  | {
+      kind: 'form'
+      source?: ChangeProposal
+      update?: boolean
+      /** 공용 문서함 '고치기'로 들어오면 그 문서를 미리 고른다. */
+      documentId?: string
+    }
 
 const statusTabs = [
   ['', '전체'],
@@ -67,7 +73,9 @@ const statusOrder: Record<ChangeStatus, number> = {
 // API 없음: 문서만 바꾸는 제안을 거르는 필터, 제목·항목 검색과 정렬 파라미터(백엔드 메모 1·2). 지금은 받은 목록을 화면에서 거른다.
 export function ChangesPanel({ projectId, isLeader }: Props) {
   const session = useSession()
-  const focusId = useWorkspaceStore((state) => state.focusId)
+  // 'new'는 새 제안 폼, 'doc:문서ID'는 그 문서를 고르는 새 제안 폼(공용 문서함 '변경 제안 쓰기'·'고치기'). 그 밖은 제안 ID.
+  const focus = useWorkspaceStore((state) => state.focusId)
+  const focusId = focus === 'new' || focus?.startsWith('doc:') ? null : focus
   const openPane = useWorkspaceStore((state) => state.openPane)
   const [selected, setSelected] = useState<{
     id: string
@@ -77,7 +85,11 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'recent' | 'status'>('recent')
   const [tab, setTab] = useState<Tab>('overview')
-  const [mode, setMode] = useState<Mode>({ kind: 'detail' })
+  const [mode, setMode] = useState<Mode>(() =>
+    focus === 'new' || focus?.startsWith('doc:')
+      ? { kind: 'form', documentId: focus.slice(4) || undefined }
+      : { kind: 'detail' },
+  )
   const [discussing, setDiscussing] = useState(false)
   const action = useProjectAction(projectId)
   const changes = useInfiniteQuery({
@@ -133,6 +145,23 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
     queryFn: () => documentsApi.baselines(projectId, { limit: 20 }),
     enabled: mode.kind === 'history',
   })
+  const documents = useQuery({
+    queryKey: ['projects', projectId, 'planning-documents'],
+    queryFn: () => documentsApi.list(projectId, { limit: 100 }),
+  })
+  const documentOptions =
+    documents.data?.items.flatMap((document) =>
+      document.approved_version
+        ? [
+            {
+              id: document.id,
+              label: `${document.title} · 기준 v${document.approved_version.version_no}`,
+              content: document.approved_version.content ?? '',
+              versionId: document.approved_version.id,
+            },
+          ]
+        : [],
+    ) ?? []
   const items = useQuery({
     queryKey: ['projects', projectId, 'approved-items'],
     queryFn: () =>
@@ -200,7 +229,17 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
       reason: values.reason,
       ...(values.task_id ? { task_id: values.task_id } : {}),
       items: toChangeItems(values.items, approved),
-      documents: [],
+      documents: values.document_id
+        ? [
+            {
+              document_id: values.document_id,
+              base_document_version_id: documentOptions.find(
+                (item) => item.id === values.document_id,
+              )!.versionId,
+              after_content: values.after_content,
+            },
+          ]
+        : [],
     }
     await action.run(
       async () => {
@@ -225,8 +264,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          설계 항목을 바꾸자고 제안하고, 팀장이 승인하면 새 기준을 발행해요.
-          문서는 공용 문서함에서 새 버전을 올려요.
+          설계 항목이나 문서를 바꾸자고 제안하고, 팀장이 승인하면 새 기준을
+          발행해요. 문서를 고치려면 제안에서 &apos;고칠 문서&apos;를 골라요.
         </p>
         <Button
           disabled={!baseline.data}
@@ -351,6 +390,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
         <div className="min-w-0">
           {mode.kind === 'form' ? (
             <ProposalForm
+              key={documents.isSuccess ? 'documents' : 'loading'}
+              documents={documentOptions}
               heading={
                 mode.update
                   ? '제안 고치기'
@@ -397,12 +438,29 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                 setTab('comments')
               }}
               defaultValues={
-                mode.source && {
-                  title: mode.source.title,
-                  reason: mode.source.reason,
-                  task_id: mode.source.task_id ?? '',
-                  items: toRows(mode.source.items),
-                }
+                mode.source
+                  ? {
+                      title: mode.source.title,
+                      reason: mode.source.reason,
+                      task_id: mode.source.task_id ?? '',
+                      items: toRows(mode.source.items),
+                      document_id: mode.source.documents[0]?.document_id ?? '',
+                      after_content:
+                        mode.source.documents[0]?.after_content ?? '',
+                    }
+                  : mode.documentId
+                    ? {
+                        title: '',
+                        reason: '',
+                        task_id: '',
+                        items: [],
+                        document_id: mode.documentId,
+                        after_content:
+                          documentOptions.find(
+                            (item) => item.id === mode.documentId,
+                          )?.content ?? '',
+                      }
+                    : undefined
               }
               onCancel={() => setMode({ kind: 'detail' })}
               onSubmit={(values) =>
@@ -414,8 +472,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
               <strong className="text-base text-foreground">
                 변경 제안이 없어요
               </strong>
-              바꾸고 싶은 설계 항목이 있으면 새 변경 제안을 올려 주세요. 문서는
-              공용 문서함에서 새 버전을 올려요.
+              바꾸고 싶은 설계 항목이나 문서가 있으면 새 변경 제안을 올려
+              주세요.
             </EmptyState>
           ) : (
             <AsyncState query={detail}>

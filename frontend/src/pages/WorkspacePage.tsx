@@ -215,7 +215,10 @@ function Workspace({ projectId }: { projectId: string }) {
                   'max-h-[87dvh] overflow-y-auto bg-background p-5 sm:p-8',
                   pane === 'chat'
                     ? 'sm:max-w-[min(1080px,94vw)]'
-                    : 'sm:max-w-[min(1180px,94vw)]',
+                    : pane === 'documents'
+                      ? // 공용 문서함 모달안: 1100px × 90vh 고정, 본문만 안에서 스크롤
+                        'h-[90dvh] max-h-[90dvh] content-start sm:max-w-[min(1100px,94vw)]'
+                      : 'sm:max-w-[min(1180px,94vw)]',
                 )}
                 onEscapeKeyDown={(event) => {
                   if (pendingMutations) event.preventDefault()

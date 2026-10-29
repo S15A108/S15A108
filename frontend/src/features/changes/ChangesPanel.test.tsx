@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
@@ -130,4 +130,34 @@ it('제안자는 검토 중인 내 제안을 같은 폼으로 고쳐 다시 올�
   expect(await screen.findByRole('status')).toHaveTextContent(
     '고친 내용을 올렸어요. 다시 검토 대기예요.',
   )
+})
+
+// 공용 문서함 '고치기'(PNL-02 수정안 10-29): 그 문서가 골라진 새 제안 폼으로 들어와 고친 글만으로도 올린다.
+it('문서함에서 고치기로 들어오면 그 문서를 고른 새 제안으로 고친 글을 올린다', async () => {
+  const user = userEvent.setup()
+  useWorkspaceStore.getState().openPane('changes', 'doc:203')
+  renderPanel()
+  await waitFor(() =>
+    expect(
+      (screen.getByLabelText('고친 글') as HTMLTextAreaElement).value,
+    ).toContain('REQ-001'),
+  )
+  const text = screen.getByLabelText('고친 글')
+  expect(screen.getByLabelText(/고칠 문서/)).toHaveValue('203')
+  expect(
+    screen.queryByRole('group', { name: '설계 항목 1' }),
+  ).not.toBeInTheDocument()
+  await user.type(screen.getByLabelText('제목 *'), '빈 목록 안내 추가')
+  await user.type(
+    screen.getByLabelText('바꾸려는 이유 *'),
+    '참여한 프로젝트가 없으면 안내가 필요해요.',
+  )
+  await user.type(text, '\nREQ-006 참여한 프로젝트가 없으면 만들기를 안내한다.')
+  await user.click(screen.getByRole('button', { name: '제안 올리기' }))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '변경 제안을 올렸어요.',
+  )
+  expect(
+    await screen.findByRole('heading', { name: /빈 목록 안내 추가/ }),
+  ).toBeInTheDocument()
 })
