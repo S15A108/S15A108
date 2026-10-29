@@ -5,7 +5,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { authApi, changesApi } from '@/api/services'
+import { authApi, changesApi, documentsApi } from '@/api/services'
 import { getApiErrorCode } from '@/api/error'
 import {
   DEMO_EMAIL,
@@ -181,6 +181,47 @@ it('문서함에서 고치기로 들어오면 그 문서를 고른 새 제안으
   expect(
     await screen.findByRole('heading', { name: /빈 목록 안내 추가/ }),
   ).toBeInTheDocument()
+})
+
+// PR #46 0df13f0: 서버가 정규화한 본문이 기준과 같으면 거절하므로 화면에서 미리 막는다.
+it('고친 글이 기준 문서와 같으면 올리지 않고 칸 아래에 알린다', async () => {
+  const user = userEvent.setup()
+  useWorkspaceStore.getState().openPane('changes', 'doc:203')
+  renderPanel()
+  await waitFor(() =>
+    expect(
+      (screen.getByLabelText('고친 글') as HTMLTextAreaElement).value,
+    ).toContain('REQ-001'),
+  )
+  await user.type(screen.getByLabelText('제목 *'), '그대로 둔 문서')
+  await user.type(screen.getByLabelText('바꾸려는 이유 *'), '확인용')
+  await user.click(screen.getByRole('button', { name: '제안 올리기' }))
+  expect(
+    await screen.findByText('기준 문서와 달라진 내용이 없어요.'),
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})
+
+it('목은 BOM과 CRLF만 다른 문서를 기준과 같다고 보고 400 validation_failed로 거절한다', async () => {
+  const baseline = await documentsApi.baseline('101')
+  const { document } = await documentsApi.get('101', '203')
+  const content = document.approved_version!.content ?? ''
+  const same = await changesApi
+    .create('101', {
+      base_baseline_id: baseline.id,
+      title: '줄바꿈만 바꿈',
+      reason: '확인용',
+      items: [],
+      documents: [
+        {
+          document_id: '203',
+          base_document_version_id: document.approved_version!.id,
+          after_content: `\uFEFF${content.replace(/\n/g, '\r\n')}`,
+        },
+      ],
+    })
+    .catch((cause: unknown) => cause)
+  expect(getApiErrorCode(same)).toBe('validation_failed')
 })
 
 // PR #46 CHG-A15: 제안자는 올린 제안을 거두고, 거둔 제안은 새 제안(previous_proposal_id)으로 다시 올린다.

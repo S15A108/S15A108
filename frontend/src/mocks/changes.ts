@@ -21,6 +21,7 @@ import {
   templateGeneration,
 } from './helpers'
 import type { MockContext, MockReply } from './helpers'
+import { normalizeDocument } from '../features/changes/normalizeDocument'
 import { copy, nextId, now } from './state'
 
 function proposalView(
@@ -46,13 +47,44 @@ function submit(
 ): Pick<ChangeProposal, 'revision' | 'snapshot_hash' | 'documents'> {
   const project = requireProject(context)
   const documents = input.documents.map((change) => {
-    const after =
-      change.after_content ??
-      findById(project.versions, change.proposed_document_version_id!)
-        .content ??
-      ''
+    const base = findById(project.versions, change.base_document_version_id)
+    const uploaded = change.proposed_document_version_id
+      ? findById(project.versions, change.proposed_document_version_id)
+      : undefined
+    // 서버처럼 본문을 정규화하고, 기준과 같으면 거절한다(PR #46 0df13f0).
+    const after = normalizeDocument(
+      change.after_content ?? uploaded?.content ?? '',
+    )
+    if (after === normalizeDocument(base.content ?? ''))
+      fail(
+        400,
+        'validation_failed',
+        '기준과 같은 문서는 변경 제안에 넣지 않아요.',
+      )
+    // after_content로 내도 기준 버전을 부모로 하는 DRAFT 버전을 만들어 돌려준다.
+    let version = uploaded
+    if (!version) {
+      const versionNo =
+        Math.max(
+          ...project.versions
+            .filter((item) => item.document_id === change.document_id)
+            .map((item) => item.version_no),
+        ) + 1
+      version = {
+        ...base,
+        id: nextId(context.database),
+        version_no: versionNo,
+        status: 'DRAFT' as const,
+        content: after,
+        content_hash: mockHash(after),
+        created_at: now(),
+      }
+      project.versions.push(version)
+    }
     return {
-      ...change,
+      document_id: change.document_id,
+      base_document_version_id: change.base_document_version_id,
+      proposed_document_version_id: version.id,
       after_content: after,
       content_hash: mockHash(after),
     }

@@ -418,13 +418,14 @@ export const snapshotHashSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'sha256: 뒤에 소문자 64자리여야 합니다.')
 
-// DocumentChange 입력을 해석한 응답. 업로드를 고르면 after_content와 업로드 버전 ID가 함께 올 수 있다.
+// DocumentChange 입력을 해석한 응답(PR #46 0df13f0). after_content로 내도 서버가 DRAFT 버전을 만들어
+// proposed_document_version_id를 항상 준다. after_content·content_hash는 정규화(BOM 제거, CRLF→LF)한 저장 본문이다.
 export const resolvedDocumentChangeSchema = z.object({
   document_id: idSchema,
   base_document_version_id: idSchema,
+  proposed_document_version_id: idSchema,
   after_content: z.string(),
   content_hash: z.string(),
-  proposed_document_version_id: idSchema.optional(),
 })
 export type ResolvedDocumentChange = z.infer<
   typeof resolvedDocumentChangeSchema

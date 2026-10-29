@@ -10,6 +10,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { describeContent } from '@/lib/display'
 import { cn } from '@/lib/utils'
+import { normalizeDocument } from './normalizeDocument'
 import {
   emptyRow,
   kindLabel,
@@ -70,6 +71,7 @@ export function ProposalForm({
     control,
     handleSubmit,
     setValue,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ProposalFormValues>({
     resolver: zodResolver(proposalFormSchema),
@@ -88,7 +90,24 @@ export function ProposalForm({
   return (
     <form
       noValidate
-      onSubmit={handleSubmit((form) => onSubmit(form).catch(() => undefined))}
+      onSubmit={handleSubmit((form) => {
+        // 서버는 본문을 정규화(BOM 제거, CRLF→LF)해 기준과 같은 문서를 거절한다(PR #46).
+        // 같은 규칙으로 비교해 바뀌지 않은 문서는 빼고, 남는 변경이 없으면 막는다.
+        const base = documents.find((item) => item.id === form.document_id)
+        const unchanged =
+          !!base &&
+          normalizeDocument(form.after_content ?? '') ===
+            normalizeDocument(base.content)
+        if (unchanged && !form.items.length) {
+          setError('after_content', {
+            message: '기준 문서와 달라진 내용이 없어요.',
+          })
+          return
+        }
+        return onSubmit(
+          unchanged ? { ...form, document_id: '', after_content: '' } : form,
+        ).catch(() => undefined)
+      })}
       className="grid gap-4"
     >
       <div>

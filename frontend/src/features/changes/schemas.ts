@@ -122,17 +122,11 @@ export type RejectInput = z.infer<typeof rejectInputSchema>
 export const rejectResponseSchema = common.changeProposalSchema
 export type RejectResponse = z.infer<typeof rejectResponseSchema>
 
-// CHG-A15 거두기(PR #46). 응답은 사용자 결정으로 A01·A04처럼 ChangeProposal을 바로 받기로 했고,
-// PR #46 명세는 아직 { proposal } 래퍼라 둘 다 받는다.
+// CHG-A15 거두기(PR #46). 응답은 A01·A04·A08·A10과 같은 래퍼 없는 ChangeProposal이다.
 export const withdrawInputSchema = z.object(expectedSubmission)
 export type WithdrawInput = z.infer<typeof withdrawInputSchema>
 
-export const withdrawResponseSchema = z.union([
-  z
-    .object({ proposal: common.changeProposalSchema })
-    .transform((value) => value.proposal),
-  common.changeProposalSchema,
-])
+export const withdrawResponseSchema = common.changeProposalSchema
 export type WithdrawResponse = z.infer<typeof withdrawResponseSchema>
 
 export const approvalResponseSchema = z.object({
