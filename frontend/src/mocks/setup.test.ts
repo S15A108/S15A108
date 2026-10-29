@@ -168,9 +168,8 @@ describe('documented REST mock adapter', () => {
     const token = new URL(invitation.invite_url).searchParams.get('token')!
     await authApi.logout()
     await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
-    await expect(projectsApi.get(created.id)).rejects.toMatchObject({
-      response: { status: 404 },
-    })
+    // Q05(2026-10-29 확정): 초대받은 이메일로 로그인하면 그때 팀원이 된다. 링크 참여(MEM-A05)도 그대로 된다.
+    expect((await projectsApi.get(created.id)).my_role).toBe('MEMBER')
     const accepted = await membersApi.acceptInvitation({ token })
     expect(accepted.member.role).toBe('MEMBER')
     expect((await projectsApi.get(created.id)).my_role).toBe('MEMBER')

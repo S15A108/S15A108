@@ -35,7 +35,7 @@ export type PreviewInvitationInput = z.infer<
 
 export const previewInvitationResponseSchema = z.object({
   project_name: z.string(),
-  expires_at: common.timeSchema,
+  expires_at: common.timeSchema.optional(),
   login_required: z.boolean(),
 })
 export type PreviewInvitationResponse = z.infer<

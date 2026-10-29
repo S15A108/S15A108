@@ -27,6 +27,7 @@ import { useSession } from '@/features/auth/useSession'
 import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { projectPlacements } from '@/features/projects/placements'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
+import { getApiErrorCode } from '@/api/error'
 import { lines } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
 import { placementKey, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -61,7 +62,6 @@ export function TeamPanel({
   const [dialog, setDialog] = useState<DialogAction | null>(null)
   const [fresh, setFresh] = useState<{ id: string; url: string }[]>([])
   const [copyMessage, setCopyMessage] = useState('')
-  const [viewTime] = useState(() => Date.now())
   const project = useQuery({
     queryKey: ['projects', projectId, 'team-project'],
     queryFn: () => projectsApi.get(projectId),
@@ -296,15 +296,14 @@ export function TeamPanel({
                             </b>
                             <small className="mt-1 block text-muted-foreground">
                               {fresh.some((item) => item.id === invitation.id)
-                                ? '팀원 · 방금 초대 · '
+                                ? '방금 초대 · '
                                 : ''}
+                              {/* Q05(2026-10-29 확정): 초대받은 사람이 로그인·가입해야 팀원이 된다. 만료는 없다. */}
                               {invitation.accepted_at
-                                ? '수락됨'
+                                ? `참여함 · ${formatDate(invitation.accepted_at)}`
                                 : invitation.revoked_at
                                   ? '취소됨'
-                                  : Date.parse(invitation.expires_at) < viewTime
-                                    ? '만료됨'
-                                    : `만료 ${formatDate(invitation.expires_at)}`}
+                                  : '초대 중 · 이 이메일로 로그인하거나 가입하면 팀원이 돼요'}
                             </small>
                           </span>
                           {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
@@ -537,7 +536,7 @@ export function TeamPanel({
       {dialog === 'invite' && (
         <FormDialog
           title="팀원 초대"
-          description="초대한 이메일로 로그인한 사용자가 참여할 수 있어요. 7일 뒤 만료돼요."
+          description="초대한 이메일로 로그인하거나 가입하면 그때 팀원이 돼요. 만료는 없고, 잘못 보냈으면 초대 대기에서 취소해요."
           fields={[
             {
               name: 'email',
@@ -556,11 +555,23 @@ export function TeamPanel({
           onClose={() => setDialog(null)}
           onSubmit={async (values) => {
             const emails = lines(values.email)
-            // API 없음: 초대 메일 발송. 여러 명은 초대를 한 명씩 만든다.
-            await action.run(
-              async () => {
-                const created = []
-                for (const email of emails) {
+            // 이미 초대 중인 이메일은 다시 만들지 않는다(Q05 3 ALREADY_INVITED).
+            const pending = new Set(
+              invitations.data?.pages
+                .flatMap((page) => page.items)
+                .filter((item) => !item.accepted_at && !item.revoked_at)
+                .map((item) => item.invited_email?.toLowerCase()),
+            )
+            let skipped = 0
+            // API 없음: 초대 메일 발송·여러 명 한 번에(emails, PR #42). 지금은 한 명씩 만들고 이미 팀원(409 already_member)은 건너뛴다.
+            await action.run(async () => {
+              const created = []
+              for (const email of emails) {
+                if (pending.has(email.toLowerCase())) {
+                  skipped++
+                  continue
+                }
+                try {
                   const result = await membersApi.createInvitation(projectId, {
                     email,
                   })
@@ -568,13 +579,17 @@ export function TeamPanel({
                     id: result.invitation.id,
                     url: result.invite_url,
                   })
+                } catch (cause) {
+                  if (getApiErrorCode(cause) !== 'already_member') throw cause
+                  skipped++
                 }
-                setFresh(created)
-              },
-              emails.length > 1
-                ? `초대 링크 ${emails.length}개를 만들었어요.`
-                : '초대 링크를 만들었어요.',
-            )
+              }
+              setFresh(created)
+            }, '초대 링크를 만들었어요.')
+            if (skipped)
+              setCopyMessage(
+                `이미 팀원이거나 초대 중인 ${skipped}명은 건너뛰었어요.`,
+              )
             setDialog(null)
           }}
         />

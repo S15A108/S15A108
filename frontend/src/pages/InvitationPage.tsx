@@ -1,14 +1,17 @@
+import { useEffect, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import { LoaderCircle } from 'lucide-react'
-import { membersApi } from '@/api/services'
+import { authApi, membersApi } from '@/api/services'
 import { useSession } from '@/features/auth/useSession'
 import { Button } from '@/components/ui/button'
-import { formatDate } from '@/lib/formatDate'
 import { getApiErrorMessage, getApiErrorStatus } from '@/api/error'
 import NotFoundPage from './NotFoundPage'
 
+// Q05 초대 규칙(PR #42, 2026-10-29 확정): 수락 버튼은 없다.
+// 로그인한 채로 링크를 열면 저절로 참여(MEM-A05)하고 프로젝트로 간다. 로그아웃이면 로그인·가입을 거쳐 같은 화면으로 돌아온다.
+// 미리보기(MEM-A04)는 조회만 한다. 만료는 없다.
 export default function InvitationPage() {
   const [params] = useSearchParams()
   const token = params.get('token') ?? params.get('invite') ?? ''
@@ -25,9 +28,17 @@ export default function InvitationPage() {
     mutationFn: () => membersApi.acceptInvitation({ token }),
     onSuccess: async (data) => {
       await client.invalidateQueries({ queryKey: ['projects'] })
-      navigate(`/projects/${data.project.id}`)
+      navigate(`/projects/${data.project.id}`, { replace: true })
     },
   })
+  const signedIn = Boolean(session.data)
+  const ready = Boolean(invitation.data)
+  const started = useRef(false)
+  useEffect(() => {
+    if (!signedIn || !ready || started.current) return
+    started.current = true
+    accept.mutate()
+  }, [signedIn, ready, accept])
   const status = getApiErrorStatus(invitation.error)
   // 통신 실패와 서버 오류만 다시 불러오기. 나머지는 원인을 알리지 않고 '찾을 수 없음'으로 통일한다.
   const networkFailure =
@@ -36,6 +47,11 @@ export default function InvitationPage() {
       (status !== undefined && status >= 500))
   if (!token || (invitation.error && !networkFailure)) return <NotFoundPage />
   const encoded = encodeURIComponent(token)
+  const relogin = async () => {
+    await authApi.logout().catch(() => undefined)
+    await client.invalidateQueries()
+    navigate(`/login?invite=${encoded}`)
+  }
   return (
     <main className="mx-auto mt-16 max-w-lg px-4">
       <section className="rounded-3xl border bg-card p-8">
@@ -64,53 +80,54 @@ export default function InvitationPage() {
               <p className="text-sm text-muted-foreground">
                 프로젝트에 초대받았어요
               </p>
-              {/* API 없음: 미리보기 응답에 초대한 팀장(이름·이메일)과 프로젝트 소개가 생기면 이 위아래에 넣는다. */}
+              {/* API 없음: 미리보기 응답에 초대한 팀장(이름·이메일)과 프로젝트 소개가 생기면 이 위아래에 넣는다(PR #42 inviter·project_description). */}
               <h2 className="mt-2 text-2xl font-bold">
                 {invitation.data.project_name}
               </h2>
             </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
-              {/* API 없음: 초대받은 이메일. 로그인 계정과 다르면 미리 알려 주려면 이 값이 필요하다. */}
-              {session.data && (
-                <>
-                  <dt>로그인 계정</dt>
-                  <dd>{session.data.email}</dd>
-                </>
-              )}
-              <dt>만료</dt>
-              <dd>{formatDate(invitation.data.expires_at)}</dd>
-            </dl>
-            {session.data ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={accept.isPending}
-                  onClick={() => accept.mutate()}
+            {signedIn ? (
+              accept.error ? (
+                <div className="grid gap-3">
+                  <p role="alert" className="text-sm text-destructive">
+                    {getApiErrorMessage(accept.error)}
+                  </p>
+                  {/* 초대받은 이메일과 로그인 계정이 다르면 프로젝트를 열지 않고 다시 로그인하게 한다. */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={() => void relogin()}>
+                      다른 계정으로 로그인
+                    </Button>
+                    <Button variant="ghost" asChild>
+                      <Link to="/">나의 도시로</Link>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p
+                  role="status"
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
                 >
-                  초대 수락하고 참여하기
-                </Button>
-                {/* 거절 API가 없어 미루기만 둔다. */}
-                <Button variant="ghost" asChild>
-                  <Link to="/">나중에 하기</Link>
-                </Button>
-              </div>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  프로젝트를 여는 중이에요. {session.data?.email}로 참여해요.
+                </p>
+              )
             ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button asChild>
-                  <Link to={`/login?invite=${encoded}`}>
-                    로그인하고 참여하기
-                  </Link>
-                </Button>
-                <Button variant="outline" asChild>
-                  <Link to={`/register?invite=${encoded}`}>
-                    회원가입하고 참여하기
-                  </Link>
-                </Button>
-              </div>
-            )}
-            {accept.error && (
-              <p role="alert" className="text-sm text-destructive">
-                {getApiErrorMessage(accept.error)}
-              </p>
+              <>
+                <p className="text-sm text-muted-foreground">
+                  초대받은 이메일로 로그인하거나 가입하면 바로 팀원이 돼요.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild>
+                    <Link to={`/login?invite=${encoded}`}>
+                      로그인하고 참여하기
+                    </Link>
+                  </Button>
+                  <Button variant="outline" asChild>
+                    <Link to={`/register?invite=${encoded}`}>
+                      회원가입하고 참여하기
+                    </Link>
+                  </Button>
+                </div>
+              </>
             )}
           </div>
         )}

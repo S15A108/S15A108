@@ -18,6 +18,32 @@ async function password(value: unknown): Promise<string> {
   return passwordFingerprint(value)
 }
 
+// Q05 1·4: 멤버십은 초대할 때가 아니라 초대받은 이메일로 로그인·가입할 때 만든다.
+// 스스로 나간 프로젝트는 로그인만으로 되살리지 않는다(메일 링크를 열 때 MEM-A05로만).
+function joinPendingInvitations(context: MockContext, account: Account) {
+  for (const invitation of context.database.invitations) {
+    if (
+      invitation.invited_email !== account.email ||
+      invitation.accepted_at ||
+      invitation.revoked_at
+    )
+      continue
+    const project = context.database.projects.find(
+      (item) => item.project.id === invitation.project_id,
+    )
+    if (!project || project.left_account_ids?.includes(account.id)) continue
+    if (!project.members.some((item) => item.account_id === account.id))
+      project.members.push({
+        id: nextId(context.database),
+        account_id: account.id,
+        name: account.name,
+        role: 'MEMBER',
+        agent_connected: false,
+      })
+    invitation.accepted_at = now()
+  }
+}
+
 function projectView(context: MockContext, project: Project): Project {
   const member = context.database.projects
     .find((item) => item.project.id === project.id)
@@ -49,6 +75,7 @@ export async function accountRoutes(
         password_fingerprint: await password(body.password),
       })
       database.session_account_id = profile.id
+      joinPendingInvitations(context, profile)
       return { status: 201, data: profile }
     }
     case 'ACC-A02': {
@@ -62,6 +89,7 @@ export async function accountRoutes(
       if (!account)
         fail(401, 'invalid_credentials', '이메일과 비밀번호를 확인해 주세요.')
       database.session_account_id = account.profile.id
+      joinPendingInvitations(context, account.profile)
       return { data: account.profile }
     }
     case 'ACC-A03':
@@ -238,11 +266,19 @@ export async function accountRoutes(
     case 'MEM-A01': {
       requireLeader(context)
       const project = requireProject(context)
+      const email = requiredString(body, 'email').trim().toLowerCase()
+      const invitee = database.accounts.find(
+        (item) => item.profile.email === email,
+      )
+      if (
+        invitee &&
+        project.members.some((item) => item.account_id === invitee.profile.id)
+      )
+        fail(409, 'already_member', '이미 팀원이에요.')
       const invitation = {
         id: nextId(database),
         project_id: project.project.id,
-        invited_email: requiredString(body, 'email').toLowerCase(),
-        expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        invited_email: email,
         token: `mock-invite-${nextId(database)}`,
       }
       database.invitations.push(invitation)
@@ -285,11 +321,8 @@ export async function accountRoutes(
       const invitation =
         database.invitations.find((item) => item.token === body.token) ??
         fail(404, 'not_found', '초대를 찾을 수 없어요.')
-      if (
-        invitation.revoked_at ||
-        Date.parse(invitation.expires_at) < Date.now()
-      )
-        fail(410, 'invitation_expired', '초대가 만료됐어요.')
+      if (invitation.revoked_at)
+        fail(404, 'not_found', '초대를 찾을 수 없어요.')
       const project =
         database.projects.find(
           (item) => item.project.id === invitation.project_id,
@@ -298,7 +331,6 @@ export async function accountRoutes(
         return {
           data: {
             project_name: project.project.name,
-            expires_at: invitation.expires_at,
             login_required: !context.account,
           },
         }
@@ -325,6 +357,9 @@ export async function accountRoutes(
         }
         project.members.push(member)
       }
+      project.left_account_ids = project.left_account_ids?.filter(
+        (item) => item !== account.id,
+      )
       invitation.accepted_at = now()
       return {
         data: { project: projectView(context, project.project), member },
@@ -389,6 +424,11 @@ export async function accountRoutes(
           task.lock_version++
         })
       project.members = project.members.filter((item) => item !== member)
+      if (id === 'MEM-A10')
+        project.left_account_ids = [
+          ...(project.left_account_ids ?? []),
+          member.account_id,
+        ]
       database.tokens
         .filter(
           (token) =>

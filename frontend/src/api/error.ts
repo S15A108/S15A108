@@ -52,6 +52,8 @@ const messages: Record<string, string> = {
   review_decisions_pending:
     '처리하지 않은 보완 제안이 있어요. 반영하거나 넘겨 주세요.',
   submission_decided: '이미 결정한 검토 요청이에요.',
+  already_member: '이미 팀원이에요.',
+  invitation_email_mismatch: '초대받은 이메일로 로그인해 주세요.',
   agent_limit_reached:
     '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
 }

@@ -90,6 +90,8 @@ export interface MockProject {
   entries: MeetingEntry[]
   agents: AgentConnection[]
   activities: Activity[]
+  /** 스스로 나간 계정. 로그인만으로는 되살리지 않고 메일 링크(MEM-A05)로만 다시 참여한다(Q05 4). */
+  left_account_ids?: string[]
 }
 
 export interface MockDatabase {
