@@ -1,0 +1,56 @@
+import { useState } from 'react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, expect, it } from 'vitest'
+import { TourGuide } from './TourGuide'
+import type { TourMode } from './TourGuide'
+
+function Harness() {
+  const [mode, setMode] = useState<TourMode>(null)
+  return (
+    <>
+      {['office', 'card', 'hotbar', 'todo', 'top', 'bibi'].map((target) => (
+        <div key={target} data-tour={target} />
+      ))}
+      <TourGuide accountId="11" mode={mode} onChange={setMode} />
+    </>
+  )
+}
+
+beforeEach(() => localStorage.clear())
+
+it('? 키로 화면 안내를 열고 처음부터 둘러보기 6단계를 마치면 봤다고 남긴다', async () => {
+  const user = userEvent.setup()
+  render(<Harness />)
+  await user.keyboard('?')
+  expect(screen.getByRole('dialog', { name: '화면 안내' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '처음부터 둘러보기' }))
+  expect(
+    screen.getByText('프로젝트는 문서 초안 4종을 올리면서 시작해요'),
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '1분 둘러보기' }))
+  expect(screen.getByText('둘러보기 1/6')).toBeInTheDocument()
+  for (let step = 1; step < 6; step++)
+    await user.click(screen.getByRole('button', { name: '다음' }))
+  expect(screen.getByRole('dialog', { name: '비비' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '시작하기' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(localStorage.getItem('beez.tour.11')).toBe('seen')
+})
+
+it('입력 칸에서 ?를 치면 안내를 열지 않고 Esc로 닫는다', async () => {
+  const user = userEvent.setup()
+  render(
+    <>
+      <input aria-label="검색" />
+      <Harness />
+    </>,
+  )
+  await user.type(screen.getByLabelText('검색'), '?')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  await user.click(document.body)
+  await user.keyboard('?')
+  expect(screen.getByRole('dialog', { name: '화면 안내' })).toBeInTheDocument()
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})

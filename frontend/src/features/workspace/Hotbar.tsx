@@ -97,12 +97,14 @@ export function Hotbar({
   return (
     <nav
       aria-label="프로젝트 메뉴 단축 바"
+      data-tour="hotbar"
       className="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-2xl border bg-card/95 p-1.5 shadow-lg backdrop-blur"
     >
       {hotbarSlots.slice(0, 3).map(slot)}
       <button
         type="button"
         aria-label="비비와 대화"
+        data-tour="bibi"
         aria-pressed={pane === 'chat'}
         onClick={() => openPane(pane === 'chat' ? null : 'chat')}
         className="mx-1.5 grid w-21 justify-items-center gap-0.5 text-[10.5px] font-bold"

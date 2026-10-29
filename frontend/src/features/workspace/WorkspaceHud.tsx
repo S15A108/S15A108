@@ -2,13 +2,15 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Check, ChevronLeft, Lock, Settings } from 'lucide-react'
+import { Check, ChevronLeft, CircleHelp, Lock, Settings } from 'lucide-react'
 import { dashboardApi, inboxApi } from '@/api/services'
 import type { Member } from '@/api/contracts/common'
 import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
 import { Hotbar } from './Hotbar'
+import { TourGuide } from './TourGuide'
+import type { TourMode } from './TourGuide'
 import { Button } from '@/components/ui/button'
 import { statusLabel } from '@/lib/display'
 import { cn } from '@/lib/utils'
@@ -78,6 +80,8 @@ export function WorkspaceHud({
       inboxApi.list({ project_id: project.id, unread: true, limit: 20 }),
   })
   const [, rerender] = useState(0)
+  // 수정안은 워크스페이스에 처음 들어오면 환영 창을 한 번 띄운다. 자동으로 띄우면 기존 E2E가 환영 창에 막혀, 사용자 확인 뒤 켠다. 지금은 ? 키와 도움말 버튼으로 연다.
+  const [tour, setTour] = useState<TourMode>(null)
   const hiddenKey = guideKey(project.id, isLeader ? 'leader' : 'member')
   const readKey = guideKey(project.id, 'baseline-read')
   const uploaded = onboarding.required_documents.filter(
@@ -231,6 +235,7 @@ export function WorkspaceHud({
     <>
       <section
         aria-label="프로젝트"
+        data-tour="card"
         className="pointer-events-auto absolute top-4 left-4 z-10 grid w-80 gap-3 rounded-2xl border bg-card/95 p-3.5 shadow-lg backdrop-blur"
       >
         <div className="flex items-center gap-2">
@@ -337,7 +342,18 @@ export function WorkspaceHud({
         badges={{ changes: reviewCount }}
         highlight={isLeader && !allUploaded ? 'documents' : undefined}
       />
-      <div className="pointer-events-auto absolute top-4 right-4 z-10 flex gap-2">
+      <div
+        data-tour="top"
+        className="pointer-events-auto absolute top-4 right-4 z-10 flex gap-2"
+      >
+        <Button
+          size="icon"
+          variant="secondary"
+          aria-label="화면 안내 (?)"
+          onClick={() => setTour('map')}
+        >
+          <CircleHelp />
+        </Button>
         <InboxPopover projectId={project.id} />
         <Button
           size="icon"
@@ -350,6 +366,7 @@ export function WorkspaceHud({
       </div>
       <section
         aria-labelledby="todo-title"
+        data-tour="todo"
         className="pointer-events-auto absolute top-17 right-4 z-10 w-75 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur"
       >
         {guideOpen ? (
@@ -495,6 +512,7 @@ export function WorkspaceHud({
           </>
         )}
       </section>
+      <TourGuide accountId={me?.account_id} mode={tour} onChange={setTour} />
     </>
   )
 }

@@ -116,6 +116,7 @@ function Workspace({ projectId }: { projectId: string }) {
         return (
           <main
             ref={sceneHost}
+            data-tour="office"
             className="relative h-dvh min-h-[620px] overflow-hidden bg-muted/30"
             aria-label="프로젝트 워크스페이스"
           >
