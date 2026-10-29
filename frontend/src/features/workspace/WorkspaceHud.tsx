@@ -86,17 +86,15 @@ const notices: Record<
     text: '이제 변경 제안, 회의실, 작업 현황, 설계 관계를 쓸 수 있어요. 문서 수정도 이제 변경 제안으로 해요.',
   },
 }
-const leaderBubbles = [
-  "문서 초안 4종을 올려 주세요. 하나씩 올려 주면 바로 검토할게요. 4종이 승인되면 '프로젝트 시작'을 눌러 주세요.",
-  '4종 모두 받았어요! 지금 검토하고 있어요. 고칠 곳은 문서함에 표시해 둘게요.',
-  "문서 4종이 모두 승인됐어요! 가이드에서 '프로젝트 시작'을 눌러 주세요.",
-  '프로젝트가 시작됐어요! 이제 고칠 곳이 보이면 변경 제안으로 올릴게요. 팀원을 초대해 보세요.',
-]
 
 type Step = {
   title: string
   detail: string
   done: boolean
+  /** 필수 표시(문서 초안 4종) */
+  required?: boolean
+  /** 건너뛴 선택 단계: 완료로 세고 '건너뜀'과 다시 하기 링크를 둔다 */
+  skipped?: boolean
   locked?: boolean
   optional?: boolean
   action?: {
@@ -201,6 +199,10 @@ export function WorkspaceHud({
   })
   const hiddenKey = guideKey(project.id, isLeader ? 'leader' : 'member')
   const readKey = guideKey(project.id, 'baseline-read')
+  // API 없음: 가이드 상태 저장 필드(시작 가이드 백엔드 메모 1). 건너뛴 초대는 브라우저에 둔다.
+  const inviteSkipKey = guideKey(project.id, 'invite-skipped')
+  const invited = onboarding.member_count > 1
+  const inviteSkipped = !invited && readFlag(inviteSkipKey)
   const uploaded = onboarding.required_documents.filter(
     (item) => item.uploaded,
   ).length
@@ -230,9 +232,23 @@ export function WorkspaceHud({
     stage !== null && seenStage !== null && stage > seenStage
       ? notices[stage]
       : undefined
+  // 10-29: 팀원 초대(선택)를 1순위로, 건너뛸 수 있게. 시작 조건은 그대로 4종 승인.
   const leaderSteps: Step[] = [
     {
+      title: '팀원 초대하기',
+      detail: invited
+        ? '팀원이 들어왔어요.'
+        : inviteSkipped
+          ? '나중에 초대해도 돼요.'
+          : '선택 · 같이 일할 사람을 먼저 불러요. 건너뛰어도 문서는 올릴 수 있어요.',
+      done: invited || inviteSkipped,
+      skipped: inviteSkipped,
+      optional: true,
+      action: { label: '팀원 초대하기', pane: 'settings', focus: 'team' },
+    },
+    {
       title: '문서 초안 4종 올리기',
+      required: true,
       detail: allUploaded
         ? `${uploaded} / 4 올림`
         : '초안이어도 괜찮아요. 올리면 비비가 바로 검토해요.',
@@ -312,19 +328,6 @@ export function WorkspaceHud({
           ? '시작하면 변경 제안과 작업 계획을 받을 수 있어요'
           : undefined,
     },
-    {
-      title: '팀원 초대하기',
-      detail: started
-        ? '선택 · 팀원을 부르면 같이 작업 계획을 올릴 수 있어요.'
-        : '선택 · 언제든 할 수 있어요.',
-      done: onboarding.member_count > 1,
-      optional: true,
-      action: {
-        label: started ? '팀원 초대하기' : '초대하기',
-        pane: 'settings',
-        focus: 'team',
-      },
-    },
   ]
   const memberSteps: Step[] = [
     {
@@ -375,13 +378,6 @@ export function WorkspaceHud({
   const current = steps.findIndex((step) => !step.done && !step.locked)
   const agentStepNow =
     !isLeader && guideOpen && steps[current]?.title === '내 에이전트 연결하기'
-  const bubble = !guideOpen
-    ? undefined
-    : isLeader
-      ? leaderBubbles[stage ?? 1]
-      : agentStepNow
-        ? `어서 오세요, ${me?.name ?? ''}님. 내 에이전트부터 연결해요.`
-        : undefined
   // 비비 대화 창이 열린 동안은 단축 바만 남기고 다른 위젯은 숨긴다(PNL-12 B안).
   const chatOpen = pane === 'chat'
   // 팀 목록(SCR-06 수정안 · 팀 현황): 사람마다 지금 하는 일과 연결된 에이전트를 한 줄씩.
@@ -676,7 +672,6 @@ export function WorkspaceHud({
         lockedReason="프로젝트를 시작하면 열려요"
         badges={{ changes: reviewCount }}
         highlight={isLeader && !allUploaded ? 'documents' : undefined}
-        bubble={bubble}
       />
       <div
         data-tour="top"
@@ -704,11 +699,6 @@ export function WorkspaceHud({
           >
             <Settings />
           </Button>
-          {agentStepNow && (
-            <span className="absolute top-full right-0 mt-2 rounded-lg bg-primary px-2 py-1 text-[11px] font-bold whitespace-nowrap text-primary-foreground">
-              에이전트 연결은 여기
-            </span>
-          )}
         </span>
       </div>
       <section
@@ -737,7 +727,8 @@ export function WorkspaceHud({
                     key={step.title}
                     className={cn(
                       'rounded-xl border p-2.5',
-                      index === current && 'border-primary bg-primary/5',
+                      (index === current || (step.skipped && started)) &&
+                        'border-primary bg-primary/5',
                       locked && 'opacity-55',
                     )}
                   >
@@ -761,14 +752,19 @@ export function WorkspaceHud({
                       <div className="grid flex-1 gap-0.5">
                         <strong className="text-sm">
                           {step.title}
-                          {index === 0 && isLeader && (
+                          {step.required && (
                             <span className="ml-1.5 rounded bg-destructive/10 px-1 text-[10px] text-destructive">
                               필수
                             </span>
                           )}
-                          {step.done && (
+                          {step.done && !step.skipped && (
                             <span className="ml-1.5 text-[11px] font-semibold text-green-700">
                               완료
+                            </span>
+                          )}
+                          {step.skipped && (
+                            <span className="ml-1.5 text-[11px] font-semibold text-muted-foreground">
+                              건너뜀
                             </span>
                           )}
                         </strong>
@@ -776,6 +772,21 @@ export function WorkspaceHud({
                           {step.detail}
                         </span>
                         {!step.done && !locked && step.children}
+                        {/* 건너뛴 초대: 시작 전에는 링크, 시작 뒤에는 노란 칸에 버튼을 다시 보여 준다(10-29). */}
+                        {step.skipped && step.action && (
+                          <span className="mt-1">
+                            <Button
+                              size="xs"
+                              variant={started ? 'default' : 'link'}
+                              className={started ? undefined : 'h-auto p-0'}
+                              onClick={() =>
+                                openPane(step.action!.pane!, step.action!.focus)
+                              }
+                            >
+                              {started ? step.action.label : '지금 초대하기'}
+                            </Button>
+                          </span>
+                        )}
                         {!step.done && !locked && (
                           <span className="mt-1 flex flex-wrap items-center gap-2">
                             {step.action && (
@@ -810,6 +821,18 @@ export function WorkspaceHud({
                                   읽었어요
                                 </Button>
                               )}
+                            {step.optional && index === current && (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => {
+                                  writeFlag(inviteSkipKey)
+                                  rerender((value) => value + 1)
+                                }}
+                              >
+                                나중에 할게요
+                              </Button>
+                            )}
                             {step.note && (
                               <span className="text-[11px] text-muted-foreground">
                                 {step.note}
