@@ -124,8 +124,19 @@ export function RelationsView({ projectId }: { projectId: string }) {
                             <span className="text-muted-foreground">
                               {edge.confirmed
                                 ? '확인된 관계'
-                                : '검토할 후보 · 확정 아님'}
+                                : '검토할 후보 · 확정 아님 · 계획에 근거 설계로 넣으면 확정'}
                             </span>
+                            {/* API 없음: 비비가 이 후보를 본 이유는 관계 응답(MON-A03)에 아직 없다. */}
+                            {!edge.confirmed && (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                className="ml-2"
+                                onClick={() => openPane('tasks')}
+                              >
+                                작업 계획 등록
+                              </Button>
+                            )}
                           </li>
                         ))}
                       </ul>

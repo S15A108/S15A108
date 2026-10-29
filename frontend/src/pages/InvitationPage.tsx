@@ -107,7 +107,7 @@ export default function InvitationPage() {
                   className="flex items-center gap-2 text-sm text-muted-foreground"
                 >
                   <LoaderCircle className="size-4 animate-spin" />
-                  프로젝트를 여는 중이에요. {session.data?.email}로 참여해요.
+                  팀에 들어가는 중이에요. {session.data?.email}로 참여해요.
                 </p>
               )
             ) : (

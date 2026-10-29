@@ -5,12 +5,15 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { ArrowUpRight, Plus, Building2, Search } from 'lucide-react'
+import { ArrowUpRight, Plus, Search } from 'lucide-react'
 import { projectsApi } from '@/api/services'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
 import { projectPlacements } from '@/features/projects/placements'
-import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
+import {
+  BuildingDesignPicker,
+  DesignIcon,
+} from '@/features/projects/BuildingDesignPicker'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { BuildingDesign } from '@/stores/workspaceStore'
 import { AsyncState } from '@/components/AsyncState'
@@ -185,8 +188,15 @@ function City() {
                     key={project.id}
                     to={`/projects/${project.id}`}
                   >
+                    {/* 카드 왼쪽 위 건물 그림으로 목록과 3D 건물을 짝짓는다(SCR-04 수정안 10-29). 상태 숫자·팀 얼굴·마지막 활동은 API 없음(나의 도시 백엔드 메모 7). */}
                     <div className="mb-4 flex items-center justify-between">
-                      <Building2 className="size-5 text-primary" />
+                      <DesignIcon
+                        design={
+                          assigned.find((item) => item.id === project.id)
+                            ?.design ?? 'modern'
+                        }
+                        className="size-10"
+                      />
                       <ArrowUpRight className="size-4 text-muted-foreground group-hover:text-foreground" />
                     </div>
                     <h4 className="font-semibold">{project.name}</h4>
@@ -195,9 +205,13 @@ function City() {
                         '비비와 프로젝트를 준비해 보세요.'}
                     </p>
                     <div className="mt-5 flex items-center justify-between text-xs">
-                      <span>
+                      <Badge
+                        variant={
+                          project.my_role === 'LEADER' ? 'default' : 'outline'
+                        }
+                      >
                         {project.my_role === 'LEADER' ? '인간 팀장' : '팀원'}
-                      </span>
+                      </Badge>
                       <Badge variant="secondary">
                         {project.current_baseline
                           ? `기준 v${project.current_baseline.version_no}`
@@ -216,6 +230,13 @@ function City() {
                   {nextLot === undefined
                     ? '모든 부지를 사용 중이에요'
                     : '프로젝트 만들기'}
+                  {nextLot !== undefined && (
+                    <span className="text-xs">
+                      남은 부지{' '}
+                      {8 - assigned.filter((item) => item.lot !== null).length}
+                      칸
+                    </span>
+                  )}
                 </button>
               </div>
               {projects.hasNextPage && (

@@ -9,7 +9,7 @@ const buildingDesigns: { value: BuildingDesign; label: string }[] = [
   { value: 'wood', label: '목조 스튜디오' },
 ]
 
-function DesignIcon({
+export function DesignIcon({
   design,
   className,
 }: {

@@ -71,6 +71,7 @@ export function DashboardOverview({
       label: '검토할 변경 제안',
       value: String(review),
       onClick: () => openPane('changes'),
+      todo: review > 0 ? '검토하기 ›' : undefined,
     },
     {
       label: '선택 기간 AI 호출',
@@ -81,6 +82,7 @@ export function DashboardOverview({
       label: '에이전트 연결',
       value: `${connected} / ${members.length}`,
       onClick: () => onTab('agents'),
+      todo: connected < members.length ? '연결 확인 ›' : undefined,
     },
   ]
   return (
@@ -102,10 +104,18 @@ export function DashboardOverview({
               <span className="mt-2 block text-lg font-semibold">
                 {metric.value}
               </span>
+              {metric.todo && (
+                <span className="mt-1 block text-xs font-semibold">
+                  {metric.todo}
+                </span>
+              )}
             </>
           )
+          // 할 일이 있는 칸(검토할 변경, 연결 안 된 에이전트)만 노란 바탕으로 먼저 보이게 한다(PNL-09 수정안).
           const className = cn(
             'rounded-xl border bg-muted/30 p-4 text-left hover:bg-muted/60',
+            metric.todo &&
+              'border-primary/50 bg-primary/10 hover:bg-primary/20',
             empty && 'opacity-60',
           )
           return (

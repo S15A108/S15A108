@@ -97,3 +97,12 @@ it('아직 기록이 없으면 시작 순서 3개를 보여 준다', async () =>
     focusId: 'agent',
   })
 })
+
+it('검토할 변경 제안이 있으면 그 칸에 검토하기를 붙여 먼저 보이게 한다', async () => {
+  mount(96)
+  expect(
+    await screen.findByRole('button', {
+      name: /검토할 변경 제안\s*1\s*검토하기 ›/,
+    }),
+  ).toBeInTheDocument()
+})
