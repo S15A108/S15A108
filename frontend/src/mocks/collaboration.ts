@@ -304,35 +304,96 @@ export function collaborationRoutes(
           by_validation: [],
         },
       }
-    case 'MON-A03':
+    case 'MON-A03': {
+      // task_id를 주면 그 작업 기준으로 설계 항목·검증·관련 변경 제안만 돌려준다. 변경 제안 연결은 예시로 후보(점선)로 둔다.
+      const taskId = query.get('task_id')
+      const tasks = project.tasks.filter(
+        (task) => !taskId || task.id === taskId,
+      )
+      const itemIds = new Set(
+        tasks.flatMap((task) =>
+          task.current_plan_revision.plan.design_refs.map(
+            (reference) => reference.design_item_id,
+          ),
+        ),
+      )
+      const proposals = project.proposals.filter((proposal) =>
+        proposal.items.some(
+          (item) => item.design_item_id && itemIds.has(item.design_item_id),
+        ),
+      )
       return {
         data: {
           nodes: [
-            ...project.tasks.map((task) => ({
+            ...tasks.map((task) => ({
               id: task.id,
               type: 'TASK',
-              label: task.current_plan_revision.plan.title,
+              label: `${task.key} ${task.current_plan_revision.plan.title}`,
             })),
             ...project.items
-              .filter((item) => item.status === 'APPROVED')
+              .filter(
+                (item) =>
+                  item.status === 'APPROVED' &&
+                  (!taskId || itemIds.has(item.design_item_id)),
+              )
               .map((item) => ({
                 id: item.design_item_id,
                 type: 'DESIGN_ITEM',
                 label: item.key,
               })),
-          ],
-          edges: project.tasks.flatMap((task) =>
-            task.current_plan_revision.plan.design_refs.map((reference) => ({
-              from_id: task.id,
-              from_type: 'TASK',
-              to_id: reference.design_item_id,
-              to_type: 'DESIGN_ITEM',
-              relation: reference.relation,
-              confirmed: true,
+            ...tasks
+              .filter((task) => task.validation)
+              .map((task) => ({
+                id: task.validation!.id,
+                type: 'VALIDATION',
+                label: `계획 검증 ${task.validation!.status}`,
+              })),
+            ...proposals.map((proposal) => ({
+              id: proposal.id,
+              type: 'CHANGE_PROPOSAL',
+              label: proposal.title,
             })),
-          ),
+          ],
+          edges: [
+            ...tasks.flatMap((task) =>
+              task.current_plan_revision.plan.design_refs.map((reference) => ({
+                from_id: task.id,
+                from_type: 'TASK',
+                to_id: reference.design_item_id,
+                to_type: 'DESIGN_ITEM',
+                relation: reference.relation,
+                confirmed: true,
+              })),
+            ),
+            ...tasks
+              .filter((task) => task.validation)
+              .map((task) => ({
+                from_id: task.id,
+                from_type: 'TASK',
+                to_id: task.validation!.id,
+                to_type: 'VALIDATION',
+                relation: 'VALIDATED_BY',
+                confirmed: true,
+              })),
+            ...proposals.flatMap((proposal) =>
+              proposal.items
+                .filter(
+                  (item) =>
+                    item.design_item_id && itemIds.has(item.design_item_id),
+                )
+                .map((item) => ({
+                  from_id: proposal.id,
+                  from_type: 'CHANGE_PROPOSAL',
+                  to_id: item.design_item_id!,
+                  to_type: 'DESIGN_ITEM',
+                  relation: 'CHANGES',
+                  confirmed: false,
+                })),
+            ),
+          ],
         },
       }
+    }
     case 'MON-A04':
       return {
         data: page(

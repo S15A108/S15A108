@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -6,9 +6,9 @@ import { z } from 'zod'
 import { Activity, Wallet } from 'lucide-react'
 import { dashboardApi } from '@/api/services/dashboard'
 import { membersApi } from '@/api/services/members'
-import type { RelationNode, UsageBucket } from '@/api/contracts/common'
-import type { RelationsResponse } from './schemas'
+import type { UsageBucket } from '@/api/contracts/common'
 import { DashboardOverview } from './DashboardOverview'
+import { RelationsView } from './RelationsView'
 import { FEATURE_LABELS, dashboardTabs } from './labels'
 import type { DashboardTab } from './labels'
 import { AsyncState } from '@/components/AsyncState'
@@ -49,18 +49,6 @@ const dateRangeSchema = z
     message: '종료일은 시작일 이후여야 해요.',
   })
 type DateRange = z.infer<typeof dateRangeSchema>
-const NODE_TYPES = [
-  'TASK',
-  'DESIGN_ITEM',
-  'VALIDATION',
-  'CHANGE_PROPOSAL',
-] as const
-const NODE_LABELS: Record<RelationNode['type'], string> = {
-  TASK: '작업',
-  DESIGN_ITEM: '설계 항목',
-  VALIDATION: '검증',
-  CHANGE_PROPOSAL: '변경 요청',
-}
 
 // 단축 바 5번(설계 관계)과 6번(대시보드)이 같이 쓴다.
 export function ActivityPanel({
@@ -95,11 +83,6 @@ export function ActivityPanel({
         to: localDate(range.to, true),
       }),
   })
-  const relations = useQuery({
-    queryKey: ['projects', projectId, 'relations'],
-    queryFn: () => dashboardApi.relations(projectId),
-    enabled: view === 'relations',
-  })
   const activities = useQuery({
     queryKey: ['projects', projectId, 'activities', cursor],
     queryFn: () => dashboardApi.activities(projectId, { cursor, limit: 20 }),
@@ -121,30 +104,7 @@ export function ActivityPanel({
       ? (members.data?.items.find((member) => member.account_id === accountId)
           ?.name ?? `회원 #${accountId}`)
       : '시스템'
-  if (view === 'relations')
-    return (
-      <div className="grid gap-6">
-        <header>
-          <h2 className="text-xl font-bold">작업·설계 관계</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            작업을 기준으로 설계 항목, 검증, 변경 제안의 관계를 그려요. 실선은
-            확인된 관계예요.
-          </p>
-        </header>
-        <AsyncState query={relations}>
-          {(data) =>
-            data.nodes.length ? (
-              <RelationGraph data={data} />
-            ) : (
-              <EmptyState>
-                아직 작업이 없어요. 기준 v1이 생긴 뒤 작업 계획을 등록하면
-                여기에 관계가 그려져요.
-              </EmptyState>
-            )
-          }
-        </AsyncState>
-      </div>
-    )
+  if (view === 'relations') return <RelationsView projectId={projectId} />
   return (
     <div className="grid gap-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -584,173 +544,5 @@ function UsageTable({
         <p className="text-xs text-muted-foreground">기록된 사용량이 없어요.</p>
       )}
     </section>
-  )
-}
-
-function RelationGraph({ data }: { data: RelationsResponse }) {
-  const markerId = useId()
-  const openPane = useWorkspaceStore((state) => state.openPane)
-  const visible = NODE_TYPES.flatMap((type, column) =>
-    data.nodes
-      .filter((node) => node.type === type)
-      .slice(0, 8)
-      .map((node, row) => ({
-        ...node,
-        x: 10 + column * 220,
-        y: 45 + row * 82,
-      })),
-  )
-  const byKey = new Map(
-    visible.map((node) => [`${node.type}:${node.id}`, node]),
-  )
-  const edges = data.edges.flatMap((edge) => {
-    const from = byKey.get(`${edge.from_type}:${edge.from_id}`),
-      to = byKey.get(`${edge.to_type}:${edge.to_id}`)
-    return from && to ? [{ ...edge, from, to }] : []
-  })
-  const height =
-    60 +
-    Math.max(
-      1,
-      ...NODE_TYPES.map(
-        (type) => visible.filter((node) => node.type === type).length,
-      ),
-    ) *
-      82
-  const selectNode = (node: RelationNode) => {
-    if (node.type === 'TASK') openPane('tasks', node.id)
-    else if (node.type === 'CHANGE_PROPOSAL') openPane('changes', node.id)
-    else if (node.type === 'DESIGN_ITEM') openPane('planning')
-  }
-  return (
-    <div className="grid gap-4">
-      <p className="text-xs text-muted-foreground">
-        실선은 확인된 관계, 점선은 검토할 후보예요. 후보는 확정된 의존 관계로
-        보지 않아요.
-      </p>
-      <div className="overflow-x-auto rounded-xl border bg-muted/20 p-3">
-        <svg
-          role="img"
-          aria-label="작업·설계·검증·변경 요청 관계 그래프"
-          viewBox={`0 0 880 ${height}`}
-          className="w-full min-w-[740px]"
-        >
-          <defs>
-            <marker
-              id={markerId}
-              markerWidth="7"
-              markerHeight="7"
-              refX="6"
-              refY="3"
-              orient="auto"
-            >
-              <path d="M0,0 L0,6 L6,3 z" fill="currentColor" />
-            </marker>
-          </defs>
-          {NODE_TYPES.map((type, index) => (
-            <text
-              key={type}
-              x={100 + index * 220}
-              y="20"
-              textAnchor="middle"
-              className="fill-muted-foreground text-[12px]"
-            >
-              {NODE_LABELS[type]}
-            </text>
-          ))}
-          {edges.map((edge, index) => (
-            <path
-              key={`${edge.from.type}:${edge.from.id}:${edge.to.type}:${edge.to.id}:${index}`}
-              d={`M${edge.from.x + 90},${edge.from.y + 25} L${edge.to.x + 90},${edge.to.y + 25}`}
-              className="text-muted-foreground/60"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeDasharray={edge.confirmed ? undefined : '5 5'}
-              fill="none"
-              markerEnd={`url(#${markerId})`}
-            >
-              <title>
-                {edge.from.label} → {edge.to.label}: {edge.relation} (
-                {edge.confirmed ? '확인됨' : '후보'})
-              </title>
-            </path>
-          ))}
-          {visible.map((node) => (
-            <g key={`${node.type}:${node.id}`}>
-              <rect
-                x={node.x}
-                y={node.y}
-                width="180"
-                height="50"
-                rx="10"
-                className="fill-card stroke-border"
-              />
-              <text
-                x={node.x + 90}
-                y={node.y + 22}
-                textAnchor="middle"
-                className="fill-foreground text-[12px]"
-              >
-                {node.label.length > 17
-                  ? `${node.label.slice(0, 16)}…`
-                  : node.label}
-              </text>
-              <text
-                x={node.x + 90}
-                y={node.y + 38}
-                textAnchor="middle"
-                className="fill-muted-foreground text-[10px]"
-              >
-                #{node.id}
-              </text>
-              <title>{node.label}</title>
-            </g>
-          ))}
-        </svg>
-      </div>
-      {visible.length < data.nodes.length && (
-        <p className="text-xs text-muted-foreground">
-          그래프는 종류별 최대 8개 항목을 표시해요. 전체 {data.nodes.length}개
-          중 {visible.length}개와 그 사이의 관계 {edges.length}개를 보여요.
-        </p>
-      )}
-      <details className="rounded-xl border p-4">
-        <summary className="cursor-pointer text-sm font-medium">
-          전체 항목과 관계 읽기
-        </summary>
-        <ul className="mt-4 grid gap-2 text-sm">
-          {data.nodes.map((node) => (
-            <li
-              key={`${node.type}:${node.id}`}
-              className="flex flex-wrap items-center gap-2"
-            >
-              <span className="text-xs text-muted-foreground">
-                {NODE_LABELS[node.type]} #{node.id}
-              </span>
-              {node.type === 'VALIDATION' ? (
-                <span>{node.label}</span>
-              ) : (
-                <button
-                  type="button"
-                  className="text-primary hover:underline"
-                  onClick={() => selectNode(node)}
-                >
-                  {node.label}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <ul className="mt-4 grid gap-2 border-t pt-4 text-xs text-muted-foreground">
-          {data.edges.map((edge, index) => (
-            <li key={index}>
-              {NODE_LABELS[edge.from_type]} #{edge.from_id} →{' '}
-              {NODE_LABELS[edge.to_type]} #{edge.to_id} · {edge.relation} ·{' '}
-              {edge.confirmed ? '확인됨' : '후보'}
-            </li>
-          ))}
-        </ul>
-      </details>
-    </div>
   )
 }
