@@ -55,6 +55,7 @@ import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { describeContent, lines } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
+import { cn } from '@/lib/utils'
 
 interface Props {
   projectId: string
@@ -66,6 +67,8 @@ const relationLabel = {
   IMPLEMENTS: '구현',
   CHANGES: '계약 변경',
 } as const
+
+const taskSteps = ['계획 작성', '계획 검증', '작업 시작', '완료 보고']
 
 export function TasksPanel({ projectId, isLeader }: Props) {
   const session = useSession()
@@ -178,6 +181,15 @@ export function TasksPanel({ projectId, isLeader }: Props) {
         : blocked
           ? 'revise'
           : 'validate'
+  // 오른쪽 단계 표시(PNL-05 수정안): 계획 작성 → 계획 검증 → 작업 시작 → 완료 보고
+  const step =
+    task?.status === 'COMPLETED'
+      ? 4
+      : task?.status === 'IN_PROGRESS'
+        ? 3
+        : canStart || task?.status === 'WAITING'
+          ? 2
+          : 1
   const startBlocked =
     result?.status === 'RUNNING'
       ? '계획 검증 중이라 시작할 수 없어요.'
@@ -237,14 +249,16 @@ export function TasksPanel({ projectId, isLeader }: Props) {
             검증은 실제 코드 품질이나 테스트 통과를 뜻하지 않아요.
           </p>
         </div>
+        {/* 노란 버튼은 화면에 하나(작업 시작)만 두고 위 버튼은 테두리로(PNL-05 수정안). */}
         <Button
+          variant="outline"
           onClick={() => {
             setFormTask(undefined)
             setEditing('new')
           }}
         >
           <Plus />
-          작업 계획 등록
+          작업 계획
         </Button>
       </header>
       {action.message && (
@@ -440,8 +454,40 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                         )}
                       </div>
                     )}
+                    <ol
+                      aria-label="작업 단계"
+                      className="flex flex-wrap items-center gap-1.5 border-t pt-4 text-xs"
+                    >
+                      {taskSteps.map((label, index) => (
+                        <li
+                          key={label}
+                          aria-current={index === step ? 'step' : undefined}
+                          className={cn(
+                            'rounded-full px-2.5 py-1',
+                            index < step && 'bg-muted text-muted-foreground',
+                            index === step && 'bg-primary font-semibold',
+                            index > step && 'border text-muted-foreground',
+                          )}
+                        >
+                          {index < step ? '✓ ' : ''}
+                          {label}
+                        </li>
+                      ))}
+                    </ol>
                     {/* 주 버튼은 상태마다 하나(M5): 진행 중이면 완료 보고, 시작할 수 있으면 시작, 막혔으면 계획 고치기, 그 밖에는 계획 검증. */}
-                    <div className="flex flex-wrap items-start gap-2 border-t pt-4">
+                    <div
+                      className={cn(
+                        'flex flex-wrap items-start gap-2',
+                        isOwner &&
+                          active &&
+                          'rounded-xl border border-primary/40 bg-primary/5 p-4',
+                      )}
+                    >
+                      {isOwner && active && (
+                        <p className="w-full text-xs font-semibold">
+                          다음 할 일
+                        </p>
+                      )}
                       {isOwner && active && primary === 'revise' && (
                         <Button
                           disabled={action.busy}
@@ -455,9 +501,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                       )}
                       {isOwner && active && (
                         <Button
-                          variant={
-                            primary === 'validate' ? 'default' : 'outline'
-                          }
+                          variant={primary === 'validate' ? 'default' : 'link'}
+                          size={primary === 'validate' ? 'default' : 'sm'}
                           disabled={action.busy || result?.status === 'RUNNING'}
                           onClick={() =>
                             perform(
@@ -471,8 +516,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                             )
                           }
                         >
-                          <ClipboardCheck />
-                          계획 검증
+                          {primary === 'validate' && <ClipboardCheck />}
+                          {primary === 'validate' ? '계획 검증' : '다시 검증'}
                         </Button>
                       )}
                       {isOwner &&

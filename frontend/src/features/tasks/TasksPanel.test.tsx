@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import {
@@ -246,4 +253,16 @@ it('완료 보고는 완료 기준을 모두 체크해야 보내고 달라진 �
       { description: '정렬을 더함' },
     ],
   })
+})
+
+// PNL-05 수정안: 단계 표시와 '다음 할 일' 상자. 계획 검증은 통과 뒤 상자 안 '다시 검증'으로 남는다.
+it('검증을 통과한 작업은 단계가 작업 시작에 있고 다음 할 일 상자에 다시 검증을 둔다', async () => {
+  show(false)
+  const steps = await screen.findByRole('list', { name: '작업 단계' })
+  expect(within(steps).getByText('작업 시작')).toHaveAttribute(
+    'aria-current',
+    'step',
+  )
+  expect(screen.getByText('다음 할 일')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '다시 검증' })).toBeEnabled()
 })
