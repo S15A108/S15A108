@@ -8,12 +8,6 @@ import { ActionForm } from '@/components/ActionForm'
 import { SourceLinks } from '@/components/SourceLinks'
 import { Badge } from '@/components/ui/badge'
 
-const suggestions = [
-  '로그인에 실패하면 뭐라고 안내해요?',
-  '팀장만 할 수 있는 일은?',
-  '초대가 만료되면 어떻게 안내하나요?',
-]
-
 // 단축 바 가운데 비비 버튼(B안)으로 여는 대화. 대화는 창을 연 동안만 보인다.
 export function BibiPanel({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<
@@ -89,19 +83,6 @@ export function BibiPanel({ projectId }: { projectId: string }) {
               {getApiErrorMessage(mutation.error)}
             </p>
           )}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {suggestions.map((question) => (
-            <button
-              key={question}
-              type="button"
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate(question)}
-              className="rounded-full border px-3 py-1 text-xs hover:bg-muted"
-            >
-              {question}
-            </button>
-          ))}
         </div>
         <ActionForm
           key={messages.length}
