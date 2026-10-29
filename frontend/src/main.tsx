@@ -13,6 +13,12 @@ async function bootstrap() {
     const { setupMockApi } = await import('@/mocks/setup')
     setupMockApi()
   }
+  // 이미지·링크를 끌어 옮기지 못하게 한다(-webkit-user-drag가 없는 Firefox까지). draggable="true"로 연 곳만 둔다.
+  document.addEventListener('dragstart', (event) => {
+    if (!(event.target as Element | null)?.closest?.('[draggable="true"]'))
+      event.preventDefault()
+  })
+
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

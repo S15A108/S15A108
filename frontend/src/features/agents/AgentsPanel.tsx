@@ -154,7 +154,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                       <p className="text-sm font-semibold">
                         이 화면을 닫으면 토큰 값을 다시 볼 수 없어요.
                       </p>
-                      <code className="block overflow-x-auto rounded-lg bg-background p-3 text-xs">
+                      <code className="block overflow-x-auto rounded-lg bg-background p-3 text-xs select-text">
                         {fresh.token}
                       </code>
                       <p className="text-xs text-muted-foreground">
@@ -286,7 +286,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                       <li key={step}>{step}</li>
                     ))}
                   </ol>
-                  <code className="block overflow-x-auto rounded-lg bg-muted p-3 text-xs">
+                  <code className="block overflow-x-auto rounded-lg bg-muted p-3 text-xs select-text">
                     {data.guide.mcp_url}
                   </code>
                   <CopyButton
@@ -295,7 +295,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                   />
                 </Step>
                 <Step number={3} title="CLAUDE.md 붙여넣기">
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre-wrap">
+                  <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre-wrap select-text">
                     {data.guide.claude_md_snippet}
                   </pre>
                   <CopyButton

@@ -192,7 +192,7 @@ export function DocumentReview({
               )}
               {stage.step === 1 && (
                 <div className="grid gap-3">
-                  <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap">
+                  <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
                     {data.content}
                   </pre>
                   {owner && failed ? (
@@ -301,7 +301,7 @@ export function DocumentReview({
                         }}
                       />
                     ) : (
-                      <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap">
+                      <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
                         {data.content}
                       </pre>
                     )}
@@ -346,7 +346,7 @@ export function DocumentReview({
                           승인을 요청했어요. ·{' '}
                           {formatDate(submission.submission.submitted_at)}
                         </p>
-                        <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap">
+                        <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
                           {submission.content}
                         </pre>
                         <p className="text-xs text-muted-foreground">
@@ -501,7 +501,7 @@ function Suggestions({
                 </span>
               )}
             </p>
-            <div className="grid gap-1 font-mono text-xs leading-6 whitespace-pre-wrap">
+            <div className="grid gap-1 font-mono text-xs leading-6 whitespace-pre-wrap select-text">
               <p className="rounded bg-destructive/5 px-2 text-destructive">
                 − {suggestion.original_text}
               </p>

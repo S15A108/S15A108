@@ -1088,7 +1088,7 @@ function DocumentDetail({
                   </span>
                 </div>
                 {data.version.content !== undefined ? (
-                  <pre className="max-h-[32rem] overflow-auto rounded-xl border bg-muted/20 p-5 font-sans text-sm leading-7 whitespace-pre-wrap">
+                  <pre className="max-h-[32rem] overflow-auto rounded-xl border bg-muted/20 p-5 font-sans text-sm leading-7 whitespace-pre-wrap select-text">
                     {data.version.content}
                   </pre>
                 ) : (
