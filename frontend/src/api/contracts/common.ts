@@ -119,6 +119,45 @@ export const documentSchema = z.object({
 })
 export type Document = z.infer<typeof documentSchema>
 
+export const documentReviewReferenceSchema = z.object({
+  document_id: idSchema,
+  document_version_id: idSchema,
+  kind: z.string(),
+  version_no: z.number().int(),
+  content: z.string(),
+})
+export type DocumentReviewReference = z.infer<
+  typeof documentReviewReferenceSchema
+>
+
+export const documentReviewSuggestionSchema = z.object({
+  id: idSchema,
+  explanation: z.string(),
+  original_text: z.string(),
+  replacement_text: z.string(),
+  decision: z.enum(['PENDING', 'APPLIED', 'SKIPPED']),
+})
+export type DocumentReviewSuggestion = z.infer<
+  typeof documentReviewSuggestionSchema
+>
+
+export const documentReviewSubmissionSchema = z.object({
+  id: idSchema,
+  document_id: idSchema,
+  document_version_id: idSchema,
+  submitted_by: idSchema,
+  revision: z.number().int(),
+  status: z.enum(['SUBMITTED', 'APPROVED', 'REJECTED']),
+  content_hash: z.string(),
+  submitted_at: timeSchema,
+  decided_by: idSchema.optional(),
+  decided_at: timeSchema.optional(),
+  rejection_reason: z.string().optional(),
+})
+export type DocumentReviewSubmission = z.infer<
+  typeof documentReviewSubmissionSchema
+>
+
 export const designItemVersionSchema = z.object({
   id: idSchema,
   design_item_id: idSchema,
@@ -230,6 +269,40 @@ export const usageSchema = z.object({
   tokens_known: z.boolean(),
 })
 export type Usage = z.infer<typeof usageSchema>
+
+export const documentBeeReviewSchema = z.object({
+  id: idSchema,
+  input_revision: z.number().int(),
+  resolved_revision: z.number().int(),
+  reference_hash: z.string(),
+  summary: z.string(),
+  unavailable_references: z.string().array(),
+  references: documentReviewReferenceSchema.array(),
+  suggestions: documentReviewSuggestionSchema.array(),
+  usage: usageSchema.array(),
+})
+export type DocumentBeeReview = z.infer<typeof documentBeeReviewSchema>
+
+export const documentWorkingCopySchema = z.object({
+  document_id: idSchema,
+  owner_account_id: idSchema,
+  revision: z.number().int(),
+  status: z.enum(['EDITING', 'SUBMITTED', 'APPROVED', 'REJECTED']),
+  content: z.string(),
+  file_name: z.string(),
+  latest_review: documentBeeReviewSchema.optional(),
+  submissions: documentReviewSubmissionSchema.array(),
+})
+export type DocumentWorkingCopy = z.infer<typeof documentWorkingCopySchema>
+
+export const documentReviewSubmissionDetailSchema = z.object({
+  submission: documentReviewSubmissionSchema,
+  content: z.string(),
+  review: documentBeeReviewSchema,
+})
+export type DocumentReviewSubmissionDetail = z.infer<
+  typeof documentReviewSubmissionDetailSchema
+>
 
 export const generationSchema = z.object({
   origin: z.enum(['MODEL', 'TEMPLATE']),

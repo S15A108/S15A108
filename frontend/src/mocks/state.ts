@@ -11,6 +11,9 @@ import type {
   ContextRecord,
   DesignItemVersion,
   Document,
+  DocumentBeeReview,
+  DocumentReviewSubmission,
+  DocumentWorkingCopy,
   DocumentVersion,
   Invitation,
   Meeting,
@@ -26,7 +29,7 @@ import type {
 import { contractExamples } from './contract-examples'
 
 // 예시 데이터를 바꾸면 버전을 올려 브라우저에 남은 예전 데이터 대신 새 예시를 불러온다.
-export const MOCK_STORAGE_KEY = 'beez.mock.api.v5'
+export const MOCK_STORAGE_KEY = 'beez.mock.api.v6'
 export const DEMO_EMAIL = 'demo@beez.local'
 export const DEMO_PASSWORD = 'beez-demo-2026'
 export const MOCK_NOTICE =
@@ -58,11 +61,20 @@ export interface StoredInvitation extends Invitation {
   token: string
 }
 
+// 문서별 검토·승인(DOC-A13~A21) 상태. 제출 이력은 응답을 만들 때 붙인다.
+export type StoredWorkingCopy = Omit<DocumentWorkingCopy, 'submissions'>
+export interface StoredSubmission extends DocumentReviewSubmission {
+  content: string
+  review: DocumentBeeReview
+}
+
 export interface MockProject {
   project: Project
   members: Member[]
   documents: Document[]
   versions: DocumentVersion[]
+  working_copies: StoredWorkingCopy[]
+  submissions: StoredSubmission[]
   items: DesignItemVersion[]
   questions: PlanningQuestion[]
   baselines: Baseline[]
@@ -124,6 +136,8 @@ export function blankProject(
     ],
     documents: [],
     versions: [],
+    working_copies: [],
+    submissions: [],
     items: [],
     questions: [],
     baselines: [],
@@ -226,6 +240,15 @@ function seededProject(
       title,
       domain: '공통',
       ...(approved ? { approved_version: version } : { latest_draft: version }),
+    })
+    // 작성 건: 기준이 있는 프로젝트는 승인 완료, 준비 중 프로젝트는 비비 검토 전
+    state.working_copies.push({
+      document_id: documentId,
+      owner_account_id: account.id,
+      revision: 1,
+      status: approved ? 'APPROVED' : 'EDITING',
+      content,
+      file_name: `${kind.toLowerCase()}.md`,
     })
   })
   state.items.push({

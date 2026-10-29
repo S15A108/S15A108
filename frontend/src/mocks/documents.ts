@@ -25,6 +25,7 @@ import {
 import type { MockContext, MockReply } from './helpers'
 import { copy, nextId, now } from './state'
 import type { MockProject } from './state'
+import { reviewRoutes } from './documentReviews'
 
 export function draftSnapshotHash(project: MockProject): string {
   return `sha256:mock-drafts-${project.project.id}-${project.items
@@ -34,7 +35,10 @@ export function draftSnapshotHash(project: MockProject): string {
     .join('-')}`
 }
 
-function analyzeDocument(context: MockContext, version: DocumentVersion): void {
+export function analyzeDocument(
+  context: MockContext,
+  version: DocumentVersion,
+): void {
   const project = requireProject(context)
   if (
     project.items.some(
@@ -74,7 +78,7 @@ function analyzeDocument(context: MockContext, version: DocumentVersion): void {
   })
 }
 
-async function textOf(file: Blob): Promise<string> {
+export async function textOf(file: Blob): Promise<string> {
   if (typeof file.text === 'function') return file.text()
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -147,6 +151,15 @@ async function upload(
   })
   project.versions.push(version)
   document.latest_draft = version
+  if (!existingId)
+    project.working_copies.push({
+      document_id: document.id,
+      owner_account_id: requireAccount(context).id,
+      revision: 1,
+      status: 'EDITING',
+      content,
+      file_name: fileName,
+    })
   analyzeDocument(context, version)
   activity(context, 'DOCUMENT_UPLOADED')
   return {
@@ -160,6 +173,7 @@ export async function documentRoutes(
   context: MockContext,
 ): Promise<MockReply | undefined> {
   if (!/^(DOC|PLN|TRC)-/.test(id)) return undefined
+  if (/^DOC-A(1[3-9]|2[01])$/.test(id)) return reviewRoutes(id, context)
   const project = requireProject(context)
   const { body, params, query, database } = context
   switch (id) {
@@ -416,7 +430,7 @@ export async function documentRoutes(
       if (project.baselines.length)
         fail(
           409,
-          'baseline_already_exists',
+          'baseline_exists',
           '기준 설계 변경은 변경 제안으로 진행해 주세요.',
         )
       expectValue(draftSnapshotHash(project), body.draft_snapshot_hash)
