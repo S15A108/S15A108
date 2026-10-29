@@ -1,13 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useForm, useWatch } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { ArrowLeft, Sparkles } from 'lucide-react'
 import { meetingsApi, membersApi } from '@/api/services'
-import type { MeetingEntry } from '@/api/contracts/common'
+import type { MeetingEntry, Member } from '@/api/contracts/common'
 import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
 import { SourceLinks } from '@/components/SourceLinks'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Textarea } from '@/components/ui/textarea'
 import { useSession } from '@/features/auth/useSession'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { formatDate } from '@/lib/formatDate'
@@ -255,9 +265,9 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                             )}
                           </span>
                         </div>
-                        <p className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-sm">
+                        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-sm">
                           <span className="text-muted-foreground">참여자</span>
-                          {/* API 없음: 사람마다 관련 작업(TASK-001 등)을 붙인다. */}
+                          {/* API 없음: 사람마다 관련 작업(TASK-001 등)과 누가 추가했는지('이팀장이 추가')를 붙인다. */}
                           {meeting.participants.map((item) => {
                             const member = people.find(
                               (person) => person.id === item.member_id,
@@ -282,7 +292,32 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                               </span>
                             )
                           })}
-                        </p>
+                          {(isLeader || !!participant) && (
+                            <AddParticipant
+                              candidates={people.filter(
+                                (member) =>
+                                  !meeting.participants.some(
+                                    (item) => item.member_id === member.id,
+                                  ),
+                              )}
+                              joined={meeting.participants.map(
+                                (item) =>
+                                  people.find(
+                                    (member) => member.id === item.member_id,
+                                  )?.name ?? '팀원',
+                              )}
+                              onAdd={(memberIds) =>
+                                action.run(
+                                  () =>
+                                    meetingsApi.invite(projectId, meeting.id, {
+                                      member_ids: memberIds,
+                                    }),
+                                  '관련자를 추가했어요.',
+                                )
+                              }
+                            />
+                          )}
+                        </div>
                         <AsyncState query={entries}>
                           {() => (
                             <div
@@ -507,5 +542,156 @@ function Bubble({
         </p>
       </div>
     </div>
+  )
+}
+
+const addSchema = z.object({
+  member_ids: z.string().array().min(1, '부를 팀원을 골라 주세요.'),
+  reason: z.string().max(500, '500자까지 쓸 수 있어요.'),
+})
+type AddValues = z.infer<typeof addSchema>
+
+// 관련자 추가 · 비비가 부른 사람 말고 팀장이나 참여자가 더 부른다.
+// API 없음: 부르는 이유와 누가 추가했는지를 받을 필드가 없어 이유는 보내지 않는다. 지금 계약은 부르면 '참여 요청' 상태가 된다.
+function AddParticipant({
+  candidates,
+  joined,
+  onAdd,
+}: {
+  candidates: Member[]
+  joined: string[]
+  onAdd: (memberIds: string[]) => Promise<unknown>
+}) {
+  const [open, setOpen] = useState(false)
+  const {
+    register,
+    control,
+    setValue,
+    reset,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<AddValues>({
+    resolver: zodResolver(addSchema),
+    defaultValues: { member_ids: [], reason: '' },
+  })
+  const picked = useWatch({ control, name: 'member_ids' })
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) reset()
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-7 items-center rounded-full border border-dashed px-2.5 text-xs font-semibold text-muted-foreground hover:bg-muted"
+        >
+          + 관련자 추가
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96">
+        <form
+          noValidate
+          aria-label="관련자 추가"
+          className="grid gap-3"
+          onSubmit={handleSubmit((values) =>
+            onAdd(values.member_ids)
+              .then(() => {
+                setOpen(false)
+                reset()
+              })
+              .catch(() => undefined),
+          )}
+        >
+          <div>
+            <h4 className="font-bold">관련자 추가</h4>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              비비가 부른 사람 말고 더 불러야 할 팀원을 골라요. 팀장과 이 회의의
+              참여자 누구나 부를 수 있어요.
+            </p>
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-semibold">부를 팀원</legend>
+            {candidates.length ? (
+              candidates.map((member) => (
+                <label
+                  key={member.id}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2.5 rounded-lg border px-2.5 py-1.5',
+                    picked.includes(member.id) && 'border-2 border-foreground',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-primary"
+                    checked={picked.includes(member.id)}
+                    onChange={(event) =>
+                      setValue(
+                        'member_ids',
+                        event.target.checked
+                          ? [...picked, member.id]
+                          : picked.filter((id) => id !== member.id),
+                        { shouldValidate: true },
+                      )
+                    }
+                  />
+                  <Avatar name={member.name} />
+                  <span className="grid text-sm">
+                    <strong className="font-semibold">{member.name}</strong>
+                    <span className="text-xs text-muted-foreground">
+                      {[
+                        member.role === 'LEADER' ? '팀장' : '팀원',
+                        member.role_label,
+                        member.domain,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                </label>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                더 부를 팀원이 없어요.
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              이미 참여 중: {joined.join(', ')}
+            </p>
+            {errors.member_ids && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.member_ids.message}
+              </p>
+            )}
+          </fieldset>
+          <div className="grid gap-1.5">
+            <Label htmlFor="add-reason">부르는 이유 (선택)</Label>
+            <Textarea id="add-reason" rows={2} {...register('reason')} />
+            {errors.reason && (
+              <p role="alert" className="text-xs text-destructive">
+                {errors.reason.message}
+              </p>
+            )}
+          </div>
+          <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            추가한 사람은 알림을 받아요. 참여자 줄에 누가 불렀는지 보여요.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+            >
+              취소
+            </Button>
+            <Button type="submit" disabled={isSubmitting || !candidates.length}>
+              {picked.length ? `${picked.length}명 추가하기` : '추가하기'}
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   )
 }

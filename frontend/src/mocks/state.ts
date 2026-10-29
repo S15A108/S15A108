@@ -26,7 +26,7 @@ import type {
 import { contractExamples } from './contract-examples'
 
 // 예시 데이터를 바꾸면 버전을 올려 브라우저에 남은 예전 데이터 대신 새 예시를 불러온다.
-export const MOCK_STORAGE_KEY = 'beez.mock.api.v3'
+export const MOCK_STORAGE_KEY = 'beez.mock.api.v4'
 export const DEMO_EMAIL = 'demo@beez.local'
 export const DEMO_PASSWORD = 'beez-demo-2026'
 export const MOCK_NOTICE =
@@ -174,16 +174,29 @@ function seededProject(
     agent_connected: false,
   })
   if (first)
-    state.members.push({
-      id: '25',
-      account_id: '13',
-      name: '최팀원',
-      role: 'MEMBER',
-      domain: '디자인',
-      role_label: '디자인',
-      color: '#8f7ac8',
-      agent_connected: false,
-    })
+    state.members.push(
+      {
+        id: '25',
+        account_id: '13',
+        name: '최팀원',
+        role: 'MEMBER',
+        domain: '디자인',
+        role_label: '디자인',
+        color: '#8f7ac8',
+        agent_connected: false,
+      },
+      // 회의실 '관련자 추가' 예시: 회의에 아직 없는 팀원
+      {
+        id: '26',
+        account_id: '14',
+        name: '박팀원',
+        role: 'MEMBER',
+        domain: 'API',
+        role_label: '백엔드',
+        color: '#5f9b7a',
+        agent_connected: false,
+      },
+    )
   const labels = [
     ['PLAN', '기획안'],
     ['ERD', 'ERD'],
@@ -470,6 +483,17 @@ export function createMockDatabase(): MockDatabase {
           email: 'designer@beez.local',
           name: '최팀원',
           avatar: 'bee-purple',
+          created_at: now(),
+        },
+        password_fingerprint:
+          'sha256-ac434a1b7e6298f11544d43e5a52307bc5ca5f553050be5f59e47796e110928b',
+      },
+      {
+        profile: {
+          id: '14',
+          email: 'backend@beez.local',
+          name: '박팀원',
+          avatar: 'bee-green',
           created_at: now(),
         },
         password_fingerprint:

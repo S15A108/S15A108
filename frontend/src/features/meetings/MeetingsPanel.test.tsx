@@ -87,3 +87,24 @@ it('팀원은 대화만 하고 검토 요청은 팀장만 할 수 있다고 안�
   ).toBeDisabled()
   expect(screen.getByText('팀장만 요청할 수 있어요')).toBeInTheDocument()
 })
+
+it('참여자는 관련자 추가로 아직 없는 팀원을 골라 회의에 부른다', async () => {
+  const user = userEvent.setup()
+  renderPanel(true)
+  await screen.findByRole('heading', { name: '초대 안내 문구 검토' })
+  await user.click(screen.getByRole('button', { name: '+ 관련자 추가' }))
+  const form = await screen.findByRole('form', { name: '관련자 추가' })
+  expect(
+    within(form).getByText(/이미 참여 중: 이팀장, 김동료, 최팀원/),
+  ).toBeInTheDocument()
+  await user.click(within(form).getByRole('button', { name: '추가하기' }))
+  expect(
+    await within(form).findByText('부를 팀원을 골라 주세요.'),
+  ).toBeInTheDocument()
+  await user.click(within(form).getByRole('checkbox', { name: /박팀원/ }))
+  await user.click(within(form).getByRole('button', { name: '1명 추가하기' }))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '관련자를 추가했어요.',
+  )
+  expect(await screen.findByText('박팀원')).toBeInTheDocument()
+})
