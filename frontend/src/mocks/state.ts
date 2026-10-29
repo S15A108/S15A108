@@ -26,7 +26,7 @@ import type {
 import { contractExamples } from './contract-examples'
 
 // 예시 데이터를 바꾸면 버전을 올려 브라우저에 남은 예전 데이터 대신 새 예시를 불러온다.
-export const MOCK_STORAGE_KEY = 'beez.mock.api.v4'
+export const MOCK_STORAGE_KEY = 'beez.mock.api.v5'
 export const DEMO_EMAIL = 'demo@beez.local'
 export const DEMO_PASSWORD = 'beez-demo-2026'
 export const MOCK_NOTICE =
@@ -335,6 +335,29 @@ function seededProject(
   delete other.current_plan_revision.plan.context_packet_id
   state.tasks.push(other)
   state.revisions.push(copy(other.current_plan_revision))
+  // 수정안 예시 데이터: TASK-003은 박팀원의 백엔드 작업
+  const third = example<TaskDetail>('TSK-A01')
+  third.id = '503'
+  third.key = 'TASK-003'
+  third.assignee_member_id = '26'
+  third.current_plan_revision = {
+    ...third.current_plan_revision,
+    id: '513',
+    task_id: '503',
+    created_by: '14',
+    plan: {
+      ...third.current_plan_revision.plan,
+      title: '참여 프로젝트 목록 API 구현',
+      goal: '로그인한 사용자가 참여한 프로젝트를 돌려준다.',
+      included_scope: ['참여 프로젝트 조회 API'],
+      excluded_scope: [],
+      approach: '승인 요구사항 REQ-001을 따른다.',
+      completion_criteria: ['빈 목록과 여러 프로젝트를 모두 돌려준다'],
+    },
+  }
+  delete third.current_plan_revision.plan.context_packet_id
+  state.tasks.push(third)
+  state.revisions.push(copy(third.current_plan_revision))
   const packet = example<ContextPacket>('CTX-A01')
   packet.design_items = copy(state.items)
   packet.related_tasks = []
@@ -434,6 +457,14 @@ function seededProject(
     member_id: '21',
     connected: false,
     last_report_at: created,
+    status_check_required: true,
+  })
+  // 에이전트 2: 박팀원의 Claude Code. 목은 실제 연결을 하지 않아 연결됨으로 두지 않는다.
+  state.agents.push({
+    id: '52',
+    member_id: '26',
+    connected: false,
+    last_report_at: '2026-10-28T05:20:00Z',
     status_check_required: true,
   })
   state.activities = [

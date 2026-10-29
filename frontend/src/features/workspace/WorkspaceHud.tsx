@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -8,6 +8,7 @@ import type { Member } from '@/api/contracts/common'
 import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
+import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
 import type { TourMode } from './TourGuide'
@@ -61,6 +62,7 @@ export function WorkspaceHud({
 }) {
   const navigate = useNavigate()
   const openPane = useWorkspaceStore((state) => state.openPane)
+  const pane = useWorkspaceStore((state) => state.pane)
   const setOutdoor = useWorkspaceStore((state) => state.setOutdoor)
   const isLeader = project.my_role === 'LEADER'
   const counts = useQuery({
@@ -80,6 +82,28 @@ export function WorkspaceHud({
       inboxApi.list({ project_id: project.id, unread: true, limit: 20 }),
   })
   const [, rerender] = useState(0)
+  // 기준 v1이 생긴 순간 '기준 v1이 만들어졌어요'를 한 번 띄운다. 준비 중일 때 본 적이 있는 브라우저에서만 띄운다.
+  const noticeKey = `beez.baseline-notice.${project.id}`
+  const [baselineNotice] = useState(() => {
+    try {
+      return (
+        onboarding.baseline_published &&
+        localStorage.getItem(noticeKey) === 'pending'
+      )
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        noticeKey,
+        onboarding.baseline_published ? 'shown' : 'pending',
+      )
+    } catch {
+      /* 저장소가 없으면 알림을 한 번 더 띄울 수 있을 뿐이다. */
+    }
+  }, [noticeKey, onboarding.baseline_published])
   // 워크스페이스에 처음 들어오면 환영 창을 한 번 띄운다. 다시 보기는 ? 키와 도움말 버튼.
   const [tour, setTour] = useState<TourMode>(() => {
     try {
@@ -204,6 +228,10 @@ export function WorkspaceHud({
       ? !onboarding.baseline_published || onboarding.member_count <= 1
       : steps.some((step) => !step.done))
   const current = steps.findIndex((step) => !step.done && !step.locked)
+  const agentStepNow =
+    !isLeader && guideOpen && steps[current]?.title === '내 에이전트 연결'
+  // 비비 대화 창이 열린 동안은 단축 바만 남기고 다른 위젯은 숨긴다(PNL-12 B안).
+  const chatOpen = pane === 'chat'
   const connected = members.filter((member) => member.agent_connected).length
   const approved =
     counts.data?.documents.by_kind.reduce(
@@ -249,6 +277,7 @@ export function WorkspaceHud({
       <section
         aria-label="프로젝트"
         data-tour="card"
+        hidden={chatOpen}
         className="pointer-events-auto absolute top-4 left-4 z-10 grid w-80 gap-3 rounded-2xl border bg-card/95 p-3.5 shadow-lg backdrop-blur"
       >
         <div className="flex items-center gap-2">
@@ -362,6 +391,7 @@ export function WorkspaceHud({
       />
       <div
         data-tour="top"
+        hidden={chatOpen}
         className="pointer-events-auto absolute top-4 right-4 z-10 flex gap-2"
       >
         <Button
@@ -377,6 +407,9 @@ export function WorkspaceHud({
           size="icon"
           variant="secondary"
           aria-label="설정"
+          className={cn(
+            agentStepNow && 'animate-pulse ring-2 ring-primary ring-offset-2',
+          )}
           onClick={() => openPane('settings', isLeader ? 'team' : 'agent')}
         >
           <Settings />
@@ -385,6 +418,7 @@ export function WorkspaceHud({
       <section
         aria-labelledby="todo-title"
         data-tour="todo"
+        hidden={chatOpen}
         className="pointer-events-auto absolute top-17 right-4 z-10 w-75 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur"
       >
         {guideOpen ? (
@@ -531,6 +565,12 @@ export function WorkspaceHud({
         )}
       </section>
       <TourGuide accountId={me?.account_id} mode={tour} onChange={setTour} />
+      {baselineNotice && (
+        <Toast>
+          기준 v1이 만들어졌어요. 이제 변경 제안·작업 현황·설계 관계를 쓸 수
+          있어요.
+        </Toast>
+      )}
     </>
   )
 }
