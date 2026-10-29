@@ -255,27 +255,52 @@ export function changeRoutes(
       return {
         data: {
           proposal: proposalView(context, proposal!),
-          comparisons: proposal!.documents.map((change) => {
-            const document = findById(project.documents, change.document_id)
-            const base = findById(
-              project.versions,
-              change.base_document_version_id,
-            )
-            const after =
-              change.after_content ??
-              findById(project.versions, change.proposed_document_version_id!)
-                .content ??
-              ''
-            return {
-              target_type: 'DOCUMENT',
-              target_id: document.id,
-              format: 'TEXT',
-              base_content: base.content ?? '',
-              current_content: document.approved_version?.content ?? '',
-              proposed_content: after,
-              diff: `- ${base.content ?? ''}\n+ ${after}`,
-            }
-          }),
+          comparisons: [
+            ...proposal!.items.map((change) => {
+              const base = change.base_design_item_version_id
+                ? findById(project.items, change.base_design_item_version_id)
+                : undefined
+              const current = base
+                ? project.items.find(
+                    (item) =>
+                      item.design_item_id === base.design_item_id &&
+                      item.status === 'APPROVED',
+                  )
+                : undefined
+              return {
+                target_type: 'DESIGN_ITEM',
+                // 새 항목은 아직 ID가 없어 제안 ID로 둔다.
+                target_id: change.design_item_id ?? proposal!.id,
+                format: 'STRUCTURED',
+                ...(base ? { base_content: base.content } : {}),
+                ...(current ? { current_content: current.content } : {}),
+                ...(change.proposed_content
+                  ? { proposed_content: change.proposed_content }
+                  : {}),
+              }
+            }),
+            ...proposal!.documents.map((change) => {
+              const document = findById(project.documents, change.document_id)
+              const base = findById(
+                project.versions,
+                change.base_document_version_id,
+              )
+              const after =
+                change.after_content ??
+                findById(project.versions, change.proposed_document_version_id!)
+                  .content ??
+                ''
+              return {
+                target_type: 'DOCUMENT',
+                target_id: document.id,
+                format: 'TEXT',
+                base_content: base.content ?? '',
+                current_content: document.approved_version?.content ?? '',
+                proposed_content: after,
+                diff: `- ${base.content ?? ''}\n+ ${after}`,
+              }
+            }),
+          ],
         },
       }
     case 'CHG-A04': {

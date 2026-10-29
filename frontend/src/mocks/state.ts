@@ -332,24 +332,33 @@ function seededProject(
     summary: '프로젝트 목록의 승인 근거를 확인했어요.',
     detail: 'REQ-001을 기준으로 목록과 빈 상태를 준비합니다.',
   })
+  // 변경 제안 예시(수정안 PNL-04): 김동료가 올린 설계 항목 제안. 문서 변경은 공용 문서함에서 다룬다.
   state.proposals.push({
     ...example<ChangeProposal>('CHG-A01'),
-    title: '초대 안내 문구 보완',
-    reason: '팀원이 초대 만료 상태를 이해할 수 있도록 문구를 보완합니다.',
+    title: '프로젝트 목록 빈 화면 안내',
+    reason: '참여한 프로젝트가 없을 때 무엇을 하면 되는지 알려 줘야 해요.',
     status: 'IN_REVIEW',
-    documents: [
+    proposer_account_id: '12',
+    items: [
       {
-        document_id: '203',
-        base_document_version_id: '213',
-        after_content: `${state.versions[2].content}\nREQ-003 만료된 초대는 새 초대를 요청하도록 안내한다.`,
+        operation: 'UPDATE',
+        design_item_id: '301',
+        base_design_item_version_id: '311',
+        schema_version: 1,
+        proposed_content: {
+          description:
+            '로그인한 사용자는 참여 프로젝트를 조회하고, 없으면 새 프로젝트를 만들거나 초대를 기다리라는 안내를 본다.',
+        },
       },
     ],
-    items: [],
+    documents: [],
   })
   // 회의실 예시(수정안 PNL-06): 작업이 부딪혀 비비가 연 회의.
   // 비비 메시지의 작성자 구분이 계약에 없어 비비가 쓴 기록 종류(BEE_ANALYSIS)로 둔다.
+  const meeting = example<Meeting>('MTG-A01')
+  delete meeting.change_proposal_id
   state.meetings.push({
-    ...example<Meeting>('MTG-A01'),
+    ...meeting,
     title: '초대 안내 문구 검토',
     participants: ['21', '22', '25'].map((member_id) => ({
       member_id,
@@ -479,8 +488,8 @@ export function createMockDatabase(): MockDatabase {
         account_id: '11',
         project_id: '101',
         type: 'CHANGE_REVIEW_REQUESTED',
-        title: '초대 안내 문구 검토 요청',
-        body: '브라우저에 저장한 예시 변경 제안입니다.',
+        title: '프로젝트 목록 빈 화면 안내 검토 요청',
+        body: '김동료가 REQ-001을 고치자고 제안했어요.',
         target_type: 'CHANGE_PROPOSAL',
         target_id: '71',
         created_at: now(),
