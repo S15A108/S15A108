@@ -431,7 +431,7 @@ export function ActivityPanel({
                     ].map((metric) => (
                       <div
                         key={metric.label}
-                        className="rounded-xl border bg-muted/30 p-4"
+                        className="rounded-xl border bg-card p-4 shadow-xs"
                       >
                         <dt className="text-xs text-muted-foreground">
                           {metric.label}

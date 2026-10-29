@@ -254,9 +254,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
             검증은 실제 코드 품질이나 테스트 통과를 뜻하지 않아요.
           </p>
         </div>
-        {/* 노란 버튼은 화면에 하나(작업 시작)만 두고 위 버튼은 테두리로(PNL-05 수정안). */}
+        {/* 머리 버튼은 모든 작업 현황 화면에서 노란 '+ 작업 계획' 하나(PNL-05 수정안 10-29). */}
         <Button
-          variant="outline"
           onClick={() => {
             setFormTask(undefined)
             setEditing('new')
@@ -479,7 +478,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                         </li>
                       ))}
                     </ol>
-                    {/* 주 버튼은 상태마다 하나(M5): 진행 중이면 완료 보고, 시작할 수 있으면 시작, 막혔으면 계획 고치기, 그 밖에는 계획 검증. */}
+                    {/* 주 버튼은 상태마다 하나(M5): 진행 중이면 완료 보고, 시작할 수 있으면 시작, 막혔으면 계획 수정, 그 밖에는 계획 검증. */}
                     <div
                       className={cn(
                         'flex flex-wrap items-start gap-2',
@@ -501,7 +500,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                             setEditing('edit')
                           }}
                         >
-                          계획 고치기
+                          계획 수정
                         </Button>
                       )}
                       {isOwner && active && (
@@ -600,7 +599,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                                   setEditing('edit')
                                 }}
                               >
-                                계획 고치기
+                                계획 수정
                               </DropdownMenuItem>
                             )}
                             {isLeader && (
@@ -1250,7 +1249,7 @@ function PlanDialog({
         <DialogHeader>
           <DialogTitle>
             {task
-              ? `계획 고치기 · r${task.current_plan_revision.revision_no + 1}`
+              ? `계획 수정 · r${task.current_plan_revision.revision_no + 1}`
               : '작업 계획 등록'}
           </DialogTitle>
           <DialogDescription>

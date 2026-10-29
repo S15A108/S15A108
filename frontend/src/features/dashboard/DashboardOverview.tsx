@@ -113,7 +113,7 @@ export function DashboardOverview({
           )
           // 할 일이 있는 칸(검토할 변경, 연결 안 된 에이전트)만 노란 바탕으로 먼저 보이게 한다(PNL-09 수정안).
           const className = cn(
-            'rounded-xl border bg-muted/30 p-4 text-left hover:bg-muted/60',
+            'rounded-xl border bg-card p-4 text-left shadow-xs hover:bg-muted/40',
             metric.todo &&
               'border-primary/50 bg-primary/10 hover:bg-primary/20',
             empty && 'opacity-60',
@@ -131,7 +131,7 @@ export function DashboardOverview({
         })}
       </div>
       {empty ? (
-        <div className="grid gap-3 rounded-xl border border-dashed p-5 text-sm">
+        <div className="grid gap-3 rounded-xl border border-dashed bg-card p-5 text-sm">
           <p className="font-medium">
             아직 기록이 없어요. 이렇게 시작해 보세요.
           </p>
@@ -156,7 +156,7 @@ export function DashboardOverview({
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
-          <div className="grid content-start gap-2 rounded-xl border p-4">
+          <div className="grid content-start gap-2 rounded-xl border bg-card p-4 shadow-xs">
             <h4 className="text-sm font-semibold">기능별 AI 사용</h4>
             {/* API 없음: 날짜별(한국시간) 호출 막대 그래프는 사용량 API에 by_day가 생기면 그린다(백엔드 메모 7). */}
             {features.length ? (
@@ -183,7 +183,7 @@ export function DashboardOverview({
             )}
           </div>
           <div className="grid content-start gap-4">
-            <div className="grid gap-1.5 rounded-xl border p-4">
+            <div className="grid gap-1.5 rounded-xl border bg-card p-4 shadow-xs">
               <h4 className="text-sm font-semibold">최근 활동</h4>
               {recent.length ? (
                 recent.map((item) => (
@@ -204,7 +204,7 @@ export function DashboardOverview({
                 활동 타임라인에서 더 보기
               </button>
             </div>
-            <div className="grid gap-1.5 rounded-xl border p-4">
+            <div className="grid gap-1.5 rounded-xl border bg-card p-4 shadow-xs">
               <h4 className="text-sm font-semibold">에이전트</h4>
               {agents.length ? (
                 agents.map((agent) => (

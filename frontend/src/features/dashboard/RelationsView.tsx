@@ -61,7 +61,7 @@ export function RelationsView({ projectId }: { projectId: string }) {
                       aria-current={task.id === selected}
                       onClick={() => setPicked(task.id)}
                       className={cn(
-                        'grid w-full gap-0.5 rounded-xl border px-3 py-2.5 text-left text-sm hover:bg-muted/40',
+                        'grid w-full gap-0.5 rounded-xl border bg-card px-3 py-2.5 text-left text-sm shadow-xs hover:bg-muted/40',
                         task.id === selected && 'border-2 border-foreground',
                       )}
                     >

@@ -58,7 +58,7 @@ export function RelationGraph({ data }: { data: RelationsResponse }) {
         실선은 확인된 관계, 점선은 검토할 후보예요. 후보는 확정된 의존 관계로
         보지 않아요.
       </p>
-      <div className="overflow-x-auto rounded-xl border bg-muted/20 p-3">
+      <div className="overflow-x-auto rounded-xl border bg-card p-3 shadow-xs">
         <svg
           role="img"
           aria-label="작업·설계·검증·변경 요청 관계 그래프"
@@ -144,7 +144,7 @@ export function RelationGraph({ data }: { data: RelationsResponse }) {
           중 {visible.length}개와 그 사이의 관계 {edges.length}개를 보여요.
         </p>
       )}
-      <details className="rounded-xl border p-4">
+      <details className="rounded-xl border bg-card p-4 shadow-xs">
         <summary className="cursor-pointer text-sm font-medium">
           전체 항목과 관계 읽기
         </summary>

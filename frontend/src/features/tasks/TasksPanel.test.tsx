@@ -162,7 +162,7 @@ it('팀장도 담당자가 아니면 시작·검증을 대신하지 않고 취�
     screen.queryByRole('button', { name: '계획 검증' }),
   ).not.toBeInTheDocument()
   expect(
-    screen.queryByRole('menuitem', { name: '계획 고치기' }),
+    screen.queryByRole('menuitem', { name: '계획 수정' }),
   ).not.toBeInTheDocument()
 })
 
@@ -173,7 +173,7 @@ it('편집 중 재조회가 일어나도 검토했던 리비전과 잠금 번호
   const { client } = show(false)
   await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
   await userEvent.click(
-    await screen.findByRole('menuitem', { name: '계획 고치기' }),
+    await screen.findByRole('menuitem', { name: '계획 수정' }),
   )
   expect(await screen.findByLabelText('이번 작업의 목표')).toHaveValue(
     '승인된 응답 필드를 구현한다.',

@@ -51,6 +51,8 @@ function Workspace({ projectId }: { projectId: string }) {
   const session = useSession()
   const [params, setParams] = useSearchParams()
   const pane = useWorkspaceStore((state) => state.pane)
+  const tinted =
+    pane === 'tasks' || pane === 'relations' || pane === 'dashboard'
   const openPane = useWorkspaceStore((state) => state.openPane)
   const viewMode = useWorkspaceStore((state) => state.viewMode)
   const setViewMode = useWorkspaceStore((state) => state.setViewMode)
@@ -214,6 +216,8 @@ function Workspace({ projectId }: { projectId: string }) {
               <DialogContent
                 className={cn(
                   'max-h-[87dvh] overflow-y-auto bg-background p-5 sm:p-8',
+                  // 작업 현황·설계 관계·대시보드: 창 바탕은 연회색, 머리는 흰 띠, 칸은 흰 카드(PNL-05·09 수정안 10-29)
+                  tinted && 'bg-[#f7f8fa]',
                   pane === 'chat'
                     ? 'sm:max-w-[min(1080px,94vw)]'
                     : pane === 'documents'
@@ -228,7 +232,13 @@ function Workspace({ projectId }: { projectId: string }) {
                   if (pendingMutations) event.preventDefault()
                 }}
               >
-                <DialogHeader>
+                <DialogHeader
+                  className={
+                    tinted
+                      ? '-mx-5 -mt-5 border-b bg-card px-5 py-4 sm:-mx-8 sm:-mt-8 sm:px-8 sm:py-5'
+                      : undefined
+                  }
+                >
                   <DialogTitle>
                     {pane && pane !== 'settings' ? paneTitles[pane] : ''}
                   </DialogTitle>
