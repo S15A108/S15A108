@@ -6,6 +6,7 @@ import { documentsApi } from '@/api/services/documents'
 import { membersApi } from '@/api/services/members'
 import type { DocumentBeeReview } from '@/api/contracts/common'
 import { ActionForm } from '@/components/ActionForm'
+import { MarkdownView } from '@/components/MarkdownView'
 import { AsyncState } from '@/components/AsyncState'
 import { Toast } from '@/components/Toast'
 import { Button } from '@/components/ui/button'
@@ -192,9 +193,7 @@ export function DocumentReview({
               )}
               {stage.step === 1 && (
                 <div className="grid gap-3">
-                  <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
-                    {data.content}
-                  </pre>
+                  <MarkdownView source={data.content} className="max-h-72" />
                   {owner && failed ? (
                     <div
                       role="alert"
@@ -301,9 +300,10 @@ export function DocumentReview({
                         }}
                       />
                     ) : (
-                      <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
-                        {data.content}
-                      </pre>
+                      <MarkdownView
+                        source={data.content}
+                        className="max-h-72"
+                      />
                     )}
                     {owner && !editing && (
                       <div className="flex flex-wrap gap-2">
@@ -346,9 +346,10 @@ export function DocumentReview({
                           승인을 요청했어요. ·{' '}
                           {formatDate(submission.submission.submitted_at)}
                         </p>
-                        <pre className="max-h-72 overflow-auto rounded-xl bg-muted/40 p-4 text-sm leading-6 whitespace-pre-wrap select-text">
-                          {submission.content}
-                        </pre>
+                        <MarkdownView
+                          source={submission.content}
+                          className="max-h-72"
+                        />
                         <p className="text-xs text-muted-foreground">
                           비비 검토: {submission.review.summary} · 반영{' '}
                           {

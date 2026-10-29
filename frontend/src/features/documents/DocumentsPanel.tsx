@@ -21,6 +21,7 @@ import {
 import { documentsApi } from '@/api/services/documents'
 import { getApiErrorCode, getApiErrorMessage } from '@/api/error'
 import { AsyncState } from '@/components/AsyncState'
+import { MarkdownView } from '@/components/MarkdownView'
 import { EmptyState } from '@/components/EmptyState'
 import { FormDialog } from '@/components/FormDialog'
 import { Toast } from '@/components/Toast'
@@ -1088,9 +1089,10 @@ function DocumentDetail({
                   </span>
                 </div>
                 {data.version.content !== undefined ? (
-                  <pre className="max-h-[32rem] overflow-auto rounded-xl border bg-muted/20 p-5 font-sans text-sm leading-7 whitespace-pre-wrap select-text">
-                    {data.version.content}
-                  </pre>
+                  <MarkdownView
+                    source={data.version.content}
+                    className="max-h-[32rem]"
+                  />
                 ) : (
                   <EmptyState>
                     이 파일은 본문 미리보기를 제공하지 않아요. 원본 파일을
