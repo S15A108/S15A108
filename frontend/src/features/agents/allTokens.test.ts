@@ -36,3 +36,11 @@ it('has_more가 false가 될 때까지 다음 cursor로 이어 받는다', async
     cursor: 'after-8',
   })
 })
+
+it('프로젝트를 주지 않으면 project_id 없이 내 모든 토큰을 받는다', async () => {
+  const myTokens = vi
+    .spyOn(agentsApi, 'myTokens')
+    .mockResolvedValue({ items: [token('4')], has_more: false })
+  expect(await allTokens()).toHaveLength(1)
+  expect(myTokens).toHaveBeenCalledWith({ limit: 100, cursor: undefined })
+})

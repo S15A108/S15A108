@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Bot, Hexagon, UserRound } from 'lucide-react'
-import { authApi, agentsApi, projectsApi } from '@/api/services'
+import { agentsApi, authApi, projectsApi } from '@/api/services'
+import { allTokens } from '@/features/agents/allTokens'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
 import { ActionForm } from '@/components/ActionForm'
@@ -42,7 +43,7 @@ function Account() {
     queryKey: ['my-tokens'],
     queryFn: async () => {
       const [tokens, projects] = await Promise.all([
-        agentsApi.myTokens(),
+        allTokens(),
         projectsApi.list(),
       ])
       return { tokens, projects }
@@ -161,9 +162,7 @@ function Account() {
         <CardContent>
           <AsyncState query={tokens}>
             {(data) => {
-              const active = data.tokens.items.filter(
-                (token) => !token.revoked_at,
-              )
+              const active = data.tokens.filter((token) => !token.revoked_at)
               return active.length ? (
                 <table className="w-full text-left text-sm">
                   <thead className="text-xs text-muted-foreground">
