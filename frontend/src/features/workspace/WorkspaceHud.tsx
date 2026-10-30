@@ -13,17 +13,20 @@ import type { Member, TaskDetail } from '@/api/contracts/common'
 import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { useProjectStart } from '@/features/projects/useProjectStart'
+import { useSession } from '@/features/auth/useSession'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
 import {
   openMeetingCount,
   useMeetingList,
 } from '@/features/meetings/useMeetingList'
 import { targetLabel, targetPane } from '@/features/inbox/notificationTarget'
+import { CharacterAvatar } from '@/components/CharacterAvatar'
 import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
 import type { TourMode } from './TourGuide'
 import { Button } from '@/components/ui/button'
+import { characterOf } from '@/lib/characters'
 import { describeContent, statusLabel } from '@/lib/display'
 import { formatAgo } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
@@ -133,6 +136,7 @@ export function WorkspaceHud({
   myTasks: TaskDetail[]
 }) {
   const navigate = useNavigate()
+  const session = useSession()
   const openPane = useWorkspaceStore((state) => state.openPane)
   const pane = useWorkspaceStore((state) => state.pane)
   const setOutdoor = useWorkspaceStore((state) => state.setOutdoor)
@@ -413,6 +417,12 @@ export function WorkspaceHud({
           key: member.id,
           initial: member.name.slice(0, 1),
           color: member.color,
+          // 3D 사무실과 같은 Kenney 캐릭터(나는 회원 설정, 팀원은 표시 색 기준)
+          character: characterOf(
+            member.id === me?.id ? session.data?.avatar : undefined,
+            member.color,
+            member.id,
+          ),
           name: `${member.name}${member.id === me?.id ? ' · 나' : ''}`,
           detail: task
             ? `${task.key} ${taskText[task.status]}`
@@ -429,6 +439,7 @@ export function WorkspaceHud({
         key: `agent:${member.id}`,
         initial: 'AI',
         color: undefined,
+        character: undefined,
         name: `${member.name}의 에이전트`,
         detail: '연결됨',
         open: () => openPane('dashboard'),
@@ -653,16 +664,24 @@ export function WorkspaceHud({
                   onClick={row.open}
                   className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left hover:bg-muted"
                 >
-                  <span
-                    aria-hidden="true"
-                    className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
-                    style={{
-                      backgroundColor: `${row.color ?? '#8a8378'}26`,
-                      color: row.color ?? '#57534e',
-                    }}
-                  >
-                    {row.initial}
-                  </span>
+                  {row.character ? (
+                    <CharacterAvatar
+                      character={row.character}
+                      color={row.color}
+                      className="size-7"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold"
+                      style={{
+                        backgroundColor: `${row.color ?? '#8a8378'}26`,
+                        color: row.color ?? '#57534e',
+                      }}
+                    >
+                      {row.initial}
+                    </span>
+                  )}
                   <span className="min-w-0">
                     <strong className="block truncate text-xs">
                       {row.name}

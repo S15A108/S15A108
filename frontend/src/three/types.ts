@@ -23,6 +23,8 @@ export interface SceneAgent {
   name: string
   kind: 'human' | 'lead' | 'agent'
   color?: string
+  /** 사람 모양으로 그릴 Kenney 캐릭터 모델 이름 */
+  character?: string
   status?: string
   home_zone?: Zone
   zone?: Zone
@@ -46,6 +48,7 @@ export interface Agent {
   kind: 'human' | 'lead' | 'agent'
   builtin: boolean
   color: string
+  character?: string
   home_zone: Zone
   zone: Zone
   status: string

@@ -115,6 +115,12 @@ function OfficeRuntime(
   useEffect(() => {
     latest.current = { props, floor, actors, work, phase }
   }, [props, floor, actors, work, phase])
+  // 나도 회원 설정에서 고른 Kenney 캐릭터로 걷는다.
+  useEffect(() => {
+    player.current.character = agents.find(
+      (agent) => agent.id === props.currentUserId,
+    )?.character
+  }, [agents, props.currentUserId])
 
   useEffect(() => {
     const canvas = gl.domElement

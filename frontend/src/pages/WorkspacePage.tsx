@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { characterOf } from '@/lib/characters'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePane } from '@/stores/workspaceStore'
@@ -78,6 +79,8 @@ function Workspace({ projectId }: { projectId: string }) {
       return { project, members, tasks, onboarding }
     },
   })
+  const myAccountId = session.data?.id
+  const myAvatar = session.data?.avatar
   const sceneAgents = useMemo<SceneAgent[]>(
     () => [
       { id: 'bibi', name: '비비', kind: 'lead', color: '#f5b800' },
@@ -85,14 +88,20 @@ function Workspace({ projectId }: { projectId: string }) {
         id: `member:${member.id}`,
         name: member.name,
         kind:
-          member.account_id === session.data?.id
+          member.account_id === myAccountId
             ? ('human' as const)
             : ('agent' as const),
         color: member.color ?? '#8ca9a0',
+        // 내 캐릭터는 회원 설정의 avatar, 팀원은 응답에 avatar가 없어 표시 색으로 고른다.
+        character: characterOf(
+          member.account_id === myAccountId ? myAvatar : undefined,
+          member.color,
+          member.id,
+        ).model,
         status: 'idle',
       })),
     ],
-    [query.data?.members, session.data?.id],
+    [query.data?.members, myAccountId, myAvatar],
   )
   const sceneTasks = useMemo<SceneTask[]>(
     () =>

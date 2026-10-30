@@ -4,6 +4,8 @@ import { Hexagon, Settings } from 'lucide-react'
 import { authApi } from '@/api/services'
 import { useSession } from '@/features/auth/useSession'
 import { Button } from '@/components/ui/button'
+import { CharacterAvatar } from '@/components/CharacterAvatar'
+import { characterOf } from '@/lib/characters'
 import { apiMode } from '@/lib/apiMode'
 
 export default function App() {
@@ -43,7 +45,11 @@ export default function App() {
         </Link>
         {session.data ? (
           <nav aria-label="계정" className="flex items-center gap-1 text-sm">
-            <span className="mr-2 text-muted-foreground">
+            <span className="mr-2 inline-flex items-center gap-2 text-muted-foreground">
+              <CharacterAvatar
+                character={characterOf(session.data.avatar)}
+                className="size-7 ring-2 ring-primary"
+              />
               {session.data.name}
             </span>
             {pathname !== '/account' && (
