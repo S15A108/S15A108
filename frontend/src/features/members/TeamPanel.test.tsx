@@ -5,7 +5,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { authApi } from '@/api/services'
+import { authApi, membersApi } from '@/api/services'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -121,5 +121,25 @@ it('팀 목록은 팀장을 맨 위, 다음에 나, 나머지는 서버 순서�
       expect.stringContaining('박팀원'),
       expect.stringContaining('최팀원'),
     ],
+  )
+})
+
+// 사용자 결정 10-30: 팀장 위임은 팀원 줄 ⋯ → '팀장으로 위임' → 작은 확인 창
+it('팀원 줄 ⋯에서 팀장으로 위임을 누르면 확인 창에서 팀장을 넘긴다', async () => {
+  const user = userEvent.setup()
+  renderTeam()
+  await screen.findByText('김동료')
+  await user.click(screen.getByRole('button', { name: '김동료 더보기' }))
+  await user.click(
+    await screen.findByRole('menuitem', { name: '팀장으로 위임' }),
+  )
+  const dialog = await screen.findByRole('dialog', {
+    name: '김동료님에게 팀장을 넘길까요?',
+  })
+  await user.click(within(dialog).getByRole('button', { name: '팀장 넘기기' }))
+  expect(await screen.findByText('팀장을 넘겼어요')).toBeInTheDocument()
+  const members = await membersApi.list('101', { limit: 100 })
+  expect(members.items.find((member) => member.name === '김동료')?.role).toBe(
+    'LEADER',
   )
 })

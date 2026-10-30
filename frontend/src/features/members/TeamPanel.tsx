@@ -27,7 +27,15 @@ import { useSession } from '@/features/auth/useSession'
 import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { projectPlacements } from '@/features/projects/placements'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
-import { getApiErrorCode } from '@/api/error'
+import { getApiErrorCode, getApiErrorMessage } from '@/api/error'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { lines } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
 import { placementKey, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -53,6 +61,12 @@ export function TeamPanel({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const action = useProjectAction(projectId)
+  // 팀장 넘기기 진행·결과. 끝나면 가운데 위 토스트를 띄우고 창은 팀원 권한으로 다시 그려진다.
+  const [handoff, setHandoff] = useState<{
+    busy?: boolean
+    error?: string
+    done?: boolean
+  }>({})
   const placements = useWorkspaceStore((state) => state.placements)
   const placeProject = useWorkspaceStore((state) => state.placeProject)
   const accountId = session.data?.id ?? ''
@@ -147,6 +161,11 @@ export function TeamPanel({
       </header>
       {/* 결과는 화면 안 글 대신 오른쪽 위 토스트로 잠깐 보여 준다. */}
       {action.message && <Toast>{action.message}</Toast>}
+      {handoff.done && (
+        <Toast tone="success">
+          <strong>팀장을 넘겼어요</strong>
+        </Toast>
+      )}
       {copyMessage && <Toast key={copyMessage}>{copyMessage}</Toast>}
       {action.error && (
         <p
@@ -493,7 +512,10 @@ export function TeamPanel({
                 </p>
                 <ol className="grid gap-3 text-sm">
                   <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
-                    <span>1. 팀원 중 한 명에게 팀장 위임</span>
+                    <span>
+                      1. 팀원 중 한 명에게 팀장 위임 · 팀 목록에서 그 팀원 줄의
+                      ⋯ → &apos;팀장으로 위임&apos;
+                    </span>
                     <Button
                       variant="outline"
                       size="sm"
@@ -611,33 +633,65 @@ export function TeamPanel({
         />
       )}
       {typeof dialog === 'object' && dialog?.action === 'transfer' && (
-        <FormDialog
-          title="팀장으로 위임"
-          description={`${dialog.member.name}님이 인간 팀장이 되고, 나는 팀원이 돼요. 승인·발행과 프로젝트 설정 권한이 넘어가요.`}
-          fields={[
-            {
-              name: 'confirm',
-              label: "확인을 위해 '위임'을 입력",
-              required: true,
-              check: (value) =>
-                value === '위임' ? undefined : "'위임'을 입력해 주세요.",
-            },
-          ]}
-          submitLabel="팀장 넘기기"
-          destructive
-          onClose={() => setDialog(null)}
-          onSubmit={async () => {
-            await action.run(
-              () =>
-                membersApi.transfer(projectId, {
-                  target_member_id: dialog.member.id,
-                }),
-              '인간 팀장을 위임했어요.',
-            )
-            await queryClient.invalidateQueries({ queryKey: ['projects'] })
-            setDialog(null)
+        // 작은 확인 창(사용자 결정 10-30). 오류는 invalid_transfer_target 등 서버 문구를 그대로 보인다.
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !handoff.busy) {
+              setHandoff({})
+              setDialog(null)
+            }
           }}
-        />
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                {dialog.member.name}님에게 팀장을 넘길까요?
+              </DialogTitle>
+              <DialogDescription>
+                넘기면 나는 팀원이 되고 {dialog.member.name}님이 팀장이 돼요.
+                프로젝트 설정과 승인 권한도 함께 넘어가요.
+              </DialogDescription>
+            </DialogHeader>
+            {handoff.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {handoff.error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={handoff.busy}
+                onClick={() => {
+                  setHandoff({})
+                  setDialog(null)
+                }}
+              >
+                취소
+              </Button>
+              <Button
+                disabled={handoff.busy}
+                onClick={async () => {
+                  setHandoff({ busy: true })
+                  try {
+                    await membersApi.transfer(projectId, {
+                      target_member_id: dialog.member.id,
+                    })
+                    setHandoff({ done: true })
+                    setDialog(null)
+                    await queryClient.invalidateQueries({
+                      queryKey: ['projects'],
+                    })
+                  } catch (cause) {
+                    setHandoff({ error: getApiErrorMessage(cause) })
+                  }
+                }}
+              >
+                팀장 넘기기
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       {typeof dialog === 'object' && dialog?.action === 'edit' && (
         <FormDialog
