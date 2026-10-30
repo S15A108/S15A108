@@ -2,11 +2,15 @@ import { useEffect, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
-import { LoaderCircle } from 'lucide-react'
+import { LoaderCircle, TriangleAlert } from 'lucide-react'
 import { authApi, membersApi } from '@/api/services'
 import { useSession } from '@/features/auth/useSession'
 import { Button } from '@/components/ui/button'
-import { getApiErrorMessage, getApiErrorStatus } from '@/api/error'
+import {
+  getApiErrorCode,
+  getApiErrorMessage,
+  getApiErrorStatus,
+} from '@/api/error'
 import NotFoundPage from './NotFoundPage'
 
 // Q05 초대 규칙(PR #42, 2026-10-29 확정): 수락 버튼은 없다.
@@ -53,8 +57,8 @@ export default function InvitationPage() {
     navigate(`/login?invite=${encoded}`)
   }
   return (
-    <main className="mx-auto mt-16 max-w-lg px-4">
-      <section className="rounded-3xl border bg-card p-8">
+    <main className="px-4 pt-[72px] pb-10">
+      <section className="mx-auto max-w-[480px] rounded-[22px] border bg-card p-10 shadow-sm">
         {invitation.isPending ? (
           <p
             role="status"
@@ -75,61 +79,102 @@ export default function InvitationPage() {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-6">
-            <div>
-              <p className="text-sm text-muted-foreground">
-                프로젝트에 초대받았어요
-              </p>
-              {/* API 없음: 미리보기 응답에 초대한 팀장(이름·이메일)과 프로젝트 소개가 생기면 이 위아래에 넣는다(PR #42 inviter·project_description). */}
-              <h2 className="mt-2 text-2xl font-bold">
+          <>
+            <p className="text-[13px] font-medium text-muted-foreground">
+              프로젝트 초대
+            </p>
+            {/* API 없음: 미리보기 응답에 초대한 팀장(이름·역할·이메일)과 프로젝트 소개, 초대받은 이메일이 생기면
+                초대한 사람 줄, 카드의 소개, '초대받은 이메일 / 로그인한 계정 + 일치' 줄을 넣는다(PR #42 inviter·project_description). */}
+            <div className="mt-3 rounded-2xl border p-5">
+              <h2 className="text-2xl font-bold">
                 {invitation.data.project_name}
               </h2>
             </div>
             {signedIn ? (
               accept.error ? (
-                <div className="grid gap-3">
-                  <p role="alert" className="text-sm text-destructive">
-                    {getApiErrorMessage(accept.error)}
-                  </p>
-                  {/* 초대받은 이메일과 로그인 계정이 다르면 프로젝트를 열지 않고 다시 로그인하게 한다. */}
-                  <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => void relogin()}>
-                      다른 계정으로 로그인
+                getApiErrorCode(accept.error) ===
+                'invitation_email_mismatch' ? (
+                  <>
+                    <div
+                      role="alert"
+                      className="mt-5 flex gap-2.5 rounded-[14px] border border-[#c99e1e]/45 bg-primary/12 p-4 text-sm leading-[22px]"
+                    >
+                      <TriangleAlert className="mt-0.5 size-[18px] shrink-0 text-[#8a6a00]" />
+                      <div>
+                        <p className="font-semibold">
+                          다른 계정으로 로그인되어 있어요
+                        </p>
+                        <p className="mt-1 text-[#57534e]">
+                          이 초대는 다른 이메일로 보냈어요. 지금은{' '}
+                          {session.data?.email}로 로그인되어 있어서 이
+                          프로젝트를 열 수 없어요.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      className="mt-6 h-11 w-full rounded-xl text-[15px] font-bold"
+                      onClick={() => void relogin()}
+                    >
+                      초대받은 계정으로 다시 로그인
                     </Button>
-                    <Button variant="ghost" asChild>
-                      <Link to="/">나의 도시로</Link>
-                    </Button>
+                    <Link
+                      to="/"
+                      className="mt-3 block text-center text-sm text-muted-foreground"
+                    >
+                      나의 도시로
+                    </Link>
+                  </>
+                ) : (
+                  <div className="mt-5 grid gap-3">
+                    <p role="alert" className="text-sm text-destructive">
+                      {getApiErrorMessage(accept.error)}
+                    </p>
+                    <Link to="/" className="text-sm text-muted-foreground">
+                      나의 도시로
+                    </Link>
                   </div>
-                </div>
+                )
               ) : (
-                <p
-                  role="status"
-                  className="flex items-center gap-2 text-sm text-muted-foreground"
-                >
-                  <LoaderCircle className="size-4 animate-spin" />
-                  팀에 들어가는 중이에요. {session.data?.email}로 참여해요.
-                </p>
+                <>
+                  <dl className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t px-1 pt-4 text-[13px]">
+                    <dt className="text-muted-foreground">로그인한 계정</dt>
+                    <dd>{session.data?.email}</dd>
+                  </dl>
+                  <p
+                    role="status"
+                    className="mt-6 flex h-11 items-center justify-center gap-2 rounded-xl bg-[#fbfaf6] text-[15px] font-semibold"
+                  >
+                    <LoaderCircle className="size-[18px] animate-spin text-[#8a6a00]" />
+                    팀에 들어가는 중이에요
+                  </p>
+                  <p className="mt-3 text-center text-[13px] text-muted-foreground">
+                    모르는 초대라면 들어간 뒤 설정에서 프로젝트를 나갈 수
+                    있어요.
+                  </p>
+                </>
               )
             ) : (
               <>
-                <p className="text-sm text-muted-foreground">
-                  초대받은 이메일로 로그인하거나 가입하면 바로 팀원이 돼요.
+                <Button
+                  asChild
+                  className="mt-5 h-11 w-full rounded-xl text-[15px] font-bold"
+                >
+                  <Link to={`/login?invite=${encoded}`}>
+                    로그인하고 프로젝트 열기
+                  </Link>
+                </Button>
+                <p className="mt-4 text-center text-sm text-muted-foreground">
+                  계정이 없나요?{' '}
+                  <Link
+                    to={`/register?invite=${encoded}`}
+                    className="font-semibold text-foreground"
+                  >
+                    이 이메일로 회원가입하기
+                  </Link>
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild>
-                    <Link to={`/login?invite=${encoded}`}>
-                      로그인하고 프로젝트 열기
-                    </Link>
-                  </Button>
-                  <Button variant="outline" asChild>
-                    <Link to={`/register?invite=${encoded}`}>
-                      이 이메일로 회원가입하기
-                    </Link>
-                  </Button>
-                </div>
               </>
             )}
-          </div>
+          </>
         )}
       </section>
     </main>

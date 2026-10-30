@@ -4,7 +4,7 @@ import { authApi } from '@/api/services'
 import { ActionForm, type FormField } from '@/components/ActionForm'
 import { EmailVerification } from '@/features/auth/EmailVerification'
 import { emailVerificationEnabled } from '@/features/auth/emailCode'
-import { passwordRule } from '@/features/auth/passwordRule'
+import { PASSWORD_HINT, passwordRule } from '@/features/auth/passwordRule'
 
 const passwordFields: FormField[] = [
   {
@@ -15,7 +15,7 @@ const passwordFields: FormField[] = [
     min: 8,
     max: 128,
     check: passwordRule,
-    placeholder: '영문·숫자·특수문자 포함 8자 이상',
+    hint: PASSWORD_HINT,
   },
   {
     name: 'confirm',
@@ -36,31 +36,35 @@ export default function RegisterPage() {
     ? `/login?invite=${encodeURIComponent(invite)}`
     : '/login'
   return (
-    <main className="mx-auto grid min-h-[calc(100dvh-4rem)] max-w-xl content-center px-6 py-12">
+    // 캔버스 SCR-01-v2-register: 위쪽에 둔 카드 하나, 이름 → 이메일·인증 코드 → 비밀번호 → 확인 순서
+    <main className="px-4 py-10">
       <section
         aria-labelledby="register-title"
-        className="rounded-3xl border bg-card p-7 shadow-sm sm:p-10"
+        className="mx-auto max-w-[480px] rounded-[22px] border bg-card px-10 py-9 shadow-sm"
       >
         <h2 id="register-title" className="text-2xl font-bold">
           회원가입
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          가입하면 나의 도시에 첫 프로젝트를 만들 수 있어요.
-        </p>
-        <div className="mt-7 grid gap-5">
-          {/* 인증 계약(ACC-A11·A12)이 없는 live 모드는 인증 없이 가입한다. emailCode.ts 참고 */}
-          {emailVerificationEnabled && (
-            <EmailVerification
-              needed={needVerify}
-              onVerified={setVerifiedEmail}
-            />
-          )}
+        <div className="mt-6">
           <ActionForm
             block
+            auth
             fields={[
               { name: 'name', label: '이름', required: true, max: 40 },
               ...(emailVerificationEnabled
-                ? []
+                ? [
+                    {
+                      name: 'verification',
+                      label: '이메일',
+                      // 인증 계약(ACC-A11·A12)이 없는 live 모드는 인증 없이 가입한다. emailCode.ts 참고
+                      custom: (
+                        <EmailVerification
+                          needed={needVerify}
+                          onVerified={setVerifiedEmail}
+                        />
+                      ),
+                    },
+                  ]
                 : [
                     {
                       name: 'email',
@@ -89,7 +93,7 @@ export default function RegisterPage() {
             }}
           />
         </div>
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-5 text-center text-sm text-muted-foreground">
           이미 계정이 있나요?{' '}
           <Link to={login} className="font-semibold text-foreground">
             로그인
