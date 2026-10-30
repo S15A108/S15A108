@@ -39,12 +39,11 @@ export function Hotbar({
 }) {
   const pane = useWorkspaceStore((state) => state.pane)
   const openPane = useWorkspaceStore((state) => state.openPane)
-  // 숫자 키 1~6으로 칸을 연다. 입력 중이거나 창이 열려 있으면 무시한다.
+  // 숫자 키 1~6으로 칸을 연다. 열린 창의 번호를 다시 누르면 닫는다(창 머리 'N 또는 Esc로 닫기'). 입력 중이면 무시한다.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (
-        pane ||
         event.repeat ||
         event.altKey ||
         event.ctrlKey ||
@@ -53,6 +52,10 @@ export function Hotbar({
       )
         return
       const slot = hotbarSlots[Number(event.key) - 1]
+      if (pane) {
+        if (slot?.pane === pane) openPane(null)
+        return
+      }
       if (slot && !locked.includes(slot.pane)) openPane(slot.pane)
     }
     window.addEventListener('keydown', onKey)
@@ -71,7 +74,7 @@ export function Hotbar({
         aria-current={isOpen ? 'page' : undefined}
         aria-disabled={isLocked || undefined}
         title={isLocked ? lockedReason : undefined}
-        onClick={() => !isLocked && openPane(item.pane)}
+        onClick={() => !isLocked && openPane(isOpen ? null : item.pane)}
         className={cn(
           'relative inline-flex h-[34px] items-center gap-1.5 rounded-full pr-[11px] pl-[7px] text-[13px] font-semibold whitespace-nowrap text-[#3f3a2e] transition-colors hover:bg-muted',
           isOpen && 'bg-foreground font-bold text-white hover:bg-foreground',
@@ -122,7 +125,11 @@ export function Hotbar({
   return (
     <nav
       aria-label="프로젝트 메뉴 단축 바"
-      className="pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-4"
+      className={cn(
+        'pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-4',
+        // 업무 창이 열려도 단축 바는 어두운 막 위에 밝게 남는다.
+        pane && pane !== 'settings' && 'z-[60]',
+      )}
     >
       <div
         data-tour="hotbar"

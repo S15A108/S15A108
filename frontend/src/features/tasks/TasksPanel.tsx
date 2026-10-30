@@ -32,13 +32,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { PaneSheet, SheetSubmit } from '@/components/PaneSheet'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -961,7 +955,8 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       )}
       {assigning && formTask && (
         <FormDialog
-          title="작업 담당자 변경"
+          back={formTask.key}
+          title="담당자 바꾸기"
           // 진행 중이거나 대기 중인 작업은 넘기면 새 담당자가 다시 검증받는다(PR #50 d4db914, 보드에 없는 안내).
           description={`바뀐 담당자에게 알림이 가요. 계획과 기록은 그대로 남아요.${
             formTask.status === 'IN_PROGRESS'
@@ -999,8 +994,9 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       )}
       {reporting === 'WAIT' && formTask && (
         <FormDialog
-          title="대기 보고"
-          description="기다리는 이유를 하나 고르면 팀 활동에 남아요."
+          back={formTask.key}
+          title="대기로 보고"
+          description="작업을 멈추고 기다리는 이유를 남겨요. 팀 활동에도 보여요."
           fields={[
             {
               name: 'waiting_reason',
@@ -1015,7 +1011,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
             },
             { name: 'summary', label: '지금 상황', type: 'textarea' },
           ]}
-          submitLabel="대기 보고"
+          submitLabel="대기로 보고"
           onClose={() => setReporting(null)}
           onSubmit={async (values) => {
             await action.run(
@@ -1036,6 +1032,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       )}
       {reporting === 'COMPLETED' && formTask && (
         <CompleteDialog
+          back={formTask.key}
           criteria={formTask.current_plan_revision.plan.completion_criteria}
           onClose={() => setReporting(null)}
           onSubmit={async (report) => {
@@ -1055,6 +1052,7 @@ export function TasksPanel({ projectId, isLeader }: Props) {
       )}
       {recording && formTask && (
         <FormDialog
+          back={formTask.key}
           title="작업 기록 남기기"
           fields={[
             {
@@ -1288,308 +1286,292 @@ function PlanDialog({
     </div>
   )
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !isSubmitting) onClose()
-      }}
+    <PaneSheet
+      back={task ? task.key : '작업 현황'}
+      title={
+        task
+          ? `계획 수정 · r${task.current_plan_revision.revision_no + 1}`
+          : '작업 계획 등록'
+      }
+      description={
+        task
+          ? `r${task.current_plan_revision.revision_no}은 그대로 남고, 등록하면 r${task.current_plan_revision.revision_no + 1}로 계획 검증을 다시 해요.`
+          : '제목, 목표, 관련 설계, 완료 기준만 적으면 등록돼요. 등록하면 바로 계획 검증을 할 수 있어요.'
+      }
+      busy={isSubmitting}
+      onClose={onClose}
+      className="sm:max-w-2xl"
     >
-      <DialogContent
-        className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl"
-        onEscapeKeyDown={(event) => {
-          if (isSubmitting) event.preventDefault()
-        }}
-        onInteractOutside={(event) => {
-          if (isSubmitting) event.preventDefault()
-        }}
+      <form
+        className="space-y-5"
+        noValidate
+        onSubmit={handleSubmit(async (values) => {
+          setError('')
+          try {
+            const input = taskPlanInputSchema.parse({
+              ...values,
+              included_scope: lines(values.included_scope),
+              excluded_scope: lines(values.excluded_scope),
+              completion_criteria: lines(values.completion_criteria),
+              context_packet_id: values.context_packet_id || undefined,
+              // API 미정(H2): 줄마다 쓴 내용을 description 하나짜리 구조로 보낸다.
+              unlinked: lines(values.unlinked).map((description) => ({
+                description,
+              })),
+              design_refs: values.refs.map((reference) => ({
+                design_item_id: reference.design_item_id,
+                design_item_version_id: reference.design_item_version_id,
+                relation: reference.relation,
+                ...(reference.relation === 'CHANGES'
+                  ? {
+                      proposed_content: {
+                        ...items.find(
+                          (item) =>
+                            item.design_item_id === reference.design_item_id,
+                        )?.content,
+                        description: reference.proposed_content,
+                      },
+                    }
+                  : {}),
+              })),
+            })
+            await onSubmit(input)
+          } catch (cause) {
+            setError(getApiErrorMessage(cause))
+          }
+        })}
       >
-        <DialogHeader>
-          <DialogTitle>
-            {task
-              ? `계획 수정 · r${task.current_plan_revision.revision_no + 1}`
-              : '작업 계획 등록'}
-          </DialogTitle>
-          <DialogDescription>
-            {task
-              ? '지금 계획을 채워 두었어요. 저장하면 새 리비전으로 다시 검증해요.'
-              : '제목·목표·관련 설계·완료 기준만 쓰면 돼요. 저장 뒤 계획 검증을 할 수 있어요.'}
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="space-y-5"
-          noValidate
-          onSubmit={handleSubmit(async (values) => {
-            setError('')
-            try {
-              const input = taskPlanInputSchema.parse({
-                ...values,
-                included_scope: lines(values.included_scope),
-                excluded_scope: lines(values.excluded_scope),
-                completion_criteria: lines(values.completion_criteria),
-                context_packet_id: values.context_packet_id || undefined,
-                // API 미정(H2): 줄마다 쓴 내용을 description 하나짜리 구조로 보낸다.
-                unlinked: lines(values.unlinked).map((description) => ({
-                  description,
-                })),
-                design_refs: values.refs.map((reference) => ({
-                  design_item_id: reference.design_item_id,
-                  design_item_version_id: reference.design_item_version_id,
-                  relation: reference.relation,
-                  ...(reference.relation === 'CHANGES'
-                    ? {
-                        proposed_content: {
-                          ...items.find(
-                            (item) =>
-                              item.design_item_id === reference.design_item_id,
-                          )?.content,
-                          description: reference.proposed_content,
-                        },
-                      }
-                    : {}),
-                })),
-              })
-              await onSubmit(input)
-            } catch (cause) {
-              setError(getApiErrorMessage(cause))
-            }
-          })}
-        >
-          {field('title', '작업 제목', false)}
-          {field('goal', '이번 작업의 목표', false)}
-          <fieldset className="space-y-3 rounded-lg border p-4">
-            <legend className="px-2 text-sm font-medium">관련 설계 항목</legend>
-            {items.map((item) => {
-              const index = refs.findIndex(
-                (reference) => reference.design_item_id === item.design_item_id,
-              )
-              const selected = index >= 0
-              return (
-                <div
-                  key={item.design_item_id}
-                  className="space-y-2 border-b pb-3 last:border-0 last:pb-0"
-                >
-                  <label className="flex items-start gap-3 text-sm">
-                    <input
-                      className="mt-1 size-4 accent-primary"
-                      type="checkbox"
-                      checked={selectedRefs.has(item.design_item_id)}
-                      disabled={isSubmitting}
-                      onChange={(event) =>
-                        setValue(
-                          'refs',
-                          event.target.checked
-                            ? [
-                                ...refs,
-                                {
-                                  design_item_id: item.design_item_id,
-                                  design_item_version_id: item.id,
-                                  relation: 'IMPLEMENTS',
-                                  proposed_content: describeContent(
-                                    item.content,
-                                  ),
-                                },
-                              ]
-                            : refs.filter(
-                                (reference) =>
-                                  reference.design_item_id !==
-                                  item.design_item_id,
-                              ),
-                        )
-                      }
-                    />
-                    <span>
-                      <strong>
-                        {item.key} · 승인 v{item.version_no}
-                      </strong>
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {typeof item.content.description === 'string'
-                          ? item.content.description
-                          : JSON.stringify(item.content)}
-                      </span>
+        {field('title', '작업 제목', false)}
+        {field('goal', '이번 작업의 목표', false)}
+        <fieldset className="space-y-3 rounded-lg border p-4">
+          <legend className="px-2 text-sm font-medium">관련 설계 항목</legend>
+          {items.map((item) => {
+            const index = refs.findIndex(
+              (reference) => reference.design_item_id === item.design_item_id,
+            )
+            const selected = index >= 0
+            return (
+              <div
+                key={item.design_item_id}
+                className="space-y-2 border-b pb-3 last:border-0 last:pb-0"
+              >
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    className="mt-1 size-4 accent-primary"
+                    type="checkbox"
+                    checked={selectedRefs.has(item.design_item_id)}
+                    disabled={isSubmitting}
+                    onChange={(event) =>
+                      setValue(
+                        'refs',
+                        event.target.checked
+                          ? [
+                              ...refs,
+                              {
+                                design_item_id: item.design_item_id,
+                                design_item_version_id: item.id,
+                                relation: 'IMPLEMENTS',
+                                proposed_content: describeContent(item.content),
+                              },
+                            ]
+                          : refs.filter(
+                              (reference) =>
+                                reference.design_item_id !==
+                                item.design_item_id,
+                            ),
+                      )
+                    }
+                  />
+                  <span>
+                    <strong>
+                      {item.key} · 승인 v{item.version_no}
+                    </strong>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {typeof item.content.description === 'string'
+                        ? item.content.description
+                        : JSON.stringify(item.content)}
                     </span>
-                  </label>
-                  {selected && (
-                    <div className="ml-7 space-y-2">
-                      <NativeSelect
-                        aria-label={`${item.key}의 참조 관계`}
-                        disabled={isSubmitting}
-                        {...register(`refs.${index}.relation`)}
-                      >
-                        <NativeSelectOption value="READS">
-                          {relationLabel.READS}
-                        </NativeSelectOption>
-                        <NativeSelectOption value="IMPLEMENTS">
-                          {relationLabel.IMPLEMENTS}
-                        </NativeSelectOption>
-                        <NativeSelectOption value="CHANGES">
-                          {relationLabel.CHANGES}
-                        </NativeSelectOption>
-                      </NativeSelect>
-                      {refs[index].design_item_version_id !== item.id && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-xs text-amber-800">
-                            이전 버전을 참조하고 있어요.
-                          </p>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            type="button"
-                            onClick={() =>
-                              setValue(
-                                `refs.${index}.design_item_version_id`,
-                                item.id,
-                              )
-                            }
-                          >
-                            현재 승인본으로 갱신
-                          </Button>
-                        </div>
-                      )}
-                      {refs[index].relation === 'CHANGES' && (
-                        <div className="grid gap-2">
-                          <Label htmlFor={`change-${index}`}>
-                            바꿀 계약 문장
-                          </Label>
-                          <Input
-                            id={`change-${index}`}
-                            disabled={isSubmitting}
-                            {...register(`refs.${index}.proposed_content`)}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {refs
-              .filter(
-                (reference) =>
-                  !items.some(
-                    (item) => item.design_item_id === reference.design_item_id,
-                  ),
-              )
-              .map((reference) => (
-                <p
-                  key={reference.design_item_id}
-                  className="text-xs text-amber-800"
-                >
-                  이전 참조 항목 {reference.design_item_id}의 현재 승인본을
-                  확인해 주세요. 기존 버전은 보존해요.
-                </p>
-              ))}
-            {!items.length && (
-              <p className="text-sm text-muted-foreground">
-                현재 조회된 승인 설계 항목이 없어요.
-              </p>
-            )}
-            {moreItems && (
-              <Button type="button" variant="outline" onClick={onMoreItems}>
-                설계 항목 더 보기
-              </Button>
-            )}
-          </fieldset>
-          {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
-          <details
-            className="rounded-lg border p-4"
-            open={detailsOpen}
-            onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
-          >
-            <summary className="cursor-pointer text-sm font-medium">
-              더 자세히 (선택)
-            </summary>
-            <div className="mt-4 space-y-5">
-              {field('included_scope', '포함 범위 · 한 줄에 하나씩')}
-              {field('excluded_scope', '제외 범위 · 한 줄에 하나씩')}
-              {field('approach', '어떻게 진행하나요?')}
-              <div className={cn('space-y-2', flagged('dependency_task_ids'))}>
-                <fieldset className="space-y-2">
-                  <legend className="mb-2 text-sm font-medium">
-                    먼저 완료되어야 하는 작업
-                  </legend>
-                  {dependencies
-                    .filter(
-                      (entry) =>
-                        entry.id !== task?.id && entry.status !== 'CANCELLED',
-                    )
-                    .map((entry) => (
-                      <label
-                        key={entry.id}
-                        className="flex items-center gap-3 text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-primary"
-                          disabled={isSubmitting}
-                          checked={dependencyIds.includes(entry.id)}
-                          onChange={(event) =>
+                  </span>
+                </label>
+                {selected && (
+                  <div className="ml-7 space-y-2">
+                    <NativeSelect
+                      aria-label={`${item.key}의 참조 관계`}
+                      disabled={isSubmitting}
+                      {...register(`refs.${index}.relation`)}
+                    >
+                      <NativeSelectOption value="READS">
+                        {relationLabel.READS}
+                      </NativeSelectOption>
+                      <NativeSelectOption value="IMPLEMENTS">
+                        {relationLabel.IMPLEMENTS}
+                      </NativeSelectOption>
+                      <NativeSelectOption value="CHANGES">
+                        {relationLabel.CHANGES}
+                      </NativeSelectOption>
+                    </NativeSelect>
+                    {refs[index].design_item_version_id !== item.id && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-amber-800">
+                          이전 버전을 참조하고 있어요.
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          onClick={() =>
                             setValue(
-                              'dependency_task_ids',
-                              event.target.checked
-                                ? [...dependencyIds, entry.id]
-                                : dependencyIds.filter((id) => id !== entry.id),
+                              `refs.${index}.design_item_version_id`,
+                              item.id,
                             )
                           }
+                        >
+                          현재 승인본으로 갱신
+                        </Button>
+                      </div>
+                    )}
+                    {refs[index].relation === 'CHANGES' && (
+                      <div className="grid gap-2">
+                        <Label htmlFor={`change-${index}`}>
+                          바꿀 계약 문장
+                        </Label>
+                        <Input
+                          id={`change-${index}`}
+                          disabled={isSubmitting}
+                          {...register(`refs.${index}.proposed_content`)}
                         />
-                        {entry.key} · {entry.current_plan_revision.plan.title}
-                      </label>
-                    ))}
-                </fieldset>
-                {flagNote('dependency_task_ids')}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className={cn('grid gap-2', flagged('unlinked'))}>
-                <Label htmlFor="plan-unlinked">
-                  아직 연결하지 못한 내용 · 한 줄에 하나씩
-                </Label>
-                <Textarea
-                  id="plan-unlinked"
-                  {...register('unlinked')}
-                  rows={4}
-                  disabled={isSubmitting}
-                />
-                {flagNote('unlinked')}
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="plan-packet">
-                  개발 컨텍스트 패킷 ID · 선택
-                </Label>
-                <Input
-                  id="plan-packet"
-                  {...register('context_packet_id')}
-                  disabled={isSubmitting}
-                />
-              </div>
-              <div className={cn('grid gap-2', flagged('no_contract_change'))}>
-                <label className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 text-sm leading-6">
-                  <input
-                    type="checkbox"
-                    className="mt-1 size-4 accent-primary"
-                    disabled={isSubmitting}
-                    {...register('no_contract_change')}
-                  />
-                  승인된 계약을 변경하지 않는 작업입니다.
-                </label>
-                {flagNote('no_contract_change')}
-              </div>
-            </div>
-          </details>
-          <p className="text-xs text-muted-foreground">
-            나머지는 비워 둬도 돼요. 검증에서 더 필요하면 알려 줘요.
-          </p>
-          {error && (
-            <p
-              className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
-              role="alert"
-            >
-              {error}
+            )
+          })}
+          {refs
+            .filter(
+              (reference) =>
+                !items.some(
+                  (item) => item.design_item_id === reference.design_item_id,
+                ),
+            )
+            .map((reference) => (
+              <p
+                key={reference.design_item_id}
+                className="text-xs text-amber-800"
+              >
+                이전 참조 항목 {reference.design_item_id}의 현재 승인본을 확인해
+                주세요. 기존 버전은 보존해요.
+              </p>
+            ))}
+          {!items.length && (
+            <p className="text-sm text-muted-foreground">
+              현재 조회된 승인 설계 항목이 없어요.
             </p>
           )}
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? '저장 중…' : '계획 저장'}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {moreItems && (
+            <Button type="button" variant="outline" onClick={onMoreItems}>
+              설계 항목 더 보기
+            </Button>
+          )}
+        </fieldset>
+        {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
+        <details
+          className="rounded-lg border p-4"
+          open={detailsOpen}
+          onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+        >
+          <summary className="cursor-pointer text-sm font-medium">
+            더 자세히 (선택)
+          </summary>
+          <div className="mt-4 space-y-5">
+            {field('included_scope', '포함 범위 · 한 줄에 하나씩')}
+            {field('excluded_scope', '제외 범위 · 한 줄에 하나씩')}
+            {field('approach', '어떻게 진행하나요?')}
+            <div className={cn('space-y-2', flagged('dependency_task_ids'))}>
+              <fieldset className="space-y-2">
+                <legend className="mb-2 text-sm font-medium">
+                  먼저 완료되어야 하는 작업
+                </legend>
+                {dependencies
+                  .filter(
+                    (entry) =>
+                      entry.id !== task?.id && entry.status !== 'CANCELLED',
+                  )
+                  .map((entry) => (
+                    <label
+                      key={entry.id}
+                      className="flex items-center gap-3 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        disabled={isSubmitting}
+                        checked={dependencyIds.includes(entry.id)}
+                        onChange={(event) =>
+                          setValue(
+                            'dependency_task_ids',
+                            event.target.checked
+                              ? [...dependencyIds, entry.id]
+                              : dependencyIds.filter((id) => id !== entry.id),
+                          )
+                        }
+                      />
+                      {entry.key} · {entry.current_plan_revision.plan.title}
+                    </label>
+                  ))}
+              </fieldset>
+              {flagNote('dependency_task_ids')}
+            </div>
+            <div className={cn('grid gap-2', flagged('unlinked'))}>
+              <Label htmlFor="plan-unlinked">
+                아직 연결하지 못한 내용 · 한 줄에 하나씩
+              </Label>
+              <Textarea
+                id="plan-unlinked"
+                {...register('unlinked')}
+                rows={4}
+                disabled={isSubmitting}
+              />
+              {flagNote('unlinked')}
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="plan-packet">개발 컨텍스트 패킷 ID · 선택</Label>
+              <Input
+                id="plan-packet"
+                {...register('context_packet_id')}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className={cn('grid gap-2', flagged('no_contract_change'))}>
+              <label className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 text-sm leading-6">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-primary"
+                  disabled={isSubmitting}
+                  {...register('no_contract_change')}
+                />
+                승인된 계약을 변경하지 않는 작업입니다.
+              </label>
+              {flagNote('no_contract_change')}
+            </div>
+          </div>
+        </details>
+        <p className="text-xs text-muted-foreground">
+          나머지는 비워 둬도 돼요. 검증에서 더 필요하면 알려 줘요.
+        </p>
+        {error && (
+          <p
+            className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
+        <SheetSubmit disabled={isSubmitting}>
+          {isSubmitting ? '저장 중…' : '계획 저장'}
+        </SheetSubmit>
+      </form>
+    </PaneSheet>
   )
 }
 
@@ -1618,10 +1600,13 @@ type Complete = z.infer<typeof completeSchema>
 
 // 완료 보고 · 완료 기준을 하나씩 체크하고, 계획과 달라진 점은 없음/있음을 고른 뒤 줄마다 쓴다(H2: JSON 입력 없앰).
 function CompleteDialog({
+  back,
   criteria,
   onClose,
   onSubmit,
 }: {
+  /** 하위 화면 머리줄에 둘 작업 번호 */
+  back: string
   criteria: string[]
   onClose: () => void
   onSubmit: (
@@ -1644,105 +1629,95 @@ function CompleteDialog({
   })
   const changed = useWatch({ control, name: 'changed' })
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !isSubmitting) onClose()
-      }}
+    <PaneSheet
+      back={back}
+      title="완료 보고"
+      description="완료는 담당자가 스스로 보고해요. 계획과 달라진 점이 있으면 다시 검증할 때까지 대기로 남아요."
+      busy={isSubmitting}
+      onClose={onClose}
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>완료 보고</DialogTitle>
-          <DialogDescription>
-            완료는 담당자의 자기 보고예요. 계획과 달라진 점이 있으면 다시 검증이
-            끝날 때까지 대기로 남아요.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          noValidate
-          className="grid gap-4"
-          onSubmit={handleSubmit((values) =>
-            onSubmit({
-              summary: values.summary,
-              completion_checks: criteria.map((criterion) => ({
-                criterion,
-                met: true,
-              })),
-              // API 미정(H2): 줄마다 쓴 달라진 점을 description 하나짜리 구조로 보낸다.
-              delta:
-                values.changed === 'yes'
-                  ? lines(values.delta).map((description) => ({ description }))
-                  : [],
-            }).catch(() => undefined),
+      <form
+        noValidate
+        className="grid gap-4"
+        onSubmit={handleSubmit((values) =>
+          onSubmit({
+            summary: values.summary,
+            completion_checks: criteria.map((criterion) => ({
+              criterion,
+              met: true,
+            })),
+            // API 미정(H2): 줄마다 쓴 달라진 점을 description 하나짜리 구조로 보낸다.
+            delta:
+              values.changed === 'yes'
+                ? lines(values.delta).map((description) => ({ description }))
+                : [],
+          }).catch(() => undefined),
+        )}
+      >
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm font-medium">완료 기준 확인</legend>
+          {criteria.map((criterion, index) => (
+            <label key={index} className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 size-4 accent-primary"
+                {...register(`checks.${index}`)}
+              />
+              {criterion}
+            </label>
+          ))}
+          {errors.checks && (
+            <p role="alert" className="text-xs text-destructive">
+              {errors.checks.message ?? errors.checks.root?.message}
+            </p>
           )}
-        >
-          <fieldset className="grid gap-2">
-            <legend className="mb-1 text-sm font-medium">완료 기준 확인</legend>
-            {criteria.map((criterion, index) => (
-              <label key={index} className="flex items-start gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1 size-4 accent-primary"
-                  {...register(`checks.${index}`)}
-                />
-                {criterion}
-              </label>
-            ))}
-            {errors.checks && (
-              <p role="alert" className="text-xs text-destructive">
-                {errors.checks.message ?? errors.checks.root?.message}
-              </p>
-            )}
-          </fieldset>
-          <div className="grid gap-1.5">
-            <Label htmlFor="complete-summary">완료한 내용</Label>
-            <Textarea
-              id="complete-summary"
-              rows={3}
-              aria-invalid={!!errors.summary}
-              {...register('summary')}
-            />
-            {errors.summary && (
-              <p role="alert" className="text-xs text-destructive">
-                {errors.summary.message}
-              </p>
-            )}
+        </fieldset>
+        <div className="grid gap-1.5">
+          <Label htmlFor="complete-summary">완료한 내용</Label>
+          <Textarea
+            id="complete-summary"
+            rows={3}
+            aria-invalid={!!errors.summary}
+            {...register('summary')}
+          />
+          {errors.summary && (
+            <p role="alert" className="text-xs text-destructive">
+              {errors.summary.message}
+            </p>
+          )}
+        </div>
+        <fieldset className="grid gap-2">
+          <legend className="mb-1 text-sm font-medium">계획과 달라진 점</legend>
+          <div className="flex gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="radio" value="no" {...register('changed')} />
+              없음
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" value="yes" {...register('changed')} />
+              있음
+            </label>
           </div>
-          <fieldset className="grid gap-2">
-            <legend className="mb-1 text-sm font-medium">
-              계획과 달라진 점
-            </legend>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input type="radio" value="no" {...register('changed')} />
-                없음
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" value="yes" {...register('changed')} />
-                있음
-              </label>
-            </div>
-            {changed === 'yes' && (
-              <>
-                <Textarea
-                  aria-label="달라진 점 · 한 줄에 하나씩"
-                  rows={3}
-                  aria-invalid={!!errors.delta}
-                  {...register('delta')}
-                />
-                {errors.delta && (
-                  <p role="alert" className="text-xs text-destructive">
-                    {errors.delta.message}
-                  </p>
-                )}
-              </>
-            )}
-          </fieldset>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? '처리 중…' : '완료 보고'}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+          {changed === 'yes' && (
+            <>
+              <Textarea
+                aria-label="달라진 점 · 한 줄에 하나씩"
+                rows={3}
+                aria-invalid={!!errors.delta}
+                {...register('delta')}
+              />
+              {errors.delta && (
+                <p role="alert" className="text-xs text-destructive">
+                  {errors.delta.message}
+                </p>
+              )}
+            </>
+          )}
+        </fieldset>
+        <SheetSubmit disabled={isSubmitting}>
+          {isSubmitting ? '처리 중…' : '완료 보고'}
+        </SheetSubmit>
+      </form>
+    </PaneSheet>
   )
 }

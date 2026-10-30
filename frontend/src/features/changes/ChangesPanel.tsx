@@ -304,8 +304,17 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
           {action.error}
         </p>
       )}
-      <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="grid content-start gap-2.5">
+      {/* 새 제안·승인·반려·이력은 목록을 접고 창 안 전체 화면으로 연다(캔버스 수정안 '‹ 뒤로'). */}
+      <div
+        className={cn(
+          'grid gap-5',
+          mode.kind === 'detail' && 'lg:grid-cols-[280px_minmax(0,1fr)]',
+        )}
+      >
+        <div
+          hidden={mode.kind !== 'detail'}
+          className="grid content-start gap-2.5"
+        >
           <div className="flex gap-2">
             <label className="relative flex-1">
               <span className="sr-only">제안 검색</span>

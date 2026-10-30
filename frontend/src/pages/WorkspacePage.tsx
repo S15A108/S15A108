@@ -18,6 +18,7 @@ import { ContextPanel } from '@/features/contexts/ContextPanel'
 import { WorkspaceHud } from '@/features/workspace/WorkspaceHud'
 import { SettingsDialog } from '@/features/workspace/SettingsDialog'
 import { AsyncState } from '@/components/AsyncState'
+import { PaneSheetHost } from '@/components/PaneSheet'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,6 +32,15 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePane } from '@/stores/workspaceStore'
 
 const OfficeScene = lazy(() => import('@/three/OfficeScene'))
+// 단축 바 번호(창 머리 'N 또는 Esc로 닫기')
+const paneKeys: Partial<Record<WorkspacePane, number>> = {
+  documents: 1,
+  changes: 2,
+  meetings: 3,
+  tasks: 4,
+  relations: 5,
+  dashboard: 6,
+}
 const paneTitles: Record<Exclude<WorkspacePane, 'settings'>, string> = {
   documents: '공용 문서함',
   planning: '기획 분석',
@@ -217,21 +227,28 @@ function Workspace({ projectId }: { projectId: string }) {
             >
               <DialogContent
                 className={cn(
-                  'max-h-[87dvh] overflow-y-auto bg-background p-5 sm:p-8',
+                  // 보드처럼 위에서 40px에 두고, 아래 단축 바 자리(120px)를 비운다.
+                  'top-10 max-h-[calc(100dvh-160px)] translate-y-0 overflow-y-auto bg-background p-5 sm:p-8',
                   // 작업 현황·설계 관계·대시보드: 창 바탕은 연회색, 머리는 흰 띠, 칸은 흰 카드(PNL-05·09 수정안 10-29)
                   tinted && 'bg-[#f7f8fa]',
                   pane === 'chat'
                     ? 'sm:max-w-[min(1080px,94vw)]'
                     : pane === 'documents'
-                      ? // 공용 문서함: 폭은 다른 업무 창과 같고, 높이는 90vh 고정에 본문만 안에서 스크롤
-                        'h-[90dvh] max-h-[90dvh] content-start sm:max-w-[min(1180px,94vw)]'
+                      ? // 공용 문서함: 폭은 다른 업무 창과 같고, 높이는 화면에 맞춘 고정 높이에 본문만 안에서 스크롤
+                        'h-[calc(100dvh-160px)] content-start sm:max-w-[min(1180px,94vw)]'
                       : 'sm:max-w-[min(1180px,94vw)]',
                 )}
                 onEscapeKeyDown={(event) => {
                   if (pendingMutations) event.preventDefault()
                 }}
                 onInteractOutside={(event) => {
-                  if (pendingMutations) event.preventDefault()
+                  // 창이 열려도 단축 바는 밝게 남아 다른 메뉴로 바로 옮겨 간다.
+                  const target = event.target as HTMLElement | null
+                  if (
+                    pendingMutations ||
+                    target?.closest('nav[aria-label="프로젝트 메뉴 단축 바"]')
+                  )
+                    event.preventDefault()
                 }}
               >
                 <DialogHeader
@@ -241,17 +258,36 @@ function Workspace({ projectId }: { projectId: string }) {
                       : undefined
                   }
                 >
-                  <DialogTitle>
-                    {pane && pane !== 'settings' ? paneTitles[pane] : ''}
-                  </DialogTitle>
+                  <div className="flex items-start justify-between gap-3 pr-8">
+                    <DialogTitle>
+                      {pane && pane !== 'settings' ? paneTitles[pane] : ''}
+                    </DialogTitle>
+                    {pane && paneKeys[pane] && (
+                      <span className="mt-0.5 shrink-0 text-xs whitespace-nowrap text-muted-foreground">
+                        <kbd className="rounded-md border px-1.5 py-px font-[inherit]">
+                          {paneKeys[pane]}
+                        </kbd>{' '}
+                        또는{' '}
+                        <kbd className="rounded-md border px-1.5 py-px font-[inherit]">
+                          Esc
+                        </kbd>
+                        로 닫기
+                      </span>
+                    )}
+                  </div>
                   {/* 공용 문서함은 머리 부제목 없이 제목만(PNL-02-v2 10-29 부제목 제거). */}
                   <DialogDescription
                     className={pane === 'documents' ? 'sr-only' : undefined}
                   >
                     {data.project.name}
+                    {data.project.current_baseline &&
+                      ` · 기준 v${data.project.current_baseline.version_no}`}
                   </DialogDescription>
                 </DialogHeader>
-                <div key={`${projectId}:${pane}`} className="mt-4 min-w-0">
+                <PaneSheetHost
+                  key={`${projectId}:${pane}`}
+                  className="mt-4 min-w-0"
+                >
                   {pane === 'documents' && <DocumentsPanel {...panelProps} />}
                   {pane === 'planning' && <PlanningPanel {...panelProps} />}
                   {pane === 'changes' && <ChangesPanel {...panelProps} />}
@@ -266,7 +302,7 @@ function Workspace({ projectId }: { projectId: string }) {
                   {pane === 'inbox' && <InboxPanel projectId={projectId} />}
                   {pane === 'chat' && <BibiPanel projectId={projectId} />}
                   {pane === 'context' && <ContextPanel projectId={projectId} />}
-                </div>
+                </PaneSheetHost>
               </DialogContent>
             </Dialog>
           </main>

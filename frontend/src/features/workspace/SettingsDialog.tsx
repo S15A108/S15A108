@@ -4,6 +4,7 @@ import { AgentsPanel } from '@/features/agents/AgentsPanel'
 import { TeamPanel } from '@/features/members/TeamPanel'
 import type { TeamView } from '@/features/members/TeamPanel'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { PaneSheetHost } from '@/components/PaneSheet'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 
@@ -94,7 +95,7 @@ export function SettingsDialog({
             </Link>
           </div>
         </nav>
-        <div className="min-w-0 overflow-y-auto px-8 py-7">
+        <PaneSheetHost className="min-w-0 overflow-y-auto px-8 py-7">
           {section === 'agent' ? (
             <AgentsPanel projectId={projectId} />
           ) : (
@@ -106,7 +107,7 @@ export function SettingsDialog({
               onViewChange={go}
             />
           )}
-        </div>
+        </PaneSheetHost>
       </DialogContent>
     </Dialog>
   )

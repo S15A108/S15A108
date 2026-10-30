@@ -5,8 +5,9 @@ import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { getApiErrorMessage } from '@/api/error'
-import { objectParticle } from '@/lib/display'
-import { Button } from '@/components/ui/button'
+import { DISPLAY_COLORS, objectParticle } from '@/lib/display'
+import { cn } from '@/lib/utils'
+import { SheetSubmit } from '@/components/PaneSheet'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -139,7 +140,10 @@ export function ActionForm({
       {fields.map((field) => (
         <div key={field.name} className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
-            <Label htmlFor={`${formId}-${field.name}`}>
+            <Label
+              id={`${formId}-${field.name}-label`}
+              htmlFor={`${formId}-${field.name}`}
+            >
               {field.label}
               {field.required && (
                 <span aria-hidden="true" className="text-destructive">
@@ -176,6 +180,39 @@ export function ActionForm({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+          ) : field.type === 'color' ? (
+            <div
+              role="radiogroup"
+              aria-labelledby={`${formId}-${field.name}-label`}
+              className="flex flex-wrap gap-2.5"
+            >
+              {[
+                ...DISPLAY_COLORS,
+                ...(watched[field.name] &&
+                !DISPLAY_COLORS.includes(watched[field.name]!)
+                  ? [watched[field.name]!]
+                  : []),
+              ].map((color) => (
+                <label
+                  key={color}
+                  className={cn(
+                    'size-7 cursor-pointer rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]',
+                    watched[field.name] === color &&
+                      'shadow-[0_0_0_2px_#fff,0_0_0_4px_var(--foreground)]',
+                  )}
+                  style={{ backgroundColor: color }}
+                >
+                  <input
+                    type="radio"
+                    value={color}
+                    aria-label={color}
+                    className="sr-only"
+                    disabled={isSubmitting}
+                    {...register(field.name)}
+                  />
+                </label>
+              ))}
+            </div>
           ) : field.type === 'password' ? (
             <div className="relative">
               <Input
@@ -239,14 +276,13 @@ export function ActionForm({
           {error}
         </p>
       )}
-      <Button
-        type="submit"
-        variant={destructive ? 'destructive' : 'default'}
+      <SheetSubmit
+        destructive={destructive}
         disabled={isSubmitting || disabled}
         className={block ? 'w-full' : 'justify-self-end'}
       >
         {isSubmitting ? '처리 중…' : submitLabel}
-      </Button>
+      </SheetSubmit>
     </form>
   )
 }

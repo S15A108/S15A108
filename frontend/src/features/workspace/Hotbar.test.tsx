@@ -52,3 +52,12 @@ it('배지가 0이면 숫자를 붙이지 않는다', () => {
   render(<Hotbar locked={[]} badges={{ changes: 0, meetings: 0 }} />)
   expect(screen.queryByLabelText(/새 항목/)).not.toBeInTheDocument()
 })
+
+it('업무 창이 열려 있으면 그 창의 번호 키로 닫고, 다른 번호로는 열지 않는다', async () => {
+  useWorkspaceStore.setState({ pane: 'tasks' })
+  render(<Hotbar locked={[]} badges={{}} />)
+  await userEvent.keyboard('2')
+  expect(useWorkspaceStore.getState().pane).toBe('tasks')
+  await userEvent.keyboard('4')
+  expect(useWorkspaceStore.getState().pane).toBeNull()
+})

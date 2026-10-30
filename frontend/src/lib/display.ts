@@ -75,3 +75,13 @@ export function describeContent(content: unknown) {
   }
   return typeof content === 'string' ? content : JSON.stringify(content ?? '')
 }
+
+// 표시 색 동그라미(캔버스 SCR-06-v2-settings-role)
+export const DISPLAY_COLORS = [
+  '#dbe7f0',
+  '#f3c530',
+  '#cfe8d8',
+  '#f5d0c5',
+  '#e2d9f3',
+  '#e5e5e5',
+]

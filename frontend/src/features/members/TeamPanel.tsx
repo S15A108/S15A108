@@ -686,7 +686,9 @@ export function TeamPanel({
       )}
       {typeof dialog === 'object' && dialog?.action === 'edit' && (
         <FormDialog
-          title={`${dialog.member.name} 역할 수정`}
+          back="팀"
+          title={`${dialog.member.name} · 역할 수정`}
+          description="표시 역할과 담당 영역은 팀 목록과 3D 이름표에 보여요."
           fields={[
             {
               name: 'role_label',
@@ -704,7 +706,7 @@ export function TeamPanel({
               name: 'color',
               label: '표시 색',
               type: 'color',
-              value: dialog.member.color ?? '#e5b743',
+              value: dialog.member.color ?? '#f3c530',
             },
           ]}
           onClose={() => setDialog(null)}
@@ -725,6 +727,7 @@ export function TeamPanel({
       )}
       {typeof dialog === 'object' && dialog?.action === 'remove' && (
         <FormDialog
+          back="팀"
           title={`${dialog.member.name} 추방`}
           description="프로젝트 접근과 토큰이 바로 해제돼요. 진행 중인 작업을 넘겨받을 동료를 골라 주세요."
           fields={[
