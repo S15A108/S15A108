@@ -932,6 +932,11 @@ export function TasksPanel({ projectId, isLeader }: Props) {
         <PlanDialog
           key={editing === 'edit' ? formTask?.current_plan_revision.id : 'new'}
           task={editing === 'edit' ? formTask : undefined}
+          missing={
+            editing === 'edit' && result?.status === 'NEEDS_INPUT'
+              ? missingDetails(result.findings)
+              : []
+          }
           items={designItems}
           dependencies={entries}
           moreItems={approved.hasNextPage}
@@ -1116,12 +1121,13 @@ export function TasksPanel({ projectId, isLeader }: Props) {
   )
 }
 
+// 필수는 제목·목표·완료 기준. 접은 칸은 비워 두면 기본값([], '', false)으로 보낸다(명세 TaskPlanInput은 그대로).
 const editorSchema = z.object({
   title: z.string().trim().min(1),
   goal: z.string().trim().min(1),
-  included_scope: z.string().trim().min(1),
+  included_scope: z.string(),
   excluded_scope: z.string(),
-  approach: z.string().trim().min(1),
+  approach: z.string(),
   completion_criteria: z.string().trim().min(1),
   dependency_task_ids: idSchema.array(),
   context_packet_id: z.string(),
@@ -1137,6 +1143,33 @@ const editorSchema = z.object({
   ),
 })
 type Editor = z.infer<typeof editorSchema>
+type DetailField =
+  | 'included_scope'
+  | 'excluded_scope'
+  | 'approach'
+  | 'dependency_task_ids'
+  | 'unlinked'
+  | 'no_contract_change'
+
+// 검증 NEEDS_INPUT 메시지에서 빠진 칸을 찾는다. finding에 칸 이름(field)이 없어 문구로 고른다.
+const detailHints: [DetailField, RegExp][] = [
+  ['included_scope', /포함 범위/],
+  ['excluded_scope', /제외 범위/],
+  ['approach', /접근 (방법|방식)/],
+  ['dependency_task_ids', /선행 작업/],
+  ['unlinked', /연결하지 않은|미연결/],
+  ['no_contract_change', /계약 변경/],
+]
+function missingDetails(findings: { kind: string; message: string }[]) {
+  return detailHints
+    .filter(([, pattern]) =>
+      findings.some(
+        (finding) =>
+          finding.kind === 'MISSING_INPUT' && pattern.test(finding.message),
+      ),
+    )
+    .map(([name]) => name)
+}
 
 function PlanDialog({
   task,
@@ -1146,10 +1179,13 @@ function PlanDialog({
   onMoreItems,
   onClose,
   onSubmit,
+  missing = [],
 }: {
   task?: TaskDetail
   items: DesignItemVersion[]
   dependencies: TaskDetail[]
+  /** 검증에서 더 필요하다고 한 접힌 칸. 열 때 펼치고 강조한다. */
+  missing?: DetailField[]
   moreItems: boolean
   onMoreItems: () => void
   onClose: () => void
@@ -1157,6 +1193,26 @@ function PlanDialog({
 }) {
   const plan = task?.current_plan_revision.plan
   const [error, setError] = useState('')
+  // 고치기에서 이미 값이 있거나 검증이 더 필요하다고 한 칸이 있으면 '더 자세히'를 펼친다.
+  const [detailsOpen, setDetailsOpen] = useState(
+    missing.length > 0 ||
+      (!!plan &&
+        (plan.included_scope.length > 0 ||
+          plan.excluded_scope.length > 0 ||
+          !!plan.approach.trim() ||
+          plan.dependency_task_ids.length > 0 ||
+          plan.unlinked.length > 0 ||
+          plan.no_contract_change)),
+  )
+  const flagged = (name: DetailField) =>
+    missing.includes(name) &&
+    'rounded-lg ring-2 ring-destructive/60 ring-offset-4 ring-offset-background'
+  const flagNote = (name: DetailField) =>
+    missing.includes(name) && (
+      <p className="text-xs text-destructive">
+        검증에서 이 칸이 더 필요하다고 했어요.
+      </p>
+    )
   const {
     register,
     control,
@@ -1199,11 +1255,11 @@ function PlanDialog({
     label: string,
     multiline = true,
   ) => (
-    <div className="grid gap-2">
+    <div className={cn('grid gap-2', flagged(name as DetailField))}>
       {/* 필수 표시는 라벨 밖에 둔다(L4). 라벨 이름은 그대로 남아 화면 읽기 프로그램에 같은 이름으로 읽힌다. */}
       <span className="flex gap-1">
         <Label htmlFor={`plan-${name}`}>{label}</Label>
-        {name !== 'excluded_scope' && (
+        {['title', 'goal', 'completion_criteria'].includes(name) && (
           <span aria-hidden="true" className="text-sm text-destructive">
             *
           </span>
@@ -1228,6 +1284,7 @@ function PlanDialog({
           내용을 입력해 주세요.
         </p>
       )}
+      {flagNote(name as DetailField)}
     </div>
   )
   return (
@@ -1255,7 +1312,7 @@ function PlanDialog({
           <DialogDescription>
             {task
               ? '지금 계획을 채워 두었어요. 저장하면 새 리비전으로 다시 검증해요.'
-              : '목표·범위·완료 기준과 참조할 승인 설계를 연결하세요. 저장 뒤 계획 검증을 할 수 있어요.'}
+              : '제목·목표·관련 설계·완료 기준만 쓰면 돼요. 저장 뒤 계획 검증을 할 수 있어요.'}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -1298,15 +1355,9 @@ function PlanDialog({
           })}
         >
           {field('title', '작업 제목', false)}
-          {field('goal', '이번 작업의 목표')}
-          {field('included_scope', '포함 범위 · 한 줄에 하나씩')}
-          {field('excluded_scope', '제외 범위 · 한 줄에 하나씩')}
-          {field('approach', '어떻게 진행하나요?')}
-          {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
+          {field('goal', '이번 작업의 목표', false)}
           <fieldset className="space-y-3 rounded-lg border p-4">
-            <legend className="px-2 text-sm font-medium">
-              참조할 승인 설계
-            </legend>
+            <legend className="px-2 text-sm font-medium">관련 설계 항목</legend>
             {items.map((item) => {
               const index = refs.findIndex(
                 (reference) => reference.design_item_id === item.design_item_id,
@@ -1438,52 +1489,66 @@ function PlanDialog({
               </Button>
             )}
           </fieldset>
-          <label className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 text-sm leading-6">
-            <input
-              type="checkbox"
-              className="mt-1 size-4 accent-primary"
-              disabled={isSubmitting}
-              {...register('no_contract_change')}
-            />
-            승인된 계약을 변경하지 않는 작업입니다.
-          </label>
-          <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium">
-              먼저 완료되어야 하는 작업
-            </legend>
-            {dependencies
-              .filter(
-                (entry) =>
-                  entry.id !== task?.id && entry.status !== 'CANCELLED',
-              )
-              .map((entry) => (
-                <label
-                  key={entry.id}
-                  className="flex items-center gap-3 text-sm"
-                >
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    disabled={isSubmitting}
-                    checked={dependencyIds.includes(entry.id)}
-                    onChange={(event) =>
-                      setValue(
-                        'dependency_task_ids',
-                        event.target.checked
-                          ? [...dependencyIds, entry.id]
-                          : dependencyIds.filter((id) => id !== entry.id),
-                      )
-                    }
-                  />
-                  {entry.key} · {entry.current_plan_revision.plan.title}
-                </label>
-              ))}
-          </fieldset>
-          <details className="rounded-lg border p-4">
+          {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
+          <details
+            className="rounded-lg border p-4"
+            open={detailsOpen}
+            onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
+          >
             <summary className="cursor-pointer text-sm font-medium">
-              추가 근거와 아직 연결하지 못한 내용
+              더 자세히 (선택)
             </summary>
-            <div className="mt-4 space-y-4">
+            <div className="mt-4 space-y-5">
+              {field('included_scope', '포함 범위 · 한 줄에 하나씩')}
+              {field('excluded_scope', '제외 범위 · 한 줄에 하나씩')}
+              {field('approach', '어떻게 진행하나요?')}
+              <div className={cn('space-y-2', flagged('dependency_task_ids'))}>
+                <fieldset className="space-y-2">
+                  <legend className="mb-2 text-sm font-medium">
+                    먼저 완료되어야 하는 작업
+                  </legend>
+                  {dependencies
+                    .filter(
+                      (entry) =>
+                        entry.id !== task?.id && entry.status !== 'CANCELLED',
+                    )
+                    .map((entry) => (
+                      <label
+                        key={entry.id}
+                        className="flex items-center gap-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          disabled={isSubmitting}
+                          checked={dependencyIds.includes(entry.id)}
+                          onChange={(event) =>
+                            setValue(
+                              'dependency_task_ids',
+                              event.target.checked
+                                ? [...dependencyIds, entry.id]
+                                : dependencyIds.filter((id) => id !== entry.id),
+                            )
+                          }
+                        />
+                        {entry.key} · {entry.current_plan_revision.plan.title}
+                      </label>
+                    ))}
+                </fieldset>
+                {flagNote('dependency_task_ids')}
+              </div>
+              <div className={cn('grid gap-2', flagged('unlinked'))}>
+                <Label htmlFor="plan-unlinked">
+                  아직 연결하지 못한 내용 · 한 줄에 하나씩
+                </Label>
+                <Textarea
+                  id="plan-unlinked"
+                  {...register('unlinked')}
+                  rows={4}
+                  disabled={isSubmitting}
+                />
+                {flagNote('unlinked')}
+              </div>
               <div className="grid gap-2">
                 <Label htmlFor="plan-packet">
                   개발 컨텍스트 패킷 ID · 선택
@@ -1494,19 +1559,23 @@ function PlanDialog({
                   disabled={isSubmitting}
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="plan-unlinked">
-                  아직 연결하지 못한 내용 · 한 줄에 하나씩
-                </Label>
-                <Textarea
-                  id="plan-unlinked"
-                  {...register('unlinked')}
-                  rows={4}
-                  disabled={isSubmitting}
-                />
+              <div className={cn('grid gap-2', flagged('no_contract_change'))}>
+                <label className="flex items-start gap-3 rounded-lg bg-muted/50 p-3 text-sm leading-6">
+                  <input
+                    type="checkbox"
+                    className="mt-1 size-4 accent-primary"
+                    disabled={isSubmitting}
+                    {...register('no_contract_change')}
+                  />
+                  승인된 계약을 변경하지 않는 작업입니다.
+                </label>
+                {flagNote('no_contract_change')}
               </div>
             </div>
           </details>
+          <p className="text-xs text-muted-foreground">
+            나머지는 비워 둬도 돼요. 검증에서 더 필요하면 알려 줘요.
+          </p>
           {error && (
             <p
               className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"

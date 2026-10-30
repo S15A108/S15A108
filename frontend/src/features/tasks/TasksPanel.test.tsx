@@ -281,3 +281,36 @@ it('팀장이 진행 중 작업의 담당자를 바꾸려 하면 재검증 안�
     ),
   ).toBeInTheDocument()
 })
+
+// 사용자 결정 10-30: 검증이 더 필요하다고 한 칸은 계획 수정을 열 때 '더 자세히'를 펼쳐 강조한다.
+it('검증이 포함 범위를 더 달라고 하면 계획 수정에서 그 칸을 펼쳐 강조한다', async () => {
+  task = {
+    ...task,
+    validation_status: 'NEEDS_INPUT',
+    validation: {
+      ...task.validation!,
+      status: 'NEEDS_INPUT',
+      findings: [
+        {
+          id: '701',
+          source: 'RULE',
+          kind: 'MISSING_INPUT',
+          severity: 'BLOCKING',
+          message: '목표·포함 범위·접근 방법·완료 기준을 모두 작성해 주세요.',
+          sources: [],
+          resolution: 'FIX_PLAN',
+        },
+      ],
+    },
+  }
+  show(false)
+  await userEvent.click(
+    await screen.findByRole('button', { name: '계획 수정' }),
+  )
+  expect(
+    screen.getByText('더 자세히 (선택)').closest('details'),
+  ).toHaveAttribute('open')
+  expect(
+    screen.getAllByText('검증에서 이 칸이 더 필요하다고 했어요.'),
+  ).toHaveLength(2)
+})
