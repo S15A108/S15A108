@@ -59,15 +59,21 @@ function OfficeRuntime(
   const { gl, size } = useThree()
   const phase = props.phase ?? 4
   const agents = useMemo(() => officeSceneAgents(props.agents), [props.agents])
-  const floor = useMemo(
-    () =>
-      makeDreamFloor(
-        makeBuilding(ALL_KEYS, 'glass', undefined, officePopulationOf(agents))
-          .floors[1],
-        phase,
-      ),
-    [agents, phase],
-  )
+  const floor = useMemo(() => {
+    const base = makeBuilding(
+      ALL_KEYS,
+      'glass',
+      undefined,
+      officePopulationOf(agents),
+    ).floors[1]
+    // 시작 전(3)에도 사무실 바닥 전체를 보여 준다. 바깥 산책 출입구만 시작 뒤(4)에 연다.
+    if (phase !== 3) return makeDreamFloor(base, phase)
+    return {
+      ...makeDreamFloor(base, 4),
+      staticKey: 'dream-3',
+      outdoorExit: undefined,
+    }
+  }, [agents, phase])
   const snapshot = useMemo(
     () => officeSceneSnapshot(props.project, agents, props.tasks),
     [props.project, agents, props.tasks],
@@ -482,7 +488,7 @@ function OfficeRuntime(
       me.heading = renderer.viewHeading
     else if (me.moving) me.heading = Math.atan2(dx, dy)
     const target =
-      state.phase === 4
+      state.phase >= 3
         ? {
             x: (state.floor.W / 2) * 32,
             y: (bounds ? (bounds.back + bounds.front) / 2 : 9) * 32,
@@ -497,7 +503,7 @@ function OfficeRuntime(
     focus.current.x += (target.x - focus.current.x) * ease
     focus.current.y += (target.y - focus.current.y) * ease
     renderer.render(state.floor, [...residents, me], time, {
-      zoom: [2.6, 2.1, 1.6, 1.3, 1.16][state.phase] * zoom.current,
+      zoom: [2.6, 2.1, 1.6, 1.16, 1.16][state.phase] * zoom.current,
       focus: focus.current,
       firstPersonId: state.props.viewMode === 'first' ? me.id : undefined,
       work: state.work,
