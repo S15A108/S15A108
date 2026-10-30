@@ -144,7 +144,7 @@ function Account() {
               }}
             >
               <img
-                src={picked.portrait}
+                src={picked.face}
                 alt={`내 캐릭터: ${picked.label}`}
                 className="w-[150px]"
               />

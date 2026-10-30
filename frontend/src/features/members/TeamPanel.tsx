@@ -24,10 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { CharacterAvatar } from '@/components/CharacterAvatar'
 import { Toast } from '@/components/Toast'
 import { useSession } from '@/features/auth/useSession'
-import { characterOf } from '@/lib/characters'
 import { BuildingDesignPicker } from '@/features/projects/BuildingDesignPicker'
 import { projectPlacements } from '@/features/projects/placements'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
@@ -226,14 +224,16 @@ export function TeamPanel({
                         className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] items-center gap-4 px-1 py-3.5"
                       >
                         <span className="flex min-w-0 items-center gap-2.5">
-                          <CharacterAvatar
-                            character={characterOf(
-                              mine ? session.data?.avatar : undefined,
-                              member.color,
-                              member.id,
-                            )}
-                            color={member.color}
-                          />
+                          <span
+                            aria-hidden="true"
+                            className="grid size-8 shrink-0 place-items-center rounded-full text-xs font-bold"
+                            style={{
+                              backgroundColor: `${member.color ?? '#e5b743'}25`,
+                              color: member.color ?? '#a98419',
+                            }}
+                          >
+                            {member.name.slice(0, 1)}
+                          </span>
                           <span className="grid">
                             <strong className="text-sm font-semibold">
                               {member.name}

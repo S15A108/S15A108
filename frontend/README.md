@@ -303,7 +303,7 @@ React Three Fiber(R3F)로 three.js를 React 컴포넌트처럼 씁니다. 씬을
 - 3D 코드는 `src/three/`에 둡니다.
 - three.js는 번들이 큽니다. `<Canvas>`를 쓰는 컴포넌트는 `React.lazy`로 불러와 첫 화면 번들에서 분리합니다.
 - 모델 파일은 `public/models/`에 두고 `/models/xxx.glb` URL로 로드합니다. Vite는 `.glb`를 import 대상으로 인식하지 않습니다.
-- 사람 캐릭터와 건물은 Kenney CC0 에셋(`public/models/kenney/characters`, `public/models/kenney/city`)이고, 팩마다 `License.txt`를 같이 둡니다. 읽기와 복제는 `src/three/kenney.ts`가 맡습니다([D21](docs/decisions.md)).
+- 도시 화면과 사무실 창밖 건물은 Kenney City Kit CC0 에셋(`public/models/kenney/city`)이고, `License.txt`를 같이 둡니다. 읽기와 복제는 `src/three/kenney.ts`가 맡습니다([D21](docs/decisions.md)).
 - 모델은 텍스처 해상도를 줄이고 압축한 뒤 커밋합니다. 10MB를 넘으면 팀과 상의해 Git LFS나 외부 스토리지를 씁니다.
 - 매 프레임 바뀌는 값은 `useFrame` 안에서 ref로 직접 바꿉니다. 프레임마다 `setState`를 호출하면 React가 매번 리렌더링합니다.
 - 움직임이 없는 씬은 `<Canvas frameloop="demand">`로 필요할 때만 렌더링합니다.

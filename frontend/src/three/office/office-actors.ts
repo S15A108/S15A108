@@ -55,10 +55,8 @@ export function officeActors(
       floor: 1,
       color: agent.color,
       status: agent.status,
-      // 팀원은 움직임은 그대로 두고 Kenney 캐릭터 모습으로 그린다.
-      character: agent.character,
       appearance:
-        agent.character || agent.kind === 'human'
+        agent.kind === 'human'
           ? 'human'
           : agent.kind === 'lead'
             ? 'bibi'

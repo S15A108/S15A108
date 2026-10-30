@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { characterOf, characters } from './characters'
 
 it('저장된 프리셋 키는 그대로 쓰고, 옛 값은 표시 색에 가장 가까운 프리셋으로 바꾼다', () => {
-  expect(characterOf('bee-purple').label).toBe('보라 셔츠')
+  expect(characterOf('bee-purple').label).toBe('보라 헤드폰')
   expect(characterOf('human', '#3f9a5c').key).toBe('bee-green')
   expect(characterOf(undefined, '#e08040').key).toBe('bee-orange')
 })

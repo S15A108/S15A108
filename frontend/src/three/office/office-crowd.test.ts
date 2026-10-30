@@ -16,9 +16,14 @@ const floor = makeDreamFloor(
 
 test('사람이 다가가는 걸음만 막고, 이미 붙어 있으면 멀어지는 걸음은 허락한다', () => {
   const other = { x: 100, y: 100 }
-  assert.isOk(keepsSpace({ x: 140, y: 100 }, { x: 132, y: 100 }, [other]))
-  assert.isNotOk(keepsSpace({ x: 132, y: 100 }, { x: 120, y: 100 }, [other]))
-  assert.isOk(keepsSpace({ x: 110, y: 100 }, { x: 114, y: 100 }, [other]))
+  const at = (gap: number) => ({ x: 100 + gap, y: 100 })
+  // 개인 거리 밖에서 다가가되 밖에 머무는 걸음
+  const space = PERSONAL_SPACE
+  assert.isOk(keepsSpace(at(space + 12), at(space + 4), [other]))
+  // 개인 거리 안으로 들어가는 걸음
+  assert.isNotOk(keepsSpace(at(space + 4), at(space - 8), [other]))
+  // 이미 붙어 있으면 멀어지는 걸음
+  assert.isOk(keepsSpace(at(10), at(14), [other]))
 })
 
 test('여러 명이 1분 동안 돌아다녀도 서로의 거리가 개인 거리 아래로 줄지 않는다', () => {

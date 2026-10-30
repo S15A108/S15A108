@@ -66,10 +66,10 @@ const WALK_LABELS: Record<OfficeLifeDestination, string> = {
   following: '사용자를 따라가는 중',
   waiting: '멈출 자리로 이동하는 중',
 }
-// 사람끼리 지킬 거리(px, 1타일 = 32). Kenney 캐릭터 몸 너비(약 1타일)보다 조금 좁게 잡는다.
-export const PERSONAL_SPACE = 28
+// 사람끼리 지킬 거리(px, 1타일 = 32). 로봇 팀원 머리 지름(1.1타일, 약 35px)에 맞춘다.
+export const PERSONAL_SPACE = 34
 // 이 거리 안의 사람에게서 조금씩 비켜 걷는다.
-const AVOID_RADIUS = 44
+const AVOID_RADIUS = 50
 // 이만큼 못 나아가면 지금 자리에서 길을 다시 찾는다(초).
 const STUCK_SECONDS = 1.2
 const hash = (id: string) =>
@@ -293,15 +293,26 @@ export class OfficeLifeSimulation {
         ? 0
         : (hash(actor.id) + resident.visits) % idle.length
       const preferred = idle.slice(first).concat(idle.slice(0, first))
-      const reserved = new Set(
-        [...this.residents.entries()]
-          .filter(([id]) => id !== actor.id)
-          .map(([, state]) => state.target?.id),
-      )
+      const others = [...this.residents.entries()]
+        .filter(([id]) => id !== actor.id)
+        .map(([, state]) => state.target)
+        .filter((target) => !!target)
+      const reserved = new Set(others.map((target) => target.id))
+      // 바로 옆 소파 자리처럼 다른 사람 자리와 너무 붙은 곳도 예약된 것으로 본다.
+      const crowded = (target: Destination) =>
+        others.some(
+          (other) =>
+            Math.hypot(
+              other.pose.x - target.pose.x,
+              other.pose.y - target.pose.y,
+            ) < PERSONAL_SPACE,
+        )
       choices = this.destinations
         .filter(
           (target) =>
-            !reserved.has(target.id) && target.id !== resident.target?.id,
+            !reserved.has(target.id) &&
+            !crowded(target) &&
+            target.id !== resident.target?.id,
         )
         .sort(
           (a, b) =>

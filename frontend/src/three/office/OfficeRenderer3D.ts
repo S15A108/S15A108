@@ -5,7 +5,6 @@ import { stepDrop, type DropBody } from './drop-physics'
 import { OfficeOrbit, officeOrbitFrame } from './office-orbit'
 import { FirstPersonLook, firstPersonFrame } from './first-person'
 import { OfficeCity } from './office-city'
-import { cloneKenney, loadKenney, type KenneyModel } from '../kenney'
 import { WindowCityView } from './window-city-view'
 import type { OfficeLifeActivity } from './office-life'
 import {
@@ -52,8 +51,6 @@ export interface OfficeEntity3D {
   color?: string
   kind?: string
   appearance?: 'human' | 'robot' | 'bibi'
-  /** 사람 모양일 때 쓸 Kenney 캐릭터 모델 이름(public/models/kenney/characters) */
-  character?: string
   status?: string
   seated?: boolean
   seatLift?: number
@@ -75,15 +72,7 @@ interface Robot {
   phase: number
   lastX: number
   lastY: number
-  character?: string
-  mixer?: THREE.AnimationMixer
-  actions?: Partial<Record<CharacterClip, THREE.AnimationAction>>
-  clip?: CharacterClip
 }
-
-type CharacterClip = 'idle' | 'walk' | 'sprint' | 'sit'
-// Kenney 캐릭터는 키가 약 0.9라 사무실 의자·책상에 맞는 키로 키운다.
-const CHARACTER_HEIGHT = 1.95
 
 const TILE = 32
 const DREAM_BUILD_SPEED = 2
@@ -146,8 +135,6 @@ export class OfficeRenderer3D {
   private environmentEdge = { x: 0, z: 0 }
   private readonly people = new THREE.Group()
   private readonly robots = new Map<string, Robot>()
-  private readonly characterModels = new Map<string, KenneyModel | null>()
-  private disposed = false
   private readonly furnitureObjects: THREE.Group[] = []
   private outdoorPortal: THREE.Group | null = null
   private outdoorPortalKey = ''
@@ -2428,116 +2415,11 @@ export class OfficeRenderer3D {
     )
   }
 
-  // Kenney 캐릭터 모델. 아직 없으면 받기 시작하고, 받으면 그 모델을 기다리던 사람을 다시 만든다.
-  private characterModel(character: string) {
-    if (this.characterModels.has(character))
-      return this.characterModels.get(character) ?? undefined
-    this.characterModels.set(character, null)
-    loadKenney(`/models/kenney/characters/${character}.glb`)
-      .then((model) => {
-        if (this.disposed) return
-        this.characterModels.set(character, model)
-        for (const [id, robot] of this.robots)
-          if (robot.character === character && !robot.mixer) {
-            this.people.remove(robot.root)
-            this.robots.delete(id)
-          }
-      })
-      .catch(() => {
-        // 모델을 못 받으면(테스트 환경, 네트워크 오류) 직접 만든 사람 모양을 그대로 쓴다.
-      })
-    return undefined
-  }
-
-  private characterRobot(
-    id: string,
-    color: string,
-    character: string,
-    model: KenneyModel,
-  ): Robot {
-    const root = new THREE.Group()
-    const body = new THREE.Group()
-    root.add(body)
-    this.people.add(root)
-    this.contact(root, 0, 0, 1.05, 0.95, 0.9)
-    const figure = cloneKenney(model)
-    figure.scale.setScalar(CHARACTER_HEIGHT / model.size.y)
-    figure.traverse((object) => {
-      if ((object as THREE.Mesh).isMesh) object.castShadow = true
-    })
-    body.add(figure)
-    const mixer = new THREE.AnimationMixer(figure)
-    const actions: Robot['actions'] = {}
-    for (const clip of ['idle', 'walk', 'sprint', 'sit'] as const) {
-      const source = THREE.AnimationClip.findByName(model.animations, clip)
-      if (source) actions[clip] = mixer.clipAction(source)
-    }
-    actions.idle?.play()
-    // 걷기·앉기는 모델 애니메이션이 맡는다. 팔다리 자세 계산은 빈 관절로 받아 둔다.
-    const joint = () => {
-      const group = new THREE.Group()
-      body.add(group)
-      return group
-    }
-    const badge = this.box(body, 0.2, 1.05, 0.27, 0.11, 0.13, 0.02, color, 0.01)
-    const robot: Robot = {
-      appearance: 'human',
-      root,
-      body,
-      head: joint(),
-      arms: [joint(), joint()],
-      elbows: [joint(), joint()],
-      legs: [joint(), joint()],
-      knees: [joint(), joint()],
-      ring: this.selectionRing(root, 'human'),
-      badge,
-      phase: 0,
-      lastX: NaN,
-      lastY: NaN,
-      character,
-      mixer,
-      actions,
-      clip: 'idle',
-    }
-    root.traverse((object) => {
-      object.userData.entityId = id
-    })
-    this.robots.set(id, robot)
-    return robot
-  }
-
-  private selectionRing(root: THREE.Group, appearance: Robot['appearance']) {
-    const human = appearance === 'human'
-    const ringMaterial = this.material('selection-ring')
-    ringMaterial.color.set('#f5b800')
-    ringMaterial.emissive.set('#6b5414')
-    ringMaterial.emissiveIntensity = 0.24
-    ringMaterial.transparent = true
-    ringMaterial.opacity = 0.95
-    const ring = new THREE.Mesh(
-      this.geometry(
-        `selection-ring/${appearance}`,
-        () =>
-          new THREE.RingGeometry(human ? 0.47 : 0.67, human ? 0.53 : 0.73, 56),
-      ),
-      ringMaterial,
-    )
-    ring.rotation.x = -Math.PI / 2
-    ring.position.y = 0.04
-    root.add(ring)
-    return ring
-  }
-
   private robot(
     id: string,
     color: string,
     appearance: 'human' | 'robot' | 'bibi' = 'robot',
-    character?: string,
   ): Robot {
-    if (appearance === 'human' && character) {
-      const model = this.characterModel(character)
-      if (model) return this.characterRobot(id, color, character, model)
-    }
     const human = appearance === 'human'
     const bibi = appearance === 'bibi'
     const robotShell = bibi ? '#ffd24a' : C.shell
@@ -2923,7 +2805,23 @@ export class OfficeRenderer3D {
       legs.push(leg)
       knees.push(knee)
     }
-    const ring = this.selectionRing(root, appearance)
+    const ringMaterial = this.material('selection-ring')
+    ringMaterial.color.set('#f5b800')
+    ringMaterial.emissive.set('#6b5414')
+    ringMaterial.emissiveIntensity = 0.24
+    ringMaterial.transparent = true
+    ringMaterial.opacity = 0.95
+    const ring = new THREE.Mesh(
+      this.geometry(
+        `selection-ring/${appearance}`,
+        () =>
+          new THREE.RingGeometry(human ? 0.47 : 0.67, human ? 0.53 : 0.73, 56),
+      ),
+      ringMaterial,
+    )
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.04
+    root.add(ring)
     root.traverse((object) => {
       object.userData.entityId = id
     })
@@ -2941,7 +2839,6 @@ export class OfficeRenderer3D {
       phase: 0,
       lastX: NaN,
       lastY: NaN,
-      character,
     }
     this.robots.set(id, robot)
     return robot
@@ -3245,17 +3142,13 @@ export class OfficeRenderer3D {
       const look = entity.look as { top?: string } | undefined
       const color = entity.color || look?.top || '#a09b90'
       const appearance = entity.appearance ?? 'robot'
-      const character = appearance === 'human' ? entity.character : undefined
       let robot = this.robots.get(entity.id)
-      if (
-        robot &&
-        (robot.appearance !== appearance || robot.character !== character)
-      ) {
+      if (robot && robot.appearance !== appearance) {
         this.people.remove(robot.root)
         this.robots.delete(entity.id)
         robot = undefined
       }
-      robot ??= this.robot(entity.id, color, appearance, character)
+      robot ??= this.robot(entity.id, color, appearance)
       robot.root.visible =
         entity.floor === floor.id &&
         !entity.hidden &&
@@ -3300,25 +3193,9 @@ export class OfficeRenderer3D {
       robot.body.position.y =
         (entity.seated
           ? (entity.seatLift ?? 0.08)
-          : walking && !robot.mixer
+          : walking
             ? Math.abs(Math.sin(robot.phase)) * (entity.running ? 0.085 : 0.055)
             : 0) + breathing
-      if (robot.mixer && robot.actions) {
-        // Kenney 캐릭터: 앉기·걷기·뛰기·서 있기를 모델 애니메이션으로 바꿔 튼다.
-        const clip: CharacterClip = entity.seated
-          ? 'sit'
-          : walking
-            ? entity.running
-              ? 'sprint'
-              : 'walk'
-            : 'idle'
-        if (clip !== robot.clip) {
-          robot.actions[clip]?.reset().fadeIn(0.18).play()
-          if (robot.clip) robot.actions[robot.clip]?.fadeOut(0.18)
-          robot.clip = clip
-        }
-        robot.mixer.update(elapsed)
-      }
       robot.body.rotation.x =
         entity.running && walking ? 0.13 : resting ? -0.09 : typing ? 0.055 : 0
       robot.body.rotation.z = resting ? Math.sin(idleTime * 0.45) * 0.025 : 0
@@ -3528,7 +3405,6 @@ export class OfficeRenderer3D {
   }
 
   dispose() {
-    this.disposed = true
     this.aimTarget = null
     this.aimOutline.dispose()
     this.workSurfaces.forEach(({ surface }) => surface.dispose())
