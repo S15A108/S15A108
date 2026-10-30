@@ -14,6 +14,10 @@ import type { GetResponse as Project } from '@/features/projects/schemas'
 import type { OnboardingResponse } from '@/features/projects/schemas'
 import { useProjectStart } from '@/features/projects/useProjectStart'
 import { InboxPopover } from '@/features/inbox/InboxPopover'
+import {
+  openMeetingCount,
+  useMeetingList,
+} from '@/features/meetings/useMeetingList'
 import { targetLabel, targetPane } from '@/features/inbox/notificationTarget'
 import { Toast } from '@/components/Toast'
 import { Hotbar } from './Hotbar'
@@ -436,6 +440,12 @@ export function WorkspaceHud({
       0,
     ) ?? 0
   const reviewCount = counts.data?.changes.review_required_count ?? 0
+  // 회의실 배지: 회의실 창과 같은 목록 캐시. 시작 전에는 회의실이 잠겨 부르지 않는다.
+  const meetingList = useMeetingList(project.id, started)
+  const meetingCount = openMeetingCount(
+    meetingList.data?.pages.flatMap((page) => page.items) ?? [],
+    me?.id,
+  )
   const inProgress =
     counts.data?.tasks.by_status.find((item) => item.status === 'IN_PROGRESS')
       ?.count ?? 0
@@ -670,7 +680,7 @@ export function WorkspaceHud({
       <Hotbar
         locked={started ? [] : ['changes', 'meetings', 'tasks', 'relations']}
         lockedReason="프로젝트를 시작하면 열려요"
-        badges={{ changes: reviewCount }}
+        badges={{ changes: reviewCount, meetings: meetingCount }}
         highlight={isLeader && !allUploaded ? 'documents' : undefined}
       />
       <div

@@ -20,6 +20,7 @@ import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { formatDate } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useMeetingList } from './useMeetingList'
 
 interface Props {
   projectId: string
@@ -47,13 +48,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
   } | null>(null)
   const [ending, setEnding] = useState(false)
   const [agendaOpen, setAgendaOpen] = useState(false)
-  const list = useInfiniteQuery({
-    queryKey: ['projects', projectId, 'meetings'],
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) =>
-      meetingsApi.list(projectId, { cursor: pageParam }),
-    getNextPageParam: (page) => (page.has_more ? page.next_cursor : undefined),
-  })
+  const list = useMeetingList(projectId)
   const meetings = list.data?.pages.flatMap((page) => page.items) ?? []
   const open = meetings.filter((meeting) => meeting.status !== 'CLOSED')
   const closed = meetings.filter((meeting) => meeting.status === 'CLOSED')

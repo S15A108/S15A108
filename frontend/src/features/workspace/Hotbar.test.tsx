@@ -37,3 +37,18 @@ it('잠긴 칸의 이유는 부르는 쪽이 정한다', () => {
     '기준 v1이 생기면 열려요',
   )
 })
+
+it('회의실에도 변경 제안과 같은 숫자 배지를 붙인다', () => {
+  render(<Hotbar locked={[]} badges={{ changes: 2, meetings: 1 }} />)
+  const meetings = screen.getByRole('button', { name: '회의실' })
+  expect(meetings).toContainElement(screen.getByLabelText('새 항목 1개'))
+  expect(screen.getByLabelText('새 항목 1개')).toHaveTextContent('1')
+  expect(screen.getByRole('button', { name: '변경 제안' })).toContainElement(
+    screen.getByLabelText('새 항목 2개'),
+  )
+})
+
+it('배지가 0이면 숫자를 붙이지 않는다', () => {
+  render(<Hotbar locked={[]} badges={{ changes: 0, meetings: 0 }} />)
+  expect(screen.queryByLabelText(/새 항목/)).not.toBeInTheDocument()
+})

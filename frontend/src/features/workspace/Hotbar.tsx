@@ -84,7 +84,10 @@ export function Hotbar({
           </span>
         )}
         {badge ? (
-          <span className="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-destructive px-1 text-[11px] font-bold text-white">
+          <span
+            aria-label={`새 항목 ${badge}개`}
+            className="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-destructive px-1 text-[11px] font-bold text-white"
+          >
             {badge}
           </span>
         ) : null}
