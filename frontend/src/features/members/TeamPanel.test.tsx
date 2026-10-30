@@ -4,8 +4,8 @@ import { beforeEach, afterEach, expect, it } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
-import { authApi, membersApi } from '@/api/services'
+import { MemoryRouter, Route, Routes } from 'react-router'
+import { authApi, membersApi, projectsApi } from '@/api/services'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -41,23 +41,18 @@ it('validates an invitation form and displays the created invitation link', asyn
     </QueryClientProvider>,
   )
   expect(await screen.findByText('김동료')).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: '팀원 초대' }))
-  const dialog = screen.getByRole('dialog')
-  await user.type(within(dialog).getByLabelText(/팀원 이메일/), 'incorrect')
-  await user.click(
-    within(dialog).getByRole('button', { name: '초대 링크 만들기' }),
-  )
+  const form = screen.getByRole('form', { name: '팀원 초대' })
+  await user.type(within(form).getByLabelText('초대할 이메일'), 'incorrect')
+  await user.click(within(form).getByRole('button', { name: '초대' }))
   expect(
-    await within(dialog).findByText('이메일 형식을 확인해 주세요.'),
+    await within(form).findByText('이메일 형식을 확인해 주세요.'),
   ).toBeInTheDocument()
-  await user.clear(within(dialog).getByLabelText(/팀원 이메일/))
+  await user.clear(within(form).getByLabelText('초대할 이메일'))
   await user.type(
-    within(dialog).getByLabelText(/팀원 이메일/),
+    within(form).getByLabelText('초대할 이메일'),
     'colleague@beez.local',
   )
-  await user.click(
-    within(dialog).getByRole('button', { name: '초대 링크 만들기' }),
-  )
+  await user.click(within(form).getByRole('button', { name: '초대' }))
   const link = await screen.findByLabelText<HTMLInputElement>('팀원 초대 링크')
   expect(link.value).toContain('mock-invite-')
   expect(await screen.findByText('colleague@beez.local')).toBeInTheDocument()
@@ -73,22 +68,20 @@ function renderTeam() {
   )
 }
 
-it('여러 이메일을 한 줄에 하나씩 넣으면 사람마다 초대를 만든다', async () => {
+it('쉼표로 여러 이메일을 넣으면 사람마다 초대를 만들고 칸을 비운다', async () => {
   const user = userEvent.setup()
   renderTeam()
   await screen.findByText('김동료')
-  await user.click(screen.getByRole('button', { name: '팀원 초대' }))
-  const dialog = screen.getByRole('dialog')
+  const form = screen.getByRole('form', { name: '팀원 초대' })
   await user.type(
-    within(dialog).getByLabelText(/팀원 이메일/),
-    'one@beez.local{enter}two@beez.local',
+    within(form).getByLabelText('초대할 이메일'),
+    'one@beez.local, two@beez.local',
   )
-  await user.click(
-    within(dialog).getByRole('button', { name: '초대 링크 만들기' }),
-  )
+  await user.click(within(form).getByRole('button', { name: '초대' }))
   expect(await screen.findAllByLabelText('팀원 초대 링크')).toHaveLength(2)
   expect(screen.getByText('one@beez.local')).toBeInTheDocument()
   expect(screen.getByText('two@beez.local')).toBeInTheDocument()
+  expect(within(form).getByLabelText('초대할 이메일')).toHaveValue('')
 })
 
 it('추방할 때 그 팀원이 맡은 작업을 넘길 작업으로 보여 준다', async () => {
@@ -142,4 +135,32 @@ it('팀원 줄 ⋯에서 팀장으로 위임을 누르면 확인 창에서 팀�
   expect(members.items.find((member) => member.name === '김동료')?.role).toBe(
     'LEADER',
   )
+})
+
+// 사용자 지적 10-30: 제거한 프로젝트를 다시 불러 '접근 권한' 오류가 뜨지 않고 바로 도시로 간다.
+it('혼자 쓰는 프로젝트를 제거하면 바로 나의 도시로 간다', async () => {
+  const user = userEvent.setup()
+  const project = await projectsApi.create({ name: '혼자 프로젝트' })
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/projects/${project.id}`]}>
+        <Routes>
+          <Route
+            path="/projects/:id"
+            element={
+              <TeamPanel projectId={project.id} isLeader view="remove" />
+            }
+          />
+          <Route path="/" element={<p>나의 도시</p>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await user.type(
+    await screen.findByLabelText(/프로젝트 이름 입력/),
+    '혼자 프로젝트',
+  )
+  await user.click(screen.getByRole('button', { name: '프로젝트 제거' }))
+  expect(await screen.findByText('나의 도시')).toBeInTheDocument()
+  expect(screen.queryByText(/접근 권한/)).not.toBeInTheDocument()
 })

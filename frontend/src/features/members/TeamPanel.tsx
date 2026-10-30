@@ -6,7 +6,9 @@ import {
 } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { z } from 'zod'
-import { Copy, Ellipsis, MailPlus, Pencil, TriangleAlert } from 'lucide-react'
+import { Copy, Ellipsis, Pencil, TriangleAlert } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
 import type { Member } from '@/api/contracts/common'
 import { membersApi, projectsApi, tasksApi } from '@/api/services'
 import { ActionForm } from '@/components/ActionForm'
@@ -36,13 +38,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { lines } from '@/lib/display'
 import { formatDate } from '@/lib/formatDate'
 import { placementKey, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { BuildingDesign } from '@/stores/workspaceStore'
 
-type DialogAction =
-  'invite' | { action: 'edit' | 'remove' | 'transfer'; member: Member }
+type DialogAction = { action: 'edit' | 'remove' | 'transfer'; member: Member }
 
 export type TeamView = 'team' | 'project' | 'remove'
 
@@ -125,9 +125,43 @@ export function TeamPanel({
   const otherMembers = people.filter(
     (member) => member.account_id !== session.data?.id,
   )
-  const leaveProject = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['projects'] })
+  // 여러 명은 한 명씩 만든다. 이미 초대 중이거나 이미 팀원(409 already_member)이면 건너뛴다(Q05 3 ALREADY_INVITED).
+  // API 없음: 초대 메일 발송·여러 명 한 번에(emails, PR #42). 지금은 만든 링크를 아래 '초대 중'에 보여 준다.
+  const invite = async (emails: string[]) => {
+    const pending = new Set(
+      invitations.data?.pages
+        .flatMap((page) => page.items)
+        .filter((item) => !item.accepted_at && !item.revoked_at)
+        .map((item) => item.invited_email?.toLowerCase()),
+    )
+    let skipped = 0
+    await action.run(async () => {
+      const created = []
+      for (const email of emails) {
+        if (pending.has(email.toLowerCase())) {
+          skipped++
+          continue
+        }
+        try {
+          const result = await membersApi.createInvitation(projectId, {
+            email,
+          })
+          created.push({ id: result.invitation.id, url: result.invite_url })
+        } catch (cause) {
+          if (getApiErrorCode(cause) !== 'already_member') throw cause
+          skipped++
+        }
+      }
+      setFresh(created)
+    }, '초대 링크를 만들었어요.')
+    if (skipped)
+      setCopyMessage(`이미 팀원이거나 초대 중인 ${skipped}명은 건너뛰었어요.`)
+  }
+  // 제거·나가기 뒤에는 바로 도시로 간다. 이 프로젝트를 다시 부르면 404·403이라 캐시에서 지우고, 목록만 뒤에서 새로 고친다.
+  const leaveProject = () => {
     navigate('/')
+    queryClient.removeQueries({ queryKey: ['projects', projectId] })
+    void queryClient.invalidateQueries({ queryKey: ['projects'] })
   }
   const perform = (operation: () => Promise<unknown>, message: string) => {
     void action.run(operation, message).catch(() => undefined)
@@ -153,13 +187,8 @@ export function TeamPanel({
             </p>
           )}
         </div>
-        {view === 'team' && isLeader && (
-          <Button onClick={() => setDialog('invite')}>
-            <MailPlus />
-            팀원 초대
-          </Button>
-        )}
       </header>
+      {view === 'team' && isLeader && <InviteForm onInvite={invite} />}
       {/* 결과는 화면 안 글 대신 오른쪽 위 토스트로 잠깐 보여 준다. */}
       {action.message && <Toast>{action.message}</Toast>}
       {handoff.done && (
@@ -580,85 +609,19 @@ export function TeamPanel({
                   destructive
                   submitLabel={isLeader ? '프로젝트 제거' : '프로젝트 나가기'}
                   onSubmit={async (values) => {
-                    await action.run(
-                      () =>
-                        isLeader
-                          ? projectsApi.remove(projectId, {
-                              confirm_name: values.confirm_name,
-                            })
-                          : membersApi.leave(projectId, {}),
-                      isLeader
-                        ? '프로젝트를 제거했어요.'
-                        : '프로젝트에서 나갔어요.',
-                    )
-                    await leaveProject()
+                    // action.run은 성공 뒤 이 프로젝트를 다시 불러 '접근 권한' 오류가 뜨므로 직접 부른다. 실패하면 폼이 이유를 보여 준다.
+                    await (isLeader
+                      ? projectsApi.remove(projectId, {
+                          confirm_name: values.confirm_name,
+                        })
+                      : membersApi.leave(projectId, {}))
+                    leaveProject()
                   }}
                 />
               </div>
             )
           }
         </AsyncState>
-      )}
-      {dialog === 'invite' && (
-        <FormDialog
-          title="팀원 초대"
-          description="받은 사람이 같은 이메일로 로그인하거나 가입하면 팀원이 돼요. 들어오기 전까지는 '초대 중'으로 보여요."
-          fields={[
-            {
-              name: 'email',
-              label: '팀원 이메일 · 여러 명이면 한 줄에 하나씩',
-              type: 'textarea',
-              required: true,
-              check: (value) =>
-                lines(value).every(
-                  (email) => z.email().safeParse(email).success,
-                )
-                  ? undefined
-                  : '이메일 형식을 확인해 주세요.',
-            },
-          ]}
-          submitLabel="초대 링크 만들기"
-          onClose={() => setDialog(null)}
-          onSubmit={async (values) => {
-            const emails = lines(values.email)
-            // 이미 초대 중인 이메일은 다시 만들지 않는다(Q05 3 ALREADY_INVITED).
-            const pending = new Set(
-              invitations.data?.pages
-                .flatMap((page) => page.items)
-                .filter((item) => !item.accepted_at && !item.revoked_at)
-                .map((item) => item.invited_email?.toLowerCase()),
-            )
-            let skipped = 0
-            // API 없음: 초대 메일 발송·여러 명 한 번에(emails, PR #42). 지금은 한 명씩 만들고 이미 팀원(409 already_member)은 건너뛴다.
-            await action.run(async () => {
-              const created = []
-              for (const email of emails) {
-                if (pending.has(email.toLowerCase())) {
-                  skipped++
-                  continue
-                }
-                try {
-                  const result = await membersApi.createInvitation(projectId, {
-                    email,
-                  })
-                  created.push({
-                    id: result.invitation.id,
-                    url: result.invite_url,
-                  })
-                } catch (cause) {
-                  if (getApiErrorCode(cause) !== 'already_member') throw cause
-                  skipped++
-                }
-              }
-              setFresh(created)
-            }, '초대 링크를 만들었어요.')
-            if (skipped)
-              setCopyMessage(
-                `이미 팀원이거나 초대 중인 ${skipped}명은 건너뛰었어요.`,
-              )
-            setDialog(null)
-          }}
-        />
       )}
       {typeof dialog === 'object' && dialog?.action === 'transfer' && (
         // 작은 확인 창(사용자 결정 10-30). 오류는 invalid_transfer_target 등 서버 문구를 그대로 보인다.
@@ -816,5 +779,75 @@ export function TeamPanel({
         </FormDialog>
       )}
     </section>
+  )
+}
+
+const splitEmails = (value: string) =>
+  value
+    .split(/[\s,]+/)
+    .map((email) => email.trim())
+    .filter(Boolean)
+const inviteSchema = z.object({
+  emails: z
+    .string()
+    .trim()
+    .min(1, '초대할 이메일을 입력해 주세요.')
+    .refine(
+      (value) =>
+        splitEmails(value).every((email) => z.email().safeParse(email).success),
+      '이메일 형식을 확인해 주세요.',
+    ),
+})
+
+// 팀 목록 위 초대 칸(노션처럼). 쉼표나 줄바꿈으로 여러 명을 넣고, 보내면 칸을 비운다.
+function InviteForm({
+  onInvite,
+}: {
+  onInvite: (emails: string[]) => Promise<unknown>
+}) {
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<z.infer<typeof inviteSchema>>({
+    resolver: zodResolver(inviteSchema),
+    defaultValues: { emails: '' },
+  })
+  return (
+    <form
+      noValidate
+      aria-label="팀원 초대"
+      className="grid gap-1.5"
+      onSubmit={handleSubmit((values) =>
+        onInvite(splitEmails(values.emails))
+          .then(() => reset())
+          .catch(() => undefined),
+      )}
+    >
+      <span className="flex gap-2">
+        <Input
+          inputMode="email"
+          aria-label="초대할 이메일"
+          placeholder="이메일을 입력하세요 · 쉼표로 여러 명"
+          aria-invalid={!!errors.emails}
+          disabled={isSubmitting}
+          {...register('emails')}
+        />
+        <Button type="submit" disabled={isSubmitting}>
+          초대
+        </Button>
+      </span>
+      {errors.emails ? (
+        <p role="alert" className="text-xs text-destructive">
+          {errors.emails.message}
+        </p>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          받은 사람이 같은 이메일로 로그인하거나 가입하면 팀원이 돼요. 들어오기
+          전까지는 &apos;초대 중&apos;으로 보여요.
+        </span>
+      )}
+    </form>
   )
 }
