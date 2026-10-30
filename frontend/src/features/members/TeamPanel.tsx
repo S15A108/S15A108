@@ -337,135 +337,142 @@ export function TeamPanel({
           )}
         </AsyncState>
       )}
-      {view === 'team' && isLeader && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold">초대 중</h3>
-          <AsyncState query={invitations}>
-            {(data) => (
-              <>
-                {data.pages.flatMap((page) => page.items).length ? (
-                  <ul className="divide-y">
-                    {data.pages
-                      .flatMap((page) => page.items)
-                      .map((invitation) => (
-                        <li
-                          key={invitation.id}
-                          className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
-                        >
-                          <span>
-                            <b className="font-medium">
-                              {invitation.invited_email ?? '초대 링크'}
-                            </b>
-                            {!invitation.accepted_at &&
-                              !invitation.revoked_at && (
-                                <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold">
-                                  초대 중
-                                </span>
-                              )}
-                            <small className="mt-1 block text-muted-foreground">
-                              {fresh.some((item) => item.id === invitation.id)
-                                ? '방금 초대 · '
-                                : ''}
-                              {/* Q05(2026-10-29 확정): 초대받은 사람이 로그인·가입해야 팀원이 된다. 만료는 없다. */}
-                              {invitation.accepted_at
-                                ? `참여함 · ${formatDate(invitation.accepted_at)}`
-                                : invitation.revoked_at
-                                  ? '취소됨'
-                                  : '같은 이메일로 로그인하거나 가입하면 팀원이 돼요'}
-                            </small>
-                          </span>
-                          {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
-                          {fresh.some((item) => item.id === invitation.id) && (
-                            <span className="flex w-full gap-2">
-                              <Input
-                                aria-label="팀원 초대 링크"
-                                readOnly
-                                value={
-                                  fresh.find(
-                                    (item) => item.id === invitation.id,
-                                  )!.url
-                                }
-                                className="min-w-48 flex-1"
-                                onFocus={(event) =>
-                                  event.currentTarget.select()
-                                }
-                              />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  void navigator.clipboard
-                                    .writeText(
-                                      fresh.find(
-                                        (item) => item.id === invitation.id,
-                                      )!.url,
-                                    )
-                                    .then(() =>
-                                      setCopyMessage('초대 링크를 복사했어요.'),
-                                    )
-                                    .catch(() =>
-                                      setCopyMessage(
-                                        '링크를 선택해 직접 복사해 주세요.',
-                                      ),
-                                    )
-                                }
-                              >
-                                <Copy />
-                                복사
-                              </Button>
+      {/* 초대가 하나도 없으면 '초대 중' 칸을 숨긴다(캔버스 SCR-06-v2-settings). */}
+      {view === 'team' &&
+        isLeader &&
+        !!invitations.data?.pages.some((page) => page.items.length) && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">초대 중</h3>
+            <AsyncState query={invitations}>
+              {(data) => (
+                <>
+                  {data.pages.flatMap((page) => page.items).length ? (
+                    <ul className="divide-y">
+                      {data.pages
+                        .flatMap((page) => page.items)
+                        .map((invitation) => (
+                          <li
+                            key={invitation.id}
+                            className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
+                          >
+                            <span>
+                              <b className="font-medium">
+                                {invitation.invited_email ?? '초대 링크'}
+                              </b>
+                              {!invitation.accepted_at &&
+                                !invitation.revoked_at && (
+                                  <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold">
+                                    초대 중
+                                  </span>
+                                )}
+                              <small className="mt-1 block text-muted-foreground">
+                                {fresh.some((item) => item.id === invitation.id)
+                                  ? '방금 초대 · '
+                                  : ''}
+                                {/* Q05(2026-10-29 확정): 초대받은 사람이 로그인·가입해야 팀원이 된다. 만료는 없다. */}
+                                {invitation.accepted_at
+                                  ? `참여함 · ${formatDate(invitation.accepted_at)}`
+                                  : invitation.revoked_at
+                                    ? '취소됨'
+                                    : '같은 이메일로 로그인하거나 가입하면 팀원이 돼요'}
+                              </small>
                             </span>
-                          )}
-                          {!invitation.revoked_at &&
-                            !invitation.accepted_at && (
-                              // API 없음: 초대 메일 다시 보내기
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled
-                                title="메일 발송이 준비되면 열려요"
-                              >
-                                메일 다시 보내기
-                              </Button>
+                            {/* API 없음: 초대 메일 발송이 없어 방금 만든 초대는 링크를 직접 전달한다. 메일이 생기면 토스트를 '초대 메일을 보냈어요'로 바꾼다. */}
+                            {fresh.some(
+                              (item) => item.id === invitation.id,
+                            ) && (
+                              <span className="flex w-full gap-2">
+                                <Input
+                                  aria-label="팀원 초대 링크"
+                                  readOnly
+                                  value={
+                                    fresh.find(
+                                      (item) => item.id === invitation.id,
+                                    )!.url
+                                  }
+                                  className="min-w-48 flex-1"
+                                  onFocus={(event) =>
+                                    event.currentTarget.select()
+                                  }
+                                />
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void navigator.clipboard
+                                      .writeText(
+                                        fresh.find(
+                                          (item) => item.id === invitation.id,
+                                        )!.url,
+                                      )
+                                      .then(() =>
+                                        setCopyMessage(
+                                          '초대 링크를 복사했어요.',
+                                        ),
+                                      )
+                                      .catch(() =>
+                                        setCopyMessage(
+                                          '링크를 선택해 직접 복사해 주세요.',
+                                        ),
+                                      )
+                                  }
+                                >
+                                  <Copy />
+                                  복사
+                                </Button>
+                              </span>
                             )}
-                          {!invitation.revoked_at &&
-                            !invitation.accepted_at && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={action.busy}
-                                onClick={() =>
-                                  perform(
-                                    () =>
-                                      membersApi.revokeInvitation(
-                                        projectId,
-                                        invitation.id,
-                                      ),
-                                    '초대를 취소했어요.',
-                                  )
-                                }
-                              >
-                                초대 취소
-                              </Button>
-                            )}
-                        </li>
-                      ))}
-                  </ul>
-                ) : (
-                  <EmptyState>보낸 초대가 없어요.</EmptyState>
-                )}
-                {invitations.hasNextPage && (
-                  <Button
-                    variant="outline"
-                    onClick={() => void invitations.fetchNextPage()}
-                  >
-                    초대 더 보기
-                  </Button>
-                )}
-              </>
-            )}
-          </AsyncState>
-        </div>
-      )}
+                            {!invitation.revoked_at &&
+                              !invitation.accepted_at && (
+                                // API 없음: 초대 메일 다시 보내기
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled
+                                  title="메일 발송이 준비되면 열려요"
+                                >
+                                  메일 다시 보내기
+                                </Button>
+                              )}
+                            {!invitation.revoked_at &&
+                              !invitation.accepted_at && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={action.busy}
+                                  onClick={() =>
+                                    perform(
+                                      () =>
+                                        membersApi.revokeInvitation(
+                                          projectId,
+                                          invitation.id,
+                                        ),
+                                      '초대를 취소했어요.',
+                                    )
+                                  }
+                                >
+                                  초대 취소
+                                </Button>
+                              )}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <EmptyState>보낸 초대가 없어요.</EmptyState>
+                  )}
+                  {invitations.hasNextPage && (
+                    <Button
+                      variant="outline"
+                      onClick={() => void invitations.fetchNextPage()}
+                    >
+                      초대 더 보기
+                    </Button>
+                  )}
+                </>
+              )}
+            </AsyncState>
+          </div>
+        )}
       {view === 'project' && (
         <AsyncState query={project}>
           {(data) => (

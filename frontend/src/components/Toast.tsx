@@ -11,7 +11,8 @@ export function Toast({
   tone,
 }: {
   children: ReactNode
-  tone?: 'success' | 'danger'
+  /** dark: 워크스페이스 단계 알림(위 가운데 어두운 띠, 노란 체크, 캔버스 SCR-06-v2-workspace-docs-ready) */
+  tone?: 'success' | 'danger' | 'dark'
 }) {
   const [shown, setShown] = useState(true)
   useEffect(() => {
@@ -19,6 +20,21 @@ export function Toast({
     return () => clearTimeout(timer)
   }, [tone])
   if (!shown) return null
+  if (tone === 'dark')
+    return (
+      <div
+        role="status"
+        className="fixed inset-x-0 top-[68px] z-50 mx-auto flex w-max max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-[14px] bg-foreground px-4 py-2.5 text-white shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-4"
+      >
+        <span
+          aria-hidden="true"
+          className="grid size-[22px] shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
+        >
+          <Check className="size-3.5" strokeWidth={3} />
+        </span>
+        <div className="grid min-w-0 gap-px">{children}</div>
+      </div>
+    )
   if (!tone)
     return (
       <p

@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ChevronLeft, CircleHelp, Lock, Settings } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  CircleHelp,
+  Lock,
+  MapPin,
+  Settings,
+} from 'lucide-react'
 import {
   changesApi,
   dashboardApi,
@@ -82,12 +89,12 @@ const notices: Record<
   },
   2: {
     title: '문서 4종이 모두 승인됐어요',
-    text: "색인이 끝나면 가이드의 '프로젝트 시작'을 눌러 기준 v1을 만들고 프로젝트를 시작해요.",
+    text: "색인까지 끝났어요. 가이드의 '프로젝트 시작'을 누르면 기준 v1이 생기고 프로젝트가 시작돼요.",
     member: '팀장이 프로젝트를 시작하면 알려 드려요.',
   },
   3: {
     title: '기준 v1이 생겼어요 · 프로젝트가 시작됐어요',
-    text: '이제 변경 제안, 회의실, 작업 현황, 설계 관계를 쓸 수 있어요. 문서 수정도 이제 변경 제안으로 해요.',
+    text: '팀장이 프로젝트를 시작해 기준 v1이 생겼어요. 이제 변경 제안, 회의실, 작업 현황, 설계 관계를 쓸 수 있어요. 문서 수정도 이제 변경 제안으로 해요.',
   },
 }
 
@@ -414,6 +421,8 @@ export function WorkspaceHud({
           initial: member.name.slice(0, 1),
           color: member.color,
           name: `${member.name}${member.id === me?.id ? ' · 나' : ''}`,
+          // API 없음: 접속·위치(presence)가 없어 나만 '사무실 내 자리'로 두고, 다른 팀원은 하는 일만 보여 준다.
+          place: member.id === me?.id ? '사무실 내 자리' : undefined,
           detail: task
             ? `${task.key} ${taskText[task.status]}`
             : [member.role === 'LEADER' ? '인간 팀장' : '팀원', member.domain]
@@ -423,15 +432,20 @@ export function WorkspaceHud({
             task ? openPane('tasks', task.id) : openPane('settings', 'team'),
         }
       }),
+    // 에이전트 줄: 연결된 에이전트, 그리고 아직 연결하지 않은 내 에이전트(설정에서 연결)
     ...members
-      .filter((member) => member.agent_connected)
+      .filter((member) => member.agent_connected || member.id === me?.id)
       .map((member) => ({
         key: `agent:${member.id}`,
         initial: 'AI',
         color: undefined,
         name: `${member.name}의 에이전트`,
-        detail: '연결됨',
-        open: () => openPane('dashboard'),
+        place: member.agent_connected ? '연결됨' : '연결 전',
+        detail: member.agent_connected ? '' : '설정에서 연결해요',
+        open: () =>
+          member.id === me?.id && !member.agent_connected
+            ? openPane('settings', 'agent')
+            : openPane('dashboard'),
       })),
   ]
   const approved =
@@ -589,28 +603,40 @@ export function WorkspaceHud({
             </p>
           </div>
         </div>
-        {project.current_baseline && (
-          <div
-            className={cn(
-              'grid gap-1.5',
-              chips.length === 3 ? 'grid-cols-3' : 'grid-cols-2',
-            )}
-          >
-            {chips.map(([label, value, pane]) => (
+        {/* 시작 전에도 숫자 칸을 두고, 시작해야 열리는 칸은 자물쇠로 잠근다(캔버스 SCR-06-v2-workspace-preparing). */}
+        <div
+          className={cn(
+            'grid gap-1.5',
+            chips.length === 3 ? 'grid-cols-3' : 'grid-cols-2',
+          )}
+        >
+          {chips.map(([label, value, pane]) => {
+            const locked = !started && pane !== 'documents'
+            return (
               <button
                 key={label}
                 type="button"
-                onClick={() => openPane(pane)}
-                className="grid rounded-xl border bg-muted/40 px-2.5 py-2 text-left hover:bg-muted"
+                aria-disabled={locked || undefined}
+                title={locked ? '프로젝트를 시작하면 열려요' : undefined}
+                onClick={() => !locked && openPane(pane)}
+                className={cn(
+                  'grid rounded-xl border bg-muted/40 px-2.5 py-2 text-left hover:bg-muted',
+                  locked &&
+                    'cursor-not-allowed border-dashed text-muted-foreground/60 hover:bg-muted/40',
+                )}
               >
-                <strong className="text-2xl leading-8">{value}</strong>
-                <span className="text-[11px] text-muted-foreground">
+                {locked ? (
+                  <Lock className="my-2 size-4" aria-hidden="true" />
+                ) : (
+                  <strong className="text-2xl leading-8">{value}</strong>
+                )}
+                <span className="text-[11px] font-semibold whitespace-nowrap text-muted-foreground">
                   {label}
                 </span>
               </button>
-            ))}
-          </div>
-        )}
+            )
+          })}
+        </div>
         <div className="grid gap-1 border-t pt-2.5">
           <div className="flex items-center justify-between gap-2 px-0.5">
             <span className="text-xs font-semibold">
@@ -668,6 +694,13 @@ export function WorkspaceHud({
                       {row.name}
                     </strong>
                     <span className="block truncate text-[11px] text-muted-foreground">
+                      {row.place && (
+                        <span className="inline-flex items-center gap-0.5 text-[#57534e]">
+                          <MapPin className="size-3" aria-hidden="true" />
+                          {row.place}
+                        </span>
+                      )}
+                      {row.place && row.detail && ' · '}
                       {row.detail}
                     </span>
                   </span>
@@ -962,9 +995,9 @@ export function WorkspaceHud({
       </section>
       <TourGuide accountId={me?.account_id} mode={tour} onChange={setTour} />
       {notice && (
-        <Toast key={stage} tone="success">
-          <strong className="block">{notice.title}</strong>
-          <span className="text-muted-foreground">
+        <Toast key={stage} tone="dark">
+          <strong className="text-sm font-bold">{notice.title}</strong>
+          <span className="text-xs text-[#d6d3c8]">
             {(!isLeader && notice.member) || notice.text}
           </span>
         </Toast>
