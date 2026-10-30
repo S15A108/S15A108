@@ -66,6 +66,12 @@ const WALK_LABELS: Record<OfficeLifeDestination, string> = {
   following: '사용자를 따라가는 중',
   waiting: '멈출 자리로 이동하는 중',
 }
+// 사람끼리 지킬 거리(px, 1타일 = 32). Kenney 캐릭터 몸 너비(약 1타일)보다 조금 좁게 잡는다.
+export const PERSONAL_SPACE = 28
+// 이 거리 안의 사람에게서 조금씩 비켜 걷는다.
+const AVOID_RADIUS = 44
+// 이만큼 못 나아가면 지금 자리에서 길을 다시 찾는다(초).
+const STUCK_SECONDS = 1.2
 const hash = (id: string) =>
   [...id].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 7)
 const feet = (x: number, y: number): Point => ({ x: x * T + 16, y: y * T + 27 })
@@ -96,9 +102,25 @@ interface Resident {
   followTimer?: number
   blocked?: boolean
   transfer?: { from: Point; to: Point; progress: number; leaving: boolean }
+  stuck?: number
 }
 
 /** Stateful positions survive snapshots; routes and collisions use the same floor as the player. */
+/** 내딛은 자리가 누구에게도 개인 거리 안으로 더 다가가지 않으면 괜찮다. */
+export function keepsSpace(
+  from: Point,
+  to: Point,
+  others: readonly Point[],
+  space = PERSONAL_SPACE,
+) {
+  return others.every((other) => {
+    const after = Math.hypot(to.x - other.x, to.y - other.y)
+    return (
+      after >= space || after >= Math.hypot(from.x - other.x, from.y - other.y)
+    )
+  })
+}
+
 export class OfficeLifeSimulation {
   private residents = new Map<string, Resident>()
   private lastFloor?: Floor
@@ -539,6 +561,14 @@ export class OfficeLifeSimulation {
       dt = Math.min(0.1, Math.max(0, seconds))
     const live = new Set(actors.map((actor) => actor.id)),
       snapshots = lifeByProject.get(this.projectId)!
+    // 나를 뺀 사람들의 지금 자리: 걷는 사람, 앉거나 서 있는 사람, 제자리 배우(비비), 나(caller)
+    const neighbors = (selfId: string): Point[] => [
+      ...[...this.residents.entries()]
+        .filter(([id]) => id !== selfId)
+        .map(([, state]) => state),
+      ...actors.filter((other) => other.stationary && other.id !== selfId),
+      ...(options.caller ? [options.caller] : []),
+    ]
     for (const id of this.residents.keys())
       if (!live.has(id)) {
         this.residents.delete(id)
@@ -662,18 +692,37 @@ export class OfficeLifeSimulation {
               distance,
             )
           if (distance < 0.2) resident.route.shift()
-          else
-            Object.assign(
-              resident,
-              moveContinuous(
-                resident,
-                {
-                  x: ((next.x - resident.x) / distance) * step,
-                  y: ((next.y - resident.y) / distance) * step,
-                },
-                this.free,
-              ),
-            )
+          else {
+            // 곁의 사람에게서 밀려나는 힘을 더해 비켜 걷고, 다른 사람에게 너무 붙는 걸음은 내딛지 않는다.
+            const others = neighbors(actor.id)
+            let vx = ((next.x - resident.x) / distance) * step,
+              vy = ((next.y - resident.y) / distance) * step
+            for (const other of others) {
+              const ox = resident.x - other.x,
+                oy = resident.y - other.y,
+                gap = Math.hypot(ox, oy)
+              if (gap < 0.01 || gap >= AVOID_RADIUS) continue
+              const push = ((AVOID_RADIUS - gap) / AVOID_RADIUS) * step * 1.4
+              vx += (ox / gap) * push
+              vy += (oy / gap) * push
+            }
+            const length = Math.hypot(vx, vy)
+            if (length > step) {
+              vx = (vx / length) * step
+              vy = (vy / length) * step
+            }
+            const moved = moveContinuous(resident, { x: vx, y: vy }, this.free)
+            if (keepsSpace(resident, moved, others)) {
+              Object.assign(resident, moved)
+              resident.stuck = 0
+            } else resident.stuck = (resident.stuck ?? 0) + dt
+            // 오래 막히면 지금 자리에서 같은 목적지로 길을 다시 찾는다.
+            if ((resident.stuck ?? 0) > STUCK_SECONDS && resident.target) {
+              resident.stuck = 0
+              resident.route =
+                this.route(resident, resident.target.landing) ?? resident.route
+            }
+          }
           if (!resident.route.length && resident.target) {
             const target = resident.target
             resident.activity = target.activity

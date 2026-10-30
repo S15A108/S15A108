@@ -21,7 +21,7 @@ import { officeActors } from './office/office-actors'
 import { nearOfficeExit } from './office/office-exit'
 import { officePopulationOf } from './office/office-layout'
 import { officeLanding, officeWalkable } from './office/office-navigation'
-import { OfficeLifeSimulation } from './office/office-life'
+import { keepsSpace, OfficeLifeSimulation } from './office/office-life'
 import { buildOfficeWork, officeHomeSeats } from './office/office-work'
 import { findPath } from './office/path'
 import { officeSceneAgents, officeSceneSnapshot } from './sceneData'
@@ -433,6 +433,11 @@ function OfficeRuntime(
     })
     const me = player.current,
       before = { x: me.x, y: me.y }
+    // 나도 다른 사람을 뚫고 지나가지 않는다(다가가는 걸음만 막고 비켜 가는 걸음은 둔다).
+    const step = (move: { x: number; y: number }) => {
+      const next = moveContinuous(me, move, free)
+      if (keepsSpace(me, next, residents)) Object.assign(me, next)
+    }
     if (state.phase >= 3 && state.props.interactive !== false) {
       const input = movementInput(keys.current),
         direction =
@@ -444,30 +449,16 @@ function OfficeRuntime(
             : input,
         speed = movementSpeed(105, keys.current) * dt
       if (direction.x || direction.y)
-        Object.assign(
-          me,
-          moveContinuous(
-            me,
-            { x: direction.x * speed, y: direction.y * speed },
-            free,
-          ),
-        )
+        step({ x: direction.x * speed, y: direction.y * speed })
       else if (route.current.length) {
         const next = route.current[0],
           distance = Math.hypot(next.x - me.x, next.y - me.y)
         if (distance < 3) route.current.shift()
         else
-          Object.assign(
-            me,
-            moveContinuous(
-              me,
-              {
-                x: ((next.x - me.x) / distance) * Math.min(speed, distance),
-                y: ((next.y - me.y) / distance) * Math.min(speed, distance),
-              },
-              free,
-            ),
-          )
+          step({
+            x: ((next.x - me.x) / distance) * Math.min(speed, distance),
+            y: ((next.y - me.y) / distance) * Math.min(speed, distance),
+          })
       }
     }
     const dx = me.x - before.x,
