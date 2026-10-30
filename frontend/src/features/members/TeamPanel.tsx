@@ -65,7 +65,8 @@ export function TeamPanel({
   const [handoff, setHandoff] = useState<{
     busy?: boolean
     error?: string
-    done?: boolean
+    /** 넘겨받은 사람 이름 */
+    done?: string
   }>({})
   const placements = useWorkspaceStore((state) => state.placements)
   const placeProject = useWorkspaceStore((state) => state.placeProject)
@@ -148,7 +149,7 @@ export function TeamPanel({
             <p className="mt-1 text-sm text-muted-foreground">
               {isLeader
                 ? '권한은 인간 팀장과 팀원 두 가지예요. 역할 수정, 팀장 위임, 추방은 팀원 줄의 ⋯에서 해요.'
-                : '팀 구성은 보기만 할 수 있어요. 바꾸려면 인간 팀장에게 요청해 주세요.'}
+                : `권한은 인간 팀장과 팀원 두 가지예요. ${handoff.done ? `${handoff.done}님이 팀장이 됐어요. ` : ''}팀원은 팀을 보기만 할 수 있어요.`}
             </p>
           )}
         </div>
@@ -163,7 +164,10 @@ export function TeamPanel({
       {action.message && <Toast>{action.message}</Toast>}
       {handoff.done && (
         <Toast tone="success">
-          <strong>팀장을 넘겼어요</strong>
+          <strong className="block">팀장을 넘겼어요</strong>
+          <span className="text-muted-foreground">
+            {handoff.done}님이 이제 팀장이에요. 나는 팀원이 됐어요.
+          </span>
         </Toast>
       )}
       {copyMessage && <Toast key={copyMessage}>{copyMessage}</Toast>}
@@ -502,30 +506,54 @@ export function TeamPanel({
           {(data) =>
             isLeader && otherMembers.length > 0 ? (
               // 서버(PRJ-A05)는 아직 팀원이 있어도 지운다. 막는 응답(409)이 생기기 전까지 화면에서 먼저 막는다.
-              <div className="space-y-4 rounded-xl border border-destructive/30 bg-destructive/5 p-5">
-                <p className="flex items-center gap-2 font-semibold text-destructive">
-                  <TriangleAlert className="size-4" />
-                  팀원이 있어서 바로 제거할 수 없어요
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  프로젝트는 남은 팀원에게 남아요. 아래 순서로 정리해 주세요.
-                </p>
-                <ol className="grid gap-3 text-sm">
-                  <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
-                    <span>
-                      1. 팀원 중 한 명에게 팀장 위임 · 팀 목록에서 그 팀원 줄의
-                      ⋯ → &apos;팀장으로 위임&apos;
+              <div className="space-y-5">
+                <div
+                  role="alert"
+                  className="flex gap-2.5 rounded-xl border border-primary/50 bg-primary/10 p-4 text-sm"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-700" />
+                  <div>
+                    <strong className="font-semibold">
+                      팀원 {otherMembers.length}명이 함께 쓰고 있어서 바로
+                      제거할 수 없어요
+                    </strong>
+                    <p className="mt-0.5 text-muted-foreground">
+                      먼저 설정 › 팀에서 다른 팀원에게 팀장을 위임하세요.
+                      위임하면 나는 팀원이 되고, 그다음 프로젝트에서 나갈 수
+                      있어요. 프로젝트는 남은 팀원에게 그대로 남아요.
+                    </p>
+                  </div>
+                </div>
+                <ol className="grid gap-3.5 text-sm">
+                  <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3">
+                    <span className="grid size-6 place-items-center rounded-full bg-primary text-xs font-bold">
+                      1
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onViewChange?.('team')}
-                    >
-                      팀에서 위임하기
-                    </Button>
+                    <div className="grid gap-2">
+                      <strong className="font-semibold">팀장 위임</strong>
+                      <span className="text-[12.5px] text-muted-foreground">
+                        설정 › 팀에서 넘길 팀원 줄의 ⋯ → &apos;팀장으로
+                        위임&apos;으로 넘겨요. 넘기면 나는 팀원이 되고, 2단계로
+                        이어가요.
+                      </span>
+                      <Button
+                        className="justify-self-start"
+                        onClick={() => onViewChange?.('team')}
+                      >
+                        팀에서 위임하기
+                      </Button>
+                    </div>
                   </li>
-                  <li className="rounded-lg border bg-card p-3 text-muted-foreground">
-                    2. 위임한 뒤 프로젝트 나가기
+                  <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3 text-muted-foreground">
+                    <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
+                      2
+                    </span>
+                    <div className="grid gap-1">
+                      <strong className="font-semibold">프로젝트 나가기</strong>
+                      <span className="text-[12.5px]">
+                        위임이 끝나면 팀원 화면의 프로젝트 나가기로 이어져요.
+                      </span>
+                    </div>
                   </li>
                 </ol>
               </div>
@@ -643,7 +671,7 @@ export function TeamPanel({
             }
           }}
         >
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-[420px]">
             <DialogHeader>
               <DialogTitle>
                 {dialog.member.name}님에게 팀장을 넘길까요?
@@ -677,7 +705,7 @@ export function TeamPanel({
                     await membersApi.transfer(projectId, {
                       target_member_id: dialog.member.id,
                     })
-                    setHandoff({ done: true })
+                    setHandoff({ done: dialog.member.name })
                     setDialog(null)
                     await queryClient.invalidateQueries({
                       queryKey: ['projects'],

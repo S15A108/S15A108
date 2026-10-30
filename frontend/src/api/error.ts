@@ -39,7 +39,7 @@ const messages: Record<string, string> = {
   leader_transfer_required: '인간 팀장을 먼저 위임해 주세요.',
   leader_not_removable: '팀장은 회의에서 뺄 수 없어요.',
   meeting_closed: '끝난 회의라 바꿀 수 없어요.',
-  invalid_transfer_target: '나 자신이나 이미 나간 팀원에게는 위임할 수 없어요.',
+  invalid_transfer_target: '이 팀원에게는 넘길 수 없어요.',
   active_tasks_exist: '진행 중인 작업의 담당자를 먼저 정리해 주세요.',
   project_membership_remaining: '참여 중인 프로젝트를 먼저 정리해 주세요.',
   analysis_not_completed:
