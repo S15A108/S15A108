@@ -29,7 +29,7 @@ it('? 키로 화면 안내를 열고 처음부터 둘러보기 6단계를 마치
     screen.getByText('문서 초안 4종이 승인되면 프로젝트가 시작돼요'),
   ).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '1분 둘러보기' }))
-  expect(screen.getByText('둘러보기 1/6')).toBeInTheDocument()
+  expect(screen.getByText('화면 둘러보기 · 1 / 6')).toBeInTheDocument()
   for (let step = 1; step < 6; step++)
     await user.click(screen.getByRole('button', { name: '다음' }))
   expect(screen.getByRole('dialog', { name: '비비' })).toBeInTheDocument()

@@ -160,7 +160,10 @@ function Workspace({ projectId }: { projectId: string }) {
                 (task) => task.assignee_member_id === currentUser?.id,
               )}
             />
-            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-2">
+            <div
+              data-tour="view"
+              className="absolute bottom-4 left-4 z-10 flex items-center gap-2"
+            >
               <div className="rounded-xl border bg-card/95 p-1 shadow-sm">
                 <Button
                   size="sm"

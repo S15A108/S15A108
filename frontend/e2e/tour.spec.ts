@@ -10,7 +10,7 @@ test('워크스페이스에 처음 들어오면 환영 창이 한 번 뜨고 ? �
   await expect(page.getByRole('heading', { name: /님의 도시/ })).toBeVisible()
   await page.goto('/projects/101')
   const welcome = page.getByRole('dialog', {
-    name: '우리 팀 사무실에 오신 걸 환영해요',
+    name: 'BEEZ 사무실에 오신 걸 환영해요',
   })
   await expect(welcome).toBeVisible()
   await expect(
@@ -23,7 +23,7 @@ test('워크스페이스에 처음 들어오면 환영 창이 한 번 뜨고 ? �
     page.getByRole('main', { name: '프로젝트 워크스페이스' }),
   ).toBeVisible()
   await expect(
-    page.getByRole('dialog', { name: '우리 팀 사무실에 오신 걸 환영해요' }),
+    page.getByRole('dialog', { name: 'BEEZ 사무실에 오신 걸 환영해요' }),
   ).toHaveCount(0)
   await page.getByRole('button', { name: '화면 안내 (?)' }).click()
   await expect(page.getByRole('dialog', { name: '화면 안내' })).toBeVisible()
