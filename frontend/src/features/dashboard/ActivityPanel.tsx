@@ -34,12 +34,35 @@ const localDate = (day: string, end = false) =>
   new Date(
     `${day}T${end ? '23:59:59.999' : '00:00:00.000'}+09:00`,
   ).toISOString()
-const stamp = (value: string) =>
+const usageViews = [
+  ['by_feature', '기능별'],
+  ['by_task', '작업별'],
+  ['by_validation', '검증별'],
+] as const
+const clock = (value: string) =>
   new Intl.DateTimeFormat('ko-KR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
     timeZone: 'Asia/Seoul',
   }).format(new Date(value))
+const seoulDay = (value: string | number) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(
+    new Date(value),
+  )
+// 한국시간 날짜로 묶는다: '오늘 · 10월 27일', '어제 · 10월 26일', '10월 23일'
+function groupByDay<T extends { created_at: string }>(items: T[]) {
+  const today = seoulDay(Date.now())
+  const yesterday = seoulDay(Date.now() - 86_400_000)
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const day = seoulDay(item.created_at)
+    const [, month, date] = day.split('-').map(Number)
+    const name = `${day === today ? '오늘 · ' : day === yesterday ? '어제 · ' : ''}${month}월 ${date}일`
+    groups.set(name, [...(groups.get(name) ?? []), item])
+  }
+  return [...groups]
+}
 const dateRangeSchema = z
   .object({
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '시작일을 선택해 주세요.'),
@@ -61,6 +84,7 @@ export function ActivityPanel({
   view?: 'dashboard' | 'relations'
 }) {
   const openPane = useWorkspaceStore((state) => state.openPane)
+  const [usageView, setUsageView] = useState(0)
   const [tab, setTab] = useState<DashboardTab>('overview')
   const [range, setRange] = useState<DateRange>(() => ({
     from: calendarDay(new Date(Date.now() - 6 * 86400000)),
@@ -188,59 +212,87 @@ export function ActivityPanel({
               {(data) =>
                 data.items.length ? (
                   <>
-                    <ol className="grid gap-5 border-l pl-5">
-                      {data.items.map((item) => (
-                        <li key={item.id} className="relative">
-                          <span className="absolute top-1.5 -left-[1.53rem] size-2 rounded-full bg-primary" />
-                          <div className="flex flex-wrap justify-between gap-2">
-                            <strong className="text-sm font-medium">
-                              {actorName(item.actor_account_id)} ·{' '}
-                              {statusLabel(item.type)}
-                            </strong>
-                            <time
-                              className="text-xs text-muted-foreground"
-                              dateTime={item.created_at}
-                            >
-                              {stamp(item.created_at)}
-                            </time>
-                          </div>
-                          <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">
-                            {item.result}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-3">
-                            {item.task_id && (
-                              <Button
-                                variant="link"
-                                className="h-auto p-0 text-xs"
-                                onClick={() => openPane('tasks', item.task_id)}
+                    {/* API 없음: 활동에 사람·에이전트 구분이 없어 '보기 [전체][사람][에이전트]' 거르기는 아직 두지 않는다. */}
+                    <div className="grid gap-3">
+                      {groupByDay(data.items).map(([day, items]) => (
+                        <section
+                          key={day}
+                          aria-label={day}
+                          className="rounded-2xl border bg-card px-4 py-2"
+                        >
+                          <h4 className="py-1.5 text-[11.5px] text-muted-foreground">
+                            {day}
+                          </h4>
+                          <ol>
+                            {items.map((item) => (
+                              <li
+                                key={item.id}
+                                className="flex items-center gap-3 border-t py-2.5 text-[13px]"
                               >
-                                작업 #{item.task_id}
-                              </Button>
-                            )}
-                            {item.change_proposal_id && (
-                              <Button
-                                variant="link"
-                                className="h-auto p-0 text-xs"
-                                onClick={() =>
-                                  openPane('changes', item.change_proposal_id)
-                                }
-                              >
-                                변경 요청 #{item.change_proposal_id}
-                              </Button>
-                            )}
-                            {item.baseline_id && (
-                              <Button
-                                variant="link"
-                                className="h-auto p-0 text-xs"
-                                onClick={() => openPane('documents')}
-                              >
-                                기준 설계 #{item.baseline_id}
-                              </Button>
-                            )}
-                          </div>
-                        </li>
+                                <time
+                                  className="w-11 shrink-0 text-xs text-muted-foreground tabular-nums"
+                                  dateTime={item.created_at}
+                                >
+                                  {clock(item.created_at)}
+                                </time>
+                                <span className="min-w-0 flex-1">
+                                  <strong className="font-semibold">
+                                    {actorName(item.actor_account_id)}
+                                  </strong>{' '}
+                                  {statusLabel(item.type)}
+                                  {item.task_id && (
+                                    <Button
+                                      variant="link"
+                                      className="ml-2 h-auto p-0 text-xs"
+                                      onClick={() =>
+                                        openPane('tasks', item.task_id)
+                                      }
+                                    >
+                                      작업 #{item.task_id}
+                                    </Button>
+                                  )}
+                                  {item.change_proposal_id && (
+                                    <Button
+                                      variant="link"
+                                      className="ml-2 h-auto p-0 text-xs"
+                                      onClick={() =>
+                                        openPane(
+                                          'changes',
+                                          item.change_proposal_id,
+                                        )
+                                      }
+                                    >
+                                      변경 요청 #{item.change_proposal_id}
+                                    </Button>
+                                  )}
+                                  {item.baseline_id && (
+                                    <Button
+                                      variant="link"
+                                      className="ml-2 h-auto p-0 text-xs"
+                                      onClick={() => openPane('documents')}
+                                    >
+                                      기준 설계 #{item.baseline_id}
+                                    </Button>
+                                  )}
+                                </span>
+                                <span
+                                  className={cn(
+                                    'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                                    item.result === 'SUCCESS'
+                                      ? 'bg-emerald-50 text-[#00753a]'
+                                      : item.result === 'FAILED'
+                                        ? 'bg-[#fdecec] text-[#a3141b]'
+                                        : 'bg-muted text-muted-foreground',
+                                  )}
+                                >
+                                  {statusLabel(item.result) || item.result}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
+                        </section>
                       ))}
-                    </ol>
+                    </div>
                     {data.has_more && (
                       <Button
                         variant="outline"
@@ -288,81 +340,133 @@ export function ActivityPanel({
                   </p>
                 ) : data.items.length ? (
                   <>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="border-b text-xs text-muted-foreground">
-                          <tr>
-                            <th className="p-3 font-medium">팀원·연결</th>
-                            <th className="p-3 font-medium">현재 작업</th>
-                            <th className="p-3 font-medium">작업 상태</th>
-                            <th className="p-3 font-medium">계획 검증</th>
-                            <th className="p-3 font-medium">대기 이유</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {data.items.map((item) => {
-                            const member = members.data?.items.find(
-                              (entry) => entry.id === item.member_id,
-                            )
-                            return (
-                              <tr
-                                key={`${item.member_id}:${item.agent_session_id ?? ''}`}
-                                className="border-b last:border-0"
-                              >
-                                <td className="p-3">
-                                  <strong className="block font-medium">
-                                    {memberName(item.member_id)}
-                                  </strong>
-                                  <small className="mt-1 block text-muted-foreground">
-                                    {member
-                                      ? member.agent_connected
-                                        ? '연결됨'
-                                        : '미연결'
-                                      : '연결 상태 미확인'}
-                                  </small>
-                                </td>
-                                <td className="p-3">
-                                  {item.current_task_id ? (
-                                    <Button
-                                      variant="link"
-                                      className="h-auto p-0"
-                                      onClick={() =>
-                                        openPane('tasks', item.current_task_id)
-                                      }
-                                    >
-                                      작업 #{item.current_task_id}
-                                    </Button>
-                                  ) : (
-                                    '보고된 작업 없음'
+                    {/* 캔버스 PNL-09-v2-agents: 에이전트마다 카드. API 없음: 에이전트별 사용량·최근 보고 줄과 '웹에서 직접 한 호출'은 응답에 없다. */}
+                    {/* 줄마다 카드 모양이지만 표 구조(열 머리는 화면 밖)를 지켜 읽기 도구가 칸을 알 수 있게 한다. */}
+                    <table className="block w-full text-left">
+                      <thead className="sr-only">
+                        <tr>
+                          <th>에이전트·연결</th>
+                          <th>현재 작업</th>
+                          <th>작업 상태</th>
+                          <th>계획 검증</th>
+                          <th>대기 이유</th>
+                        </tr>
+                      </thead>
+                      <tbody className="grid gap-3.5 md:grid-cols-2">
+                        {data.items.map((item) => {
+                          const member = members.data?.items.find(
+                            (entry) => entry.id === item.member_id,
+                          )
+                          return (
+                            <tr
+                              key={`${item.member_id}:${item.agent_session_id ?? ''}`}
+                              className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-2xl border bg-card px-4.5 py-4 shadow-xs"
+                            >
+                              <td className="col-span-2 flex items-center gap-2.5 pb-0.5">
+                                <span
+                                  aria-hidden="true"
+                                  className="grid size-6.5 shrink-0 place-items-center rounded-full bg-[#e9e4ff] text-[10px] font-bold text-[#4b3aa8]"
+                                >
+                                  AI
+                                </span>
+                                <strong className="text-sm font-bold">
+                                  <span>{memberName(item.member_id)}</span>의
+                                  에이전트
+                                </strong>
+                                <span
+                                  className={cn(
+                                    'ml-auto inline-flex items-center gap-1.5 text-xs',
+                                    member?.agent_connected
+                                      ? 'text-[#00753a]'
+                                      : 'text-[#c99e1e]',
                                   )}
+                                >
+                                  <span
+                                    aria-hidden="true"
+                                    className="size-1.75 rounded-full bg-current"
+                                  />
+                                  {member
+                                    ? member.agent_connected
+                                      ? '연결됨'
+                                      : '미연결'
+                                    : '연결 상태 미확인'}
+                                </span>
+                              </td>
+                              {(
+                                [
+                                  [
+                                    '현재 작업',
+                                    item.current_task_id ? (
+                                      <Button
+                                        variant="link"
+                                        className="h-auto justify-start p-0 text-[13px] font-semibold"
+                                        onClick={() =>
+                                          openPane(
+                                            'tasks',
+                                            item.current_task_id,
+                                          )
+                                        }
+                                      >
+                                        작업 #{item.current_task_id}
+                                      </Button>
+                                    ) : (
+                                      <span className="text-muted-foreground/70">
+                                        보고된 작업 없음
+                                      </span>
+                                    ),
+                                  ],
+                                  [
+                                    '작업 상태',
+                                    item.task_status ? (
+                                      <StatusPill value={item.task_status} />
+                                    ) : (
+                                      <span className="text-muted-foreground/70">
+                                        미보고
+                                      </span>
+                                    ),
+                                  ],
+                                  [
+                                    '계획 검증',
+                                    item.validation_status ? (
+                                      <StatusPill
+                                        value={item.validation_status}
+                                      />
+                                    ) : (
+                                      <span className="text-muted-foreground/70">
+                                        미보고
+                                      </span>
+                                    ),
+                                  ],
+                                  [
+                                    '대기 이유',
+                                    item.waiting_reason
+                                      ? statusLabel(item.waiting_reason)
+                                      : '—',
+                                  ],
+                                ] as const
+                              ).map(([label, value]) => (
+                                <td key={label} className="grid gap-0.5">
+                                  <span
+                                    aria-hidden="true"
+                                    className="text-[11.5px] text-muted-foreground/70"
+                                  >
+                                    {label}
+                                  </span>
+                                  <span className="text-[13px] font-semibold">
+                                    {value}
+                                  </span>
                                 </td>
-                                <td className="p-3">
-                                  {item.task_status ? (
-                                    <StatusPill value={item.task_status} />
-                                  ) : (
-                                    '미보고'
-                                  )}
-                                </td>
-                                <td className="p-3">
-                                  {item.validation_status ? (
-                                    <StatusPill
-                                      value={item.validation_status}
-                                    />
-                                  ) : (
-                                    '미보고'
-                                  )}
-                                </td>
-                                <td className="p-3">
-                                  {item.waiting_reason
-                                    ? statusLabel(item.waiting_reason)
-                                    : '—'}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                              ))}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    <p className="mt-4 text-xs leading-[18px] text-muted-foreground/70">
+                      에이전트가 보고하지 않은 실행 중·완료 상태는 추정하지
+                      않아요. 연결 여부는 연결 보고, 작업 상태는 작업 보고를
+                      따로 봐요.
+                    </p>
                     {data.has_more && (
                       <Button
                         variant="outline"
@@ -427,11 +531,11 @@ export function ActivityPanel({
                         value: data.output_tokens.toLocaleString('ko-KR'),
                       },
                       {
-                        label: '호출 횟수',
+                        label: '호출',
                         value: data.call_count.toLocaleString('ko-KR'),
                       },
                       {
-                        label: '예상 비용',
+                        label: '추정 비용',
                         value:
                           data.estimated_cost_amount === undefined
                             ? '미보고'
@@ -455,27 +559,50 @@ export function ActivityPanel({
                     BEEZ에 기록된 호출을 집계한 값이에요. 외부 에이전트의 개인
                     사용량과 실제 청구액은 포함하지 않아요.
                   </p>
-                  <UsageTable
-                    title="기능별 사용량"
-                    rows={data.by_feature}
-                    currency={data.currency}
-                    label={(key) => FEATURE_LABELS[key] ?? key}
-                  />
-                  <div className="grid gap-5 xl:grid-cols-2">
-                    <UsageTable
-                      title="작업별 사용량"
-                      rows={data.by_task}
+                  {/* API 없음: 사용량 응답에 에이전트별 묶음이 없어 기능별·작업별·검증별만 전환한다. */}
+                  <section className="grid gap-1 rounded-[14px] border bg-card px-4 py-3.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">
+                        {usageViews[usageView][1]}
+                      </h3>
+                      <span role="tablist" className="flex gap-1 text-xs">
+                        {usageViews.map(([key, name], index) => (
+                          <button
+                            key={key}
+                            type="button"
+                            role="tab"
+                            aria-selected={usageView === index}
+                            onClick={() => setUsageView(index)}
+                            className={cn(
+                              'rounded-full px-2.5 py-0.5 font-semibold',
+                              usageView === index
+                                ? 'bg-foreground text-background'
+                                : 'bg-muted',
+                            )}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </span>
+                    </div>
+                    <UsageBars
+                      key={usageViews[usageView][0]}
+                      rows={data[usageViews[usageView][0]]}
                       currency={data.currency}
-                      label={(key) => `작업 #${key}`}
-                      onSelect={(id) => openPane('tasks', id)}
+                      label={(key) =>
+                        usageView === 0
+                          ? (FEATURE_LABELS[key] ?? key)
+                          : usageView === 1
+                            ? `작업 #${key}`
+                            : `검증 #${key}`
+                      }
+                      onSelect={
+                        usageView === 1
+                          ? (id) => openPane('tasks', id)
+                          : undefined
+                      }
                     />
-                    <UsageTable
-                      title="검증별 사용량"
-                      rows={data.by_validation}
-                      currency={data.currency}
-                      label={(key) => `검증 #${key}`}
-                    />
-                  </div>
+                  </section>
                 </>
               )}
             </AsyncState>
@@ -486,72 +613,65 @@ export function ActivityPanel({
   )
 }
 
-function UsageTable({
-  title,
+// 묶음 하나를 막대 줄로 보여 준다. 막대 길이는 호출 수가 가장 많은 줄 기준이다.
+function UsageBars({
   rows,
   currency,
   label,
   onSelect,
 }: {
-  title: string
   rows: UsageBucket[]
   currency?: string
   label: (key: string) => string
   onSelect?: (id: string) => void
 }) {
+  const most = Math.max(1, ...rows.map((row) => row.call_count))
+  if (!rows.length)
+    return (
+      <p className="py-2 text-xs text-muted-foreground">
+        기록된 사용량이 없어요.
+      </p>
+    )
   return (
-    <section className="min-w-0">
-      <h3 className="mb-3 text-sm font-medium">{title}</h3>
-      {rows.length ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b text-muted-foreground">
-              <tr>
-                <th className="p-2 font-medium">구분</th>
-                <th className="p-2 text-right font-medium">입력</th>
-                <th className="p-2 text-right font-medium">출력</th>
-                <th className="p-2 text-right font-medium">호출</th>
-                <th className="p-2 text-right font-medium">예상 비용</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.key} className="border-b last:border-0">
-                  <td className="p-2">
-                    {onSelect ? (
-                      <button
-                        type="button"
-                        className="text-primary underline-offset-4 hover:underline"
-                        onClick={() => onSelect(row.key)}
-                      >
-                        {label(row.key)}
-                      </button>
-                    ) : (
-                      label(row.key)
-                    )}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {row.input_tokens.toLocaleString('ko-KR')}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {row.output_tokens.toLocaleString('ko-KR')}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {row.call_count.toLocaleString('ko-KR')}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {row.estimated_cost_amount === undefined
-                      ? '미보고'
-                      : `${row.estimated_cost_amount} ${currency ?? ''}`.trim()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">기록된 사용량이 없어요.</p>
-      )}
-    </section>
+    <ul>
+      {rows.map((row) => (
+        <li
+          key={row.key}
+          className="grid grid-cols-[150px_minmax(0,1fr)_64px_110px_90px] items-center gap-3 border-b py-2.5 text-[13px] last:border-0"
+        >
+          <span className="truncate font-semibold">
+            {onSelect ? (
+              <button
+                type="button"
+                className="underline-offset-4 hover:underline"
+                onClick={() => onSelect(row.key)}
+              >
+                {label(row.key)}
+              </button>
+            ) : (
+              label(row.key)
+            )}
+          </span>
+          <span aria-hidden="true" className="h-2 rounded-full bg-muted">
+            <span
+              className="block h-2 rounded-full bg-[#e0b400]"
+              style={{ width: `${(row.call_count / most) * 100}%` }}
+            />
+          </span>
+          <span className="text-right text-[#57534e]">
+            {row.call_count.toLocaleString('ko-KR')}회
+          </span>
+          <span className="text-right text-muted-foreground">
+            {(row.input_tokens + row.output_tokens).toLocaleString('ko-KR')}{' '}
+            토큰
+          </span>
+          <strong className="text-right font-semibold">
+            {row.estimated_cost_amount === undefined
+              ? '미보고'
+              : `${row.estimated_cost_amount} ${currency ?? ''}`.trim()}
+          </strong>
+        </li>
+      ))}
+    </ul>
   )
 }

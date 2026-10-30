@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Plus, Search } from 'lucide-react'
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Plus,
+  Search,
+} from 'lucide-react'
 import {
   changesApi,
   documentsApi,
@@ -27,7 +34,12 @@ import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { foldDiff, lineDiff } from './lineDiff'
 import { ProposalForm } from './ProposalForm'
-import { operationLabel, toChangeItems, toRows } from './proposalItems'
+import {
+  kindLabel,
+  operationLabel,
+  toChangeItems,
+  toRows,
+} from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
 
 interface Props {
@@ -146,9 +158,11 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   const baselines = useQuery({
     queryKey: ['projects', projectId, 'baselines'],
     queryFn: () => documentsApi.baselines(projectId, { limit: 20 }),
-    // 승인 이력 화면과 발행한 뒤 '기준 vN 보기' 버튼이 쓴다.
+    // 승인 이력 화면, 발행한 뒤 '기준 vN 보기' 버튼, 기준이 바뀐 제안의 만든 기준 번호가 쓴다.
     enabled:
-      mode.kind === 'history' || detail.data?.proposal.status === 'PUBLISHED',
+      mode.kind === 'history' ||
+      detail.data?.proposal.status === 'PUBLISHED' ||
+      !!detail.data?.proposal.requires_refresh,
   })
   const documents = useQuery({
     queryKey: ['projects', projectId, 'planning-documents'],
@@ -386,7 +400,9 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             ['PROPOSED', 'IN_REVIEW', 'APPROVED'].includes(
                               entry.status,
                             ) && (
-                              <span className="text-amber-700">기준 바뀜</span>
+                              <span className="rounded-full bg-[#fdecec] px-2 py-0.5 font-semibold text-[#b42318]">
+                                기준 바뀜
+                              </span>
                             )}
                         </span>
                       </button>
@@ -670,12 +686,55 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       />
                     </div>
                   )
+                const baseVersion = current.requires_refresh
+                  ? publishedVersion(current.base_baseline_id)
+                  : baseline.data?.version_no
+                const changedKeys = data.comparisons
+                  .filter(
+                    (comparison) =>
+                      comparison.current_changed &&
+                      comparison.target_type === 'DESIGN_ITEM',
+                  )
+                  .map((comparison) => itemKey(comparison.target_id ?? ''))
                 return (
                   <div className="grid content-start gap-4">
+                    {current.requires_refresh && editable && (
+                      <div className="flex items-center gap-3 rounded-[14px] bg-[#fdf8e6] px-3.5 py-3">
+                        <span className="grid flex-1 gap-0.5">
+                          <strong className="flex items-center gap-1.5 text-sm">
+                            <CircleAlert className="size-4 shrink-0" />
+                            기준이 바뀌었어요
+                            {baseline.data &&
+                              ` · 지금 기준 v${baseline.data.version_no}`}
+                          </strong>
+                          <span className="text-[13px] leading-[19px] text-muted-foreground">
+                            이 제안은{' '}
+                            {baseVersion ? `v${baseVersion}` : '이전 기준'}
+                            에서 만들어서 승인할 수 없어요. 팀장이 기준이
+                            바뀌었다는 이유로 반려하면, 같은 번호에서 최신
+                            기준으로 고쳐 다시 올려요.
+                            {changedKeys.length > 0 &&
+                              ` 이미 바뀐 항목: ${changedKeys.join(', ')}`}
+                          </span>
+                        </span>
+                        <Button
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={() => setTab('diff')}
+                        >
+                          바뀐 항목 보기
+                        </Button>
+                      </div>
+                    )}
                     <div>
                       <h3 className="flex flex-wrap items-center gap-2 text-lg font-bold">
                         {current.title}
                         <StatusPill value={current.status} />
+                        {current.requires_refresh && editable && (
+                          <span className="rounded-full bg-[#fdecec] px-2 py-0.5 text-xs font-semibold text-[#b42318]">
+                            기준 바뀜
+                          </span>
+                        )}
                       </h3>
                       <p className="text-xs text-muted-foreground">
                         {current.key} ·{' '}
@@ -741,13 +800,6 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                             새 제안으로 다시 올리기
                           </Button>
                         )}
-                      </div>
-                    )}
-                    {current.requires_refresh && editable && (
-                      <div className="grid gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                        이 제안을 만든 뒤 다른 제안이 먼저 발행돼 기준이
-                        바뀌었어요. 올린 제안은 고칠 수 없어서, 반려되면 최신
-                        기준으로 맞춰 다시 올려요.
                       </div>
                     )}
                     {current.status === 'PUBLISHED' && (
@@ -910,28 +962,66 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       )}
                       {tab === 'diff' && (
                         <div className="grid gap-2">
-                          <p className="text-xs text-muted-foreground">
-                            {current.requires_refresh
-                              ? '제안을 만든 기준과 지금 기준이 달라요.'
-                              : '제안을 만든 기준과 지금 기준이 같아요.'}
+                          <p
+                            className={cn(
+                              'flex items-center gap-2 rounded-[10px] px-3 py-2 text-[13px]',
+                              current.requires_refresh
+                                ? 'bg-[#fdf8e6] text-[#6e5200]'
+                                : 'bg-[#f3f8f4] text-[#00532a]',
+                            )}
+                          >
+                            {current.requires_refresh ? (
+                              <CircleAlert className="size-4 shrink-0" />
+                            ) : (
+                              <Check className="size-4 shrink-0" />
+                            )}
+                            제안을 만든 기준
+                            {baseVersion ? `(v${baseVersion})` : ''}과 지금
+                            기준이{' '}
+                            {current.requires_refresh ? '달라요' : '같아요'}.
                           </p>
                           {data.comparisons.length ? (
-                            data.comparisons.map((comparison, index) => (
-                              <Diff
-                                key={`${comparison.target_id}-${index}`}
-                                comparison={comparison}
-                                label={
-                                  comparison.target_type === 'DOCUMENT'
-                                    ? (documentOptions.find(
-                                        (item) =>
-                                          item.id === comparison.target_id,
-                                      )?.title ?? '문서')
-                                    : comparison.target_id
-                                      ? itemKey(comparison.target_id)
-                                      : '새 항목'
-                                }
-                              />
-                            ))
+                            <ul className="grid gap-2">
+                              {data.comparisons.map((comparison, index) => {
+                                const change = current.items.find(
+                                  (item) =>
+                                    item.design_item_id ===
+                                    comparison.target_id,
+                                )
+                                const kind = approved.find(
+                                  (item) =>
+                                    item.design_item_id ===
+                                    comparison.target_id,
+                                )?.kind
+                                return (
+                                  <Diff
+                                    key={`${comparison.target_id}-${index}`}
+                                    open={index === 0}
+                                    comparison={comparison}
+                                    operation={
+                                      comparison.target_id
+                                        ? (change?.operation ?? 'UPDATE')
+                                        : 'CREATE'
+                                    }
+                                    label={
+                                      comparison.target_type === 'DOCUMENT'
+                                        ? (documentOptions.find(
+                                            (item) =>
+                                              item.id === comparison.target_id,
+                                          )?.title ?? '문서')
+                                        : comparison.target_id
+                                          ? itemKey(comparison.target_id)
+                                          : ''
+                                    }
+                                    kind={
+                                      comparison.target_type === 'DOCUMENT'
+                                        ? '문서'
+                                        : kind && kindLabel[kind]
+                                    }
+                                  />
+                                )
+                              })}
+                            </ul>
                           ) : (
                             <p className="text-sm text-muted-foreground">
                               비교할 내용이 없어요.
@@ -1292,12 +1382,24 @@ function Back({
 }
 
 // 바뀌는 내용 · 항목마다 한 줄로 접어 두고, 펼치면 기준 문장과 제안 문장을 −/+로 보여 준다.
+const operationTone = {
+  UPDATE: 'bg-[#fdf0c8] text-[#6e5200]',
+  CREATE: 'bg-[#e8f3ec] text-[#00753a]',
+  RETIRE: 'bg-[#fdecec] text-[#b42318]',
+} as const
+
 function Diff({
   comparison,
+  operation,
   label,
+  kind,
+  open,
 }: {
   comparison: Comparison
+  operation: keyof typeof operationLabel
   label: string
+  kind?: string
+  open?: boolean
 }) {
   const [whole, setWhole] = useState(false)
   const baseText = comparison.current_content ?? comparison.base_content
@@ -1311,58 +1413,90 @@ function Diff({
       ? lineDiff(baseText, comparison.proposed_content)
       : undefined
   return (
-    <details className="rounded-xl border px-3.5 py-2.5 text-sm">
-      <summary className="cursor-pointer font-medium">{label}</summary>
-      {comparison.format === 'FILE' ? (
-        <p className="mt-2 text-muted-foreground">
-          파일 버전 변경이에요. 공용 문서함에서 두 원본을 내려받아 확인하세요.
-        </p>
-      ) : lines ? (
-        <div className="mt-2 grid gap-1">
-          <div className="grid font-mono text-xs leading-6 whitespace-pre-wrap">
-            {(whole ? lines : foldDiff(lines)).map((line, index) =>
-              line.kind === 'folded' ? (
-                <p key={index} className="px-2 text-muted-foreground">
-                  … 같은 줄 {line.count}개
-                </p>
-              ) : (
-                <p
-                  key={index}
-                  className={cn(
-                    'px-2',
-                    line.kind === 'removed' &&
-                      'bg-destructive/5 text-destructive',
-                    line.kind === 'added' && 'bg-primary/10',
-                  )}
-                >
-                  {line.kind === 'removed'
-                    ? '− '
-                    : line.kind === 'added'
-                      ? '+ '
-                      : '  '}
-                  {line.text}
-                </p>
-              ),
+    <li>
+      <details
+        open={open}
+        className="group overflow-hidden rounded-xl border text-[13px]"
+      >
+        <summary className="flex cursor-pointer items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-xs font-semibold',
+              operationTone[operation],
             )}
-          </div>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            className="justify-self-start"
-            onClick={() => setWhole((value) => !value)}
           >
-            {whole ? '바뀐 줄만 보기' : '원문 전체 보기'}
-          </Button>
+            {operationLabel[operation]}
+          </span>
+          {label && <strong className="font-semibold">{label}</strong>}
+          {kind && <span className="text-muted-foreground">{kind}</span>}
+          <span className="ml-auto text-xs text-muted-foreground group-open:hidden">
+            펼치기
+          </span>
+          <span className="ml-auto hidden text-xs text-muted-foreground group-open:inline">
+            접기
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 group-open:rotate-180" />
+        </summary>
+        <div className="px-3 pb-3">
+          {comparison.format === 'FILE' ? (
+            <p className="text-muted-foreground">
+              파일 버전 변경이에요. 공용 문서함에서 두 원본을 내려받아
+              확인하세요.
+            </p>
+          ) : lines ? (
+            <div className="grid gap-1">
+              <div className="grid gap-0.5 font-mono text-xs leading-6 whitespace-pre-wrap">
+                {(whole ? lines : foldDiff(lines)).map((line, index) =>
+                  line.kind === 'folded' ? (
+                    <p key={index} className="px-2 text-muted-foreground">
+                      … 같은 줄 {line.count}개
+                    </p>
+                  ) : (
+                    <p
+                      key={index}
+                      className={cn(
+                        'px-2.5',
+                        line.kind === 'removed' &&
+                          'bg-[#fdecec] text-[#8f1d17]',
+                        line.kind === 'added' && 'bg-[#e8f3ec] text-[#00532a]',
+                      )}
+                    >
+                      {line.kind === 'removed'
+                        ? '− '
+                        : line.kind === 'added'
+                          ? '+ '
+                          : '  '}
+                      {line.text}
+                    </p>
+                  ),
+                )}
+              </div>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                className="justify-self-start"
+                onClick={() => setWhole((value) => !value)}
+              >
+                {whole ? '바뀐 줄만 보기' : '원문 전체 보기'}
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-0.5 leading-5 whitespace-pre-wrap">
+              {operation !== 'CREATE' && (
+                <p className="bg-[#fdecec] px-2.5 py-0.75 text-[#8f1d17]">
+                  − {before}
+                </p>
+              )}
+              {operation !== 'RETIRE' && (
+                <p className="bg-[#e8f3ec] px-2.5 py-0.75 text-[#00532a]">
+                  + {after}
+                </p>
+              )}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="mt-2 grid gap-1 font-mono text-xs leading-6 whitespace-pre-wrap">
-          <p className="rounded bg-destructive/5 px-2 text-destructive">
-            − {before}
-          </p>
-          <p className="rounded bg-primary/10 px-2">+ {after}</p>
-        </div>
-      )}
-    </details>
+      </details>
+    </li>
   )
 }

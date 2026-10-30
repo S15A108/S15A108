@@ -54,10 +54,21 @@ export function RelationGraph({ data }: { data: RelationsResponse }) {
   }
   return (
     <div className="grid gap-4">
-      <p className="text-xs text-muted-foreground">
-        실선은 확인된 관계, 점선은 검토할 후보예요. 후보는 확정된 의존 관계로
-        보지 않아요.
-      </p>
+      {/* 범례(캔버스 PNL-09-v2-relations). 후보는 확정된 의존 관계로 보지 않는다. */}
+      <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <li className="flex items-center gap-1.5">
+          <span aria-hidden="true" className="w-6 border-t-2 border-current" />
+          확인된 관계
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className="w-6 border-t-2 border-dashed border-current"
+          />
+          비비가 찾은 후보 (확정 아님)
+        </li>
+        <li className="ml-auto">상자를 누르면 그 화면으로 가요</li>
+      </ul>
       <div className="overflow-x-auto rounded-xl border bg-card p-3 shadow-xs">
         <svg
           role="img"
@@ -105,8 +116,17 @@ export function RelationGraph({ data }: { data: RelationsResponse }) {
               </title>
             </path>
           ))}
+          {/* 키보드로는 아래 '전체 항목과 관계 읽기' 목록의 버튼으로 같은 화면에 간다. */}
           {visible.map((node) => (
-            <g key={`${node.type}:${node.id}`}>
+            <g
+              key={`${node.type}:${node.id}`}
+              className={
+                node.type === 'VALIDATION' ? undefined : 'cursor-pointer'
+              }
+              onClick={
+                node.type === 'VALIDATION' ? undefined : () => selectNode(node)
+              }
+            >
               <rect
                 x={node.x}
                 y={node.y}
