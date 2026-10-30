@@ -12,6 +12,14 @@ export function getApiErrorCode(error: unknown): string | undefined {
 export function getApiErrorStatus(error: unknown): number | undefined {
   return isAxiosError(error) ? error.response?.status : undefined
 }
+
+// 서버에 아직 없는 계약(404·501)이면 undefined로 바꿔, 그 부분만 '준비 중'으로 두고 화면 전체가 실패하지 않게 한다.
+export const unlessMissing = <T>(request: Promise<T>) =>
+  request.catch((error: unknown) => {
+    const status = getApiErrorStatus(error)
+    if (status === 404 || status === 501) return undefined
+    throw error
+  })
 const messages: Record<string, string> = {
   unauthenticated: '로그인이 필요합니다.',
   invalid_credentials: '이메일 또는 비밀번호를 확인해 주세요.',

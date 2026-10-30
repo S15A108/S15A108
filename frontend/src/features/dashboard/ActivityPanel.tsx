@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { Activity, Wallet } from 'lucide-react'
 import { dashboardApi } from '@/api/services/dashboard'
 import { membersApi } from '@/api/services/members'
+import { unlessMissing } from '@/api/error'
 import type { UsageBucket } from '@/api/contracts/common'
 import { DashboardOverview } from './DashboardOverview'
 import { RelationsView } from './RelationsView'
@@ -89,8 +90,11 @@ export function ActivityPanel({
   })
   const work = useQuery({
     queryKey: ['projects', projectId, 'agent-work', workCursor],
+    // API 없음: 서버에 아직 없으면(404) 에이전트 현황은 '준비 중'으로 둔다(AGT-A04·A05 -178 구현 전과 같은 규칙).
     queryFn: () =>
-      dashboardApi.agentWork(projectId, { cursor: workCursor, limit: 20 }),
+      unlessMissing(
+        dashboardApi.agentWork(projectId, { cursor: workCursor, limit: 20 }),
+      ),
   })
   const members = useQuery({
     queryKey: ['projects', projectId, 'members'],
@@ -277,7 +281,12 @@ export function ActivityPanel({
           <CardContent>
             <AsyncState query={work}>
               {(data) =>
-                data.items.length ? (
+                !data ? (
+                  <p className="text-sm text-muted-foreground">
+                    에이전트 현황은 준비 중이에요. 서버가 연결 보고를 받기
+                    시작하면 여기에 보여요.
+                  </p>
+                ) : data.items.length ? (
                   <>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-sm">

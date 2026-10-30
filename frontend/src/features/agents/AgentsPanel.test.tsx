@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { AxiosError, AxiosHeaders } from 'axios'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -69,4 +70,44 @@ it('활성 토큰이 5개면 토큰 이름 폼에 한도와 할 일을 알려 �
   expect(await screen.findByRole('alert')).toHaveTextContent(
     '활성 토큰은 프로젝트마다 5개까지예요. 쓰지 않는 토큰을 폐기한 뒤 다시 발급해 주세요.',
   )
+})
+
+// API 없음: AGT-A04·A05(-178 구현 전). 404여도 토큰 발급은 그대로 되고, 연결 안내는 발급 응답으로 보여 준다.
+it('연결 안내·연결 현황이 404여도 토큰을 발급하고 발급 응답으로 연결 안내를 보여 준다', async () => {
+  const missing = () =>
+    Promise.reject(
+      new AxiosError('Not Found', 'ERR_BAD_REQUEST', undefined, undefined, {
+        status: 404,
+        statusText: 'Not Found',
+        headers: {},
+        config: { headers: new AxiosHeaders() },
+        data: { error: { code: 'not_found', message: '없음' } },
+      }),
+    )
+  vi.spyOn(agentsApi, 'connectionGuide').mockImplementation(missing)
+  vi.spyOn(agentsApi, 'list').mockImplementation(missing)
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <AgentsPanel projectId="101" />
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByText('연결 상태 확인은 준비 중이에요'),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText('토큰을 발급하면 연결 안내가 나와요.'),
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '토큰 발급' }))
+  expect(
+    await screen.findByRole('button', { name: 'MCP 주소 복사' }),
+  ).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: 'CLAUDE.md 내용 복사' }),
+  ).toBeInTheDocument()
+  vi.restoreAllMocks()
 })

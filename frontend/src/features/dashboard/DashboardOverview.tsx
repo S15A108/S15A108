@@ -27,7 +27,8 @@ export function DashboardOverview({
   projectId: string
   usage: UseQueryResult<UsageResponse>
   activities: UseQueryResult<ActivitiesResponse>
-  work: UseQueryResult<AgentWorkResponse>
+  // 서버에 아직 없으면(404) data가 undefined(unlessMissing)
+  work: UseQueryResult<AgentWorkResponse | undefined>
   members: Member[]
   actorName: (accountId?: string) => string
   onTab: (tab: DashboardTab) => void

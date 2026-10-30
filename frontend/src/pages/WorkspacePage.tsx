@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { useIsMutating, useQuery } from '@tanstack/react-query'
 import { Footprints } from 'lucide-react'
-import { agentsApi, membersApi, projectsApi, tasksApi } from '@/api/services'
+import { membersApi, projectsApi, tasksApi } from '@/api/services'
 import type { SceneAgent, SceneTask } from '@/three/types'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
@@ -69,14 +69,13 @@ function Workspace({ projectId }: { projectId: string }) {
   const query = useQuery({
     queryKey: ['projects', projectId, 'scene'],
     queryFn: async () => {
-      const [project, members, agents, tasks, onboarding] = await Promise.all([
+      const [project, members, tasks, onboarding] = await Promise.all([
         projectsApi.get(projectId),
         membersApi.list(projectId),
-        agentsApi.list(projectId),
         tasksApi.list(projectId, { limit: 100 }),
         projectsApi.onboarding(projectId),
       ])
-      return { project, members, agents, tasks, onboarding }
+      return { project, members, tasks, onboarding }
     },
   })
   const sceneAgents = useMemo<SceneAgent[]>(

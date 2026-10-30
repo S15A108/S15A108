@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { agentsApi, membersApi } from '@/api/services'
 import type { IssueTokenResponse } from './schemas'
 import { allTokens } from './allTokens'
-import { getApiErrorMessage } from '@/api/error'
+import { getApiErrorMessage, unlessMissing } from '@/api/error'
 import { useProjectAction } from '@/features/workspace/useProjectAction'
 import { useSession } from '@/features/auth/useSession'
 import { AsyncState } from '@/components/AsyncState'
@@ -55,6 +55,13 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
+// 연결 안내(AGT-A04)가 없을 때 쓰는 고정 단계
+const fallbackSteps = [
+  '터미널에서 Claude Code를 켜요.',
+  '아래 MCP 주소와 발급한 토큰으로 BEEZ MCP 서버를 추가해요.',
+  'Claude Code를 다시 시작해요.',
+]
+
 // 설정 › 내 에이전트 · 연결 상태 → 토큰 발급 → Claude Code에 BEEZ 추가 → CLAUDE.md 붙여넣기를 한 화면에.
 export function AgentsPanel({ projectId }: { projectId: string }) {
   const session = useSession()
@@ -64,18 +71,36 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
   // 발급 오류(예: 활성 토큰 5개 한도)는 토큰 이름 폼이 알려 주고, 폐기 오류는 폐기 확인 상자에 둔다.
   const [revokeError, setRevokeError] = useState('')
   const [checked, setChecked] = useState(false)
+  // 토큰(AGT-A01~A03)과 팀원은 따로 불러 연결 안내·현황이 없어도 발급·목록·폐기는 그대로 쓴다.
   const query = useQuery({
     queryKey: ['projects', projectId, 'agent-settings'],
     queryFn: async () => {
-      const [tokens, guide, agents, members] = await Promise.all([
+      const [tokens, members] = await Promise.all([
         allTokens(projectId),
-        agentsApi.connectionGuide(projectId),
-        agentsApi.list(projectId),
         membersApi.list(projectId),
       ])
-      return { tokens, guide, agents, members }
+      return { tokens, members }
     },
   })
+  // API 없음: AGT-A04·A05(-178 구현 전). 404면 연결 안내는 발급 응답(mcp_url·claude_md_snippet)으로, 연결 현황은 '준비 중'으로 둔다.
+  const guide = useQuery({
+    queryKey: ['projects', projectId, 'agent-guide'],
+    queryFn: () => unlessMissing(agentsApi.connectionGuide(projectId)),
+  })
+  const agents = useQuery({
+    queryKey: ['projects', projectId, 'agent-connections'],
+    queryFn: () => unlessMissing(agentsApi.list(projectId)),
+  })
+  const shownGuide =
+    guide.data ??
+    (fresh
+      ? {
+          steps: fallbackSteps,
+          mcp_url: fresh.mcp_url,
+          claude_md_snippet: fresh.claude_md_snippet,
+        }
+      : undefined)
+  const statusReady = agents.isSuccess && agents.data !== undefined
   return (
     <div className="space-y-5">
       <div>
@@ -90,7 +115,7 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
           const me = data.members.items.find(
             (member) => member.account_id === session.data?.id,
           )
-          const mine = data.agents.items.find(
+          const mine = agents.data?.items.find(
             (agent) => agent.member_id === me?.id,
           )
           const tokens = data.tokens.filter((token) => !token.revoked_at)
@@ -114,35 +139,41 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
               >
                 <div>
                   <p className="font-semibold">
-                    {state === 'connected'
-                      ? '연결됨'
-                      : state === 'recheck'
-                        ? '연결 확인 필요'
-                        : state === 'failed'
-                          ? '연결 실패'
-                          : '아직 연결 안 됨'}
+                    {!statusReady
+                      ? '연결 상태 확인은 준비 중이에요'
+                      : state === 'connected'
+                        ? '연결됨'
+                        : state === 'recheck'
+                          ? '연결 확인 필요'
+                          : state === 'failed'
+                            ? '연결 실패'
+                            : '아직 연결 안 됨'}
                     {mine?.last_report_at &&
                       ` · 마지막 보고 ${formatDate(mine.last_report_at)}`}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {state === 'connected'
-                      ? '에이전트가 이 프로젝트로 보고하고 있어요.'
-                      : state === 'failed'
-                        ? '아직 보고가 오지 않았어요. 토큰과 MCP 주소를 확인하고 Claude Code를 다시 시작해 주세요.'
-                        : state === 'recheck'
-                          ? '보고가 오래됐어요. Claude Code를 켠 뒤 다시 확인해 주세요.'
-                          : '아래 단계를 마친 뒤 연결 확인을 눌러 주세요.'}
+                    {!statusReady
+                      ? '토큰 발급과 연결 안내는 그대로 쓸 수 있어요. 연결 여부는 서버가 준비되면 여기에 보여요.'
+                      : state === 'connected'
+                        ? '에이전트가 이 프로젝트로 보고하고 있어요.'
+                        : state === 'failed'
+                          ? '아직 보고가 오지 않았어요. 토큰과 MCP 주소를 확인하고 Claude Code를 다시 시작해 주세요.'
+                          : state === 'recheck'
+                            ? '보고가 오래됐어요. Claude Code를 켠 뒤 다시 확인해 주세요.'
+                            : '아래 단계를 마친 뒤 연결 확인을 눌러 주세요.'}
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  disabled={query.isFetching}
-                  onClick={() =>
-                    void query.refetch().then(() => setChecked(true))
-                  }
-                >
-                  {query.isFetching ? '확인 중…' : '연결 확인'}
-                </Button>
+                {statusReady && (
+                  <Button
+                    variant="outline"
+                    disabled={agents.isFetching}
+                    onClick={() =>
+                      void agents.refetch().then(() => setChecked(true))
+                    }
+                  >
+                    {agents.isFetching ? '확인 중…' : '연결 확인'}
+                  </Button>
+                )}
               </div>
               <ol className="grid gap-6">
                 <Step number={1} title="토큰 발급">
@@ -282,26 +313,42 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                 </Step>
                 <Step number={2} title="Claude Code에 BEEZ 추가">
                   <ol className="list-inside list-decimal text-sm leading-7">
-                    {data.guide.steps.map((step) => (
+                    {(shownGuide?.steps ?? fallbackSteps).map((step) => (
                       <li key={step}>{step}</li>
                     ))}
                   </ol>
-                  <code className="block overflow-x-auto rounded-lg bg-muted p-3 text-xs select-text">
-                    {data.guide.mcp_url}
-                  </code>
-                  <CopyButton
-                    value={data.guide.mcp_url}
-                    label="MCP 주소 복사"
-                  />
+                  {shownGuide ? (
+                    <>
+                      <code className="block overflow-x-auto rounded-lg bg-muted p-3 text-xs select-text">
+                        {shownGuide.mcp_url}
+                      </code>
+                      <CopyButton
+                        value={shownGuide.mcp_url}
+                        label="MCP 주소 복사"
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      토큰을 발급하면 연결 안내가 나와요.
+                    </p>
+                  )}
                 </Step>
                 <Step number={3} title="CLAUDE.md 붙여넣기">
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre-wrap select-text">
-                    {data.guide.claude_md_snippet}
-                  </pre>
-                  <CopyButton
-                    value={data.guide.claude_md_snippet}
-                    label="CLAUDE.md 내용 복사"
-                  />
+                  {shownGuide ? (
+                    <>
+                      <pre className="max-h-48 overflow-auto rounded-lg bg-muted p-4 text-xs whitespace-pre-wrap select-text">
+                        {shownGuide.claude_md_snippet}
+                      </pre>
+                      <CopyButton
+                        value={shownGuide.claude_md_snippet}
+                        label="CLAUDE.md 내용 복사"
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      토큰을 발급하면 붙여넣을 내용이 나와요.
+                    </p>
+                  )}
                 </Step>
               </ol>
               <p className="text-xs text-muted-foreground">
