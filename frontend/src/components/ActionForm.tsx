@@ -16,7 +16,11 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 export interface FormField {
   name: string
   label: string
-  type?: 'email' | 'password' | 'textarea' | 'select' | 'text' | 'color'
+  /** chips: 보기 몇 개 중 하나를 둥근 칩으로 고른다(캔버스 PNL-05-v2-wait·record). */
+  type?:
+    'email' | 'password' | 'textarea' | 'select' | 'chips' | 'text' | 'color'
+  /** columns 폼에서 오른쪽 칸에 둔다 */
+  column?: 2
   required?: boolean
   min?: number
   max?: number
@@ -48,6 +52,8 @@ interface Props {
   disabled?: boolean
   /** 로그인·가입 화면(캔버스 SCR-01): 높이 40 입력칸, 필수 별표 없음, 칸을 벗어나면 바로 검사 */
   auth?: boolean
+  /** 넓은 화면에서 두 칸으로 놓는다. column: 2인 칸은 오른쪽으로 간다. */
+  columns?: boolean
 }
 
 export function ActionForm({
@@ -60,6 +66,7 @@ export function ActionForm({
   destructive,
   disabled,
   auth,
+  columns,
 }: Props) {
   const formId = useId()
   const [error, setError] = useState('')
@@ -74,7 +81,7 @@ export function ActionForm({
             context.addIssue({
               code: 'custom',
               path: [field.name],
-              message: `${field.label}${objectParticle(field.label)} 입력해 주세요.`,
+              message: `${field.label}${objectParticle(field.label)} ${field.type === 'chips' ? '골라' : '입력해'} 주세요.`,
             })
           else if (field.min && value.length < field.min)
             context.addIssue({
@@ -134,7 +141,10 @@ export function ActionForm({
   const watched = useWatch({ control })
   return (
     <form
-      className="grid gap-5"
+      className={cn(
+        'grid gap-5',
+        columns && 'md:grid-flow-dense md:grid-cols-2 md:items-start',
+      )}
       noValidate
       onSubmit={handleSubmit(async (values) => {
         setError('')
@@ -152,7 +162,14 @@ export function ActionForm({
         field.custom ? (
           <div key={field.name}>{field.custom}</div>
         ) : (
-          <div key={field.name} className="grid gap-2">
+          <div
+            key={field.name}
+            className={cn(
+              'grid gap-2',
+              columns &&
+                (field.column === 2 ? 'md:col-start-2' : 'md:col-start-1'),
+            )}
+          >
             <div className="flex items-center justify-between gap-2">
               <Label
                 id={`${formId}-${field.name}-label`}
@@ -194,6 +211,34 @@ export function ActionForm({
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
+            ) : field.type === 'chips' ? (
+              <div
+                role="radiogroup"
+                aria-labelledby={`${formId}-${field.name}-label`}
+                aria-invalid={Boolean(errors[field.name])}
+                className="flex flex-wrap gap-1.5"
+              >
+                {field.options?.map((option) => (
+                  <label
+                    key={option.value}
+                    className={cn(
+                      'cursor-pointer rounded-full border px-3 py-1 text-[13px] has-focus-visible:ring-2 has-focus-visible:ring-ring',
+                      watched[field.name] === option.value
+                        ? 'border-foreground font-semibold'
+                        : 'border-border text-muted-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      value={option.value}
+                      className="sr-only"
+                      disabled={isSubmitting}
+                      {...register(field.name)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
             ) : field.type === 'color' ? (
               <div
                 role="radiogroup"
@@ -291,7 +336,7 @@ export function ActionForm({
       {error && (
         <p
           role="alert"
-          className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+          className="col-span-full rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
         >
           {error}
         </p>
@@ -299,7 +344,11 @@ export function ActionForm({
       <SheetSubmit
         destructive={destructive}
         disabled={isSubmitting || disabled}
-        className={cn(block ? 'w-full' : 'justify-self-end', auth && 'h-10')}
+        className={cn(
+          'col-span-full',
+          block ? 'w-full' : 'justify-self-end',
+          auth && 'h-10',
+        )}
       >
         {isSubmitting ? '처리 중…' : submitLabel}
       </SheetSubmit>

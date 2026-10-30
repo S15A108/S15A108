@@ -14,6 +14,7 @@ export function FormDialog({
   onClose,
   submitLabel = '저장',
   destructive,
+  columns,
   children,
 }: {
   title: string
@@ -25,6 +26,8 @@ export function FormDialog({
   onClose: () => void
   submitLabel?: string
   destructive?: boolean
+  /** 넓은 화면에서 두 칸 배치(ActionForm columns) */
+  columns?: boolean
   /** 설명과 입력 칸 사이에 둘 내용(예: 넘길 작업 목록) */
   children?: ReactNode
 }) {
@@ -44,6 +47,7 @@ export function FormDialog({
         submitLabel={submitLabel}
         onBusyChange={setBusy}
         destructive={destructive}
+        columns={columns}
       />
     </PaneSheet>
   )

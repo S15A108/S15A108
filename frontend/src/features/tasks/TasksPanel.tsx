@@ -997,19 +997,26 @@ export function TasksPanel({ projectId, isLeader }: Props) {
           back={formTask.key}
           title="대기로 보고"
           description="작업을 멈추고 기다리는 이유를 남겨요. 팀 활동에도 보여요."
+          columns
           fields={[
             {
               name: 'waiting_reason',
               label: '기다리는 이유',
-              type: 'select',
+              type: 'chips',
               required: true,
+              value: '',
               options: [
-                { value: 'INPUT', label: '추가 입력이 필요해요' },
-                { value: 'APPROVAL', label: '승인을 기다려요' },
-                { value: 'DEPENDENCY', label: '선행 작업을 기다려요' },
+                { value: 'INPUT', label: '추가 입력 필요' },
+                { value: 'APPROVAL', label: '승인 필요' },
+                { value: 'DEPENDENCY', label: '선행 작업 대기' },
               ],
             },
-            { name: 'summary', label: '지금 상황', type: 'textarea' },
+            {
+              name: 'summary',
+              label: '지금 상황',
+              type: 'textarea',
+              column: 2,
+            },
           ]}
           submitLabel="대기로 보고"
           onClose={() => setReporting(null)}
@@ -1054,11 +1061,13 @@ export function TasksPanel({ projectId, isLeader }: Props) {
         <FormDialog
           back={formTask.key}
           title="작업 기록 남기기"
+          submitLabel="기록 남기기"
+          columns
           fields={[
             {
               name: 'kind',
               label: '기록 종류',
-              type: 'select',
+              type: 'chips',
               value: 'PROGRESS',
               options: [
                 { value: 'PROGRESS', label: '진행' },
@@ -1067,22 +1076,25 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                 { value: 'HANDOVER', label: '인수인계' },
               ],
             },
-            {
-              name: 'visibility',
-              label: '공유 범위',
-              type: 'select',
-              value: 'SHARED',
-              options: [
-                { value: 'SHARED', label: '프로젝트 팀에 공유' },
-                { value: 'PRIVATE', label: '나만 보기' },
-              ],
-            },
             { name: 'summary', label: '요약', required: true },
             {
               name: 'detail',
               label: '상세 내용',
               type: 'textarea',
               required: true,
+              column: 2,
+              hint: '비밀값과 코드 원문은 넣지 마세요.',
+            },
+            {
+              name: 'visibility',
+              label: '공유 범위',
+              type: 'chips',
+              value: 'SHARED',
+              column: 2,
+              options: [
+                { value: 'SHARED', label: '팀 공유' },
+                { value: 'PRIVATE', label: '나만 보기' },
+              ],
             },
           ]}
           onClose={() => setRecording(false)}
@@ -1302,8 +1314,9 @@ function PlanDialog({
       onClose={onClose}
       className="sm:max-w-2xl"
     >
+      {/* 캔버스 PNL-05-v2-plan: 왼쪽 제목·관련 설계, 오른쪽 목표·완료 기준 */}
       <form
-        className="space-y-5"
+        className="grid gap-5 md:grid-cols-2 md:items-start"
         noValidate
         onSubmit={handleSubmit(async (values) => {
           setError('')
@@ -1476,7 +1489,7 @@ function PlanDialog({
         </fieldset>
         {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
         <details
-          className="rounded-lg border p-4"
+          className="rounded-lg border p-4 md:col-span-2"
           open={detailsOpen}
           onToggle={(event) => setDetailsOpen(event.currentTarget.open)}
         >
@@ -1556,12 +1569,12 @@ function PlanDialog({
             </div>
           </div>
         </details>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground md:col-span-2">
           나머지는 비워 둬도 돼요. 검증에서 더 필요하면 알려 줘요.
         </p>
         {error && (
           <p
-            className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+            className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive md:col-span-2"
             role="alert"
           >
             {error}

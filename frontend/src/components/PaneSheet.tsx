@@ -174,7 +174,7 @@ export function SheetSubmit({
   )
   if (!sheet) return submit
   return (
-    <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 flex items-center justify-end gap-2 rounded-b-2xl border-t bg-card px-6 pt-3.5 pb-5">
+    <div className="sticky -bottom-5 z-10 col-span-full -mx-6 -mb-5 flex items-center justify-end gap-2 rounded-b-2xl border-t bg-card px-6 pt-3.5 pb-5">
       <Button
         type="button"
         variant="outline"

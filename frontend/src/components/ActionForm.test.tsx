@@ -114,4 +114,36 @@ describe('공용 입력 폼', () => {
     await userEvent.click(screen.getByRole('button', { name: '비밀번호 보기' }))
     expect(input).toHaveAttribute('type', 'text')
   })
+  it('칩을 고르지 않으면 막고, 고른 칩의 값을 제출한다', async () => {
+    const submit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ActionForm
+        fields={[
+          {
+            name: 'reason',
+            label: '기다리는 이유',
+            type: 'chips',
+            required: true,
+            value: '',
+            options: [
+              { value: 'INPUT', label: '추가 입력 필요' },
+              { value: 'APPROVAL', label: '승인 필요' },
+            ],
+          },
+        ]}
+        onSubmit={submit}
+        submitLabel="대기로 보고"
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: '대기로 보고' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '기다리는 이유를 골라 주세요.',
+    )
+    expect(submit).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('radio', { name: '승인 필요' }))
+    await userEvent.click(screen.getByRole('button', { name: '대기로 보고' }))
+    await waitFor(() =>
+      expect(submit).toHaveBeenCalledWith({ reason: 'APPROVAL' }),
+    )
+  })
 })
