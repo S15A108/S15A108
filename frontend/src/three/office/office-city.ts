@@ -129,6 +129,7 @@ export class OfficeCity {
   private readonly walkObstacles: WalkObstacle[] = []
   private trafficObstacles: WalkObstacle[] = []
   private readonly kenneySpots: KenneySpot[] = []
+  private readonly kenneyMaterials: THREE.Material[] = []
   private disposed = false
 
   constructor(bounds: OfficeCityBounds) {
@@ -1353,6 +1354,12 @@ export class OfficeCity {
       const geometry = mergeGeometries(parts, true)
       parts.forEach((part) => part.dispose())
       if (!geometry) return undefined
+      // 재질은 복제해 쓴다. 스텐실 설정이 다른 화면과 나누는 원본 재질에 번지지 않게 한다.
+      const own = materials.map((material) => {
+        const copy = material.clone()
+        this.kenneyMaterials.push(copy)
+        return copy
+      })
       // 바닥 가운데를 원점으로 옮긴다.
       geometry.computeBoundingBox()
       const box = geometry.boundingBox!
@@ -1361,7 +1368,7 @@ export class OfficeCity {
       this.geometries.set(`kenney/${name}`, geometry)
       return {
         geometry,
-        material: materials,
+        material: own,
         size: box.getSize(new THREE.Vector3()),
       }
     }
@@ -1418,6 +1425,9 @@ export class OfficeCity {
     this.root.traverse((object) => {
       if (object.userData.kenneyReplaceable) object.visible = false
     })
+    // 창밖 스텐실이 새 재질을 다시 모으게 한다(3인칭에서는 유리창 안으로만 보여야 한다).
+    this.root.userData.cityVersion =
+      ((this.root.userData.cityVersion as number | undefined) ?? 0) + 1
   }
 
   dispose() {
@@ -1427,6 +1437,8 @@ export class OfficeCity {
     })
     this.geometries.forEach((geometry) => geometry.dispose())
     this.materials.forEach((material) => material.dispose())
+    this.kenneyMaterials.forEach((material) => material.dispose())
+    this.kenneyMaterials.length = 0
     this.geometries.clear()
     this.materials.clear()
     this.sectors.length = 0
