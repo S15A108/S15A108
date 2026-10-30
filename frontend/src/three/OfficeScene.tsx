@@ -290,6 +290,8 @@ function OfficeRuntime(
         exit()
       else if (latest.current.props.viewMode === 'first') {
         if (renderer.aimedTarget) activate(renderer.aimedTarget)
+        // 가리킨 대상이 없으면 단축 바의 '비비 Enter'대로 비비를 연다.
+        else latest.current.props.onAgentSelect('bibi')
       } else {
         const nearest = latest.current.actors
           .map((actor) => ({
@@ -300,8 +302,9 @@ function OfficeRuntime(
             ),
           }))
           .sort((a, b) => a.distance - b.distance)[0]
-        if (nearest && nearest.distance < 100)
-          latest.current.props.onAgentSelect(nearest.actor.id)
+        latest.current.props.onAgentSelect(
+          nearest && nearest.distance < 100 ? nearest.actor.id : 'bibi',
+        )
       }
     }
     const keyUp = (event: KeyboardEvent) =>

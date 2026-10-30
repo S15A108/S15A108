@@ -22,6 +22,7 @@ const hotbarSlots = [
   { pane: 'dashboard', label: '대시보드', icon: ChartNoAxesCombined },
 ] satisfies { pane: WorkspacePane; label: string; icon: typeof FileText }[]
 
+// 단축 바 B안(캔버스 v433 알약 바): 한 줄 알약에 키캡·아이콘·이름, 비비는 바 오른쪽 둥근 버튼(Enter).
 export function Hotbar({
   locked,
   badges,
@@ -59,68 +60,95 @@ export function Hotbar({
   }, [pane, locked, openPane])
   const slot = (item: (typeof hotbarSlots)[number], index: number) => {
     const isLocked = locked.includes(item.pane)
+    const isOpen = pane === item.pane
     const badge = badges[item.pane]
     return (
       <button
         key={item.pane}
         type="button"
         aria-label={item.label}
+        aria-keyshortcuts={String(index + 1)}
+        aria-current={isOpen ? 'page' : undefined}
         aria-disabled={isLocked || undefined}
         title={isLocked ? lockedReason : undefined}
         onClick={() => !isLocked && openPane(item.pane)}
         className={cn(
-          'relative grid size-19 content-center justify-items-center gap-1.5 rounded-2xl border bg-muted/40 text-xs font-semibold whitespace-nowrap transition hover:bg-muted',
-          pane === item.pane && 'border-foreground bg-muted',
-          isLocked && 'cursor-not-allowed opacity-45 hover:bg-muted/40',
-          highlight === item.pane && 'ring-2 ring-primary',
+          'relative inline-flex h-[34px] items-center gap-1.5 rounded-full pr-[11px] pl-[7px] text-[13px] font-semibold whitespace-nowrap text-[#3f3a2e] transition-colors hover:bg-muted',
+          isOpen && 'bg-foreground font-bold text-white hover:bg-foreground',
+          isLocked && 'cursor-not-allowed text-[#bdb8ac] hover:bg-transparent',
+          highlight === item.pane &&
+            'bg-[#fff3c4] shadow-[0_0_0_2px_var(--primary)] hover:bg-[#fff3c4]',
         )}
       >
-        <span className="absolute top-1 left-2 text-[10px] font-semibold text-muted-foreground">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'inline-grid h-4 min-w-4 place-items-center rounded-[5px] border border-[#e2ddcf] text-[9.5px] leading-none font-bold text-[#8a8478]',
+            isOpen && 'border-white/35 text-white/85',
+            isLocked && 'border-[#e7e3d6] text-[#cfcabd]',
+          )}
+        >
           {index + 1}
         </span>
+        <item.icon aria-hidden="true" className="size-[17px]" />
+        <span>{item.label}</span>
+        {isLocked && (
+          <Lock
+            aria-hidden="true"
+            className="size-2.5 text-[#c9c3b3]"
+            strokeWidth={2.6}
+          />
+        )}
         {highlight === item.pane && (
-          <span className="absolute -top-6 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+          <span className="absolute bottom-11 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2.5 py-[5px] text-xs font-bold whitespace-nowrap text-primary-foreground shadow-md">
             여기부터 시작
+            <span
+              aria-hidden="true"
+              className="absolute -bottom-1 left-1/2 -ml-1 size-2 rotate-45 bg-primary"
+            />
           </span>
         )}
         {badge ? (
           <span
             aria-label={`새 항목 ${badge}개`}
-            className="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-destructive px-1 text-[11px] font-bold text-white"
+            className="absolute -top-[9px] -right-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#e7000b] px-[5px] text-[11px] font-bold text-white shadow-[0_0_0_2px_#fff]"
           >
             {badge}
           </span>
         ) : null}
-        {isLocked ? (
-          <Lock className="size-6" />
-        ) : (
-          <item.icon className="size-6" />
-        )}
-        {item.label}
       </button>
     )
   }
   return (
     <nav
       aria-label="프로젝트 메뉴 단축 바"
-      data-tour="hotbar"
-      className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-3xl border bg-card/95 p-2 shadow-lg backdrop-blur"
+      className="pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-4"
     >
-      {hotbarSlots.slice(0, 3).map(slot)}
+      <div
+        data-tour="hotbar"
+        className="flex h-11 items-center gap-0.5 rounded-full border border-[rgba(44,41,31,0.08)] bg-white/94 px-[5px] shadow-[0_18px_32px_-16px_rgba(44,41,31,0.35),0_2px_6px_rgba(44,41,31,0.06)] backdrop-blur-[8px]"
+      >
+        {hotbarSlots.map(slot)}
+      </div>
       <button
         type="button"
         aria-label="비비와 대화"
+        aria-keyshortcuts="Enter"
         data-tour="bibi"
         aria-pressed={pane === 'chat'}
         onClick={() => openPane(pane === 'chat' ? null : 'chat')}
-        className="relative mx-2 grid w-26 justify-items-center gap-1 text-xs font-bold"
+        className="relative block rounded-full"
       >
-        <span className="-mt-11 grid size-23 place-items-center rounded-full bg-white shadow-[0_0_0_3px_var(--primary),0_10px_18px_-6px_rgb(0_0_0/0.3)]">
-          <BibiFace className="size-21" />
+        <span className="block size-14 rounded-full shadow-[0_0_0_3px_#fff,0_0_0_5px_var(--primary),0_14px_22px_-10px_rgba(44,41,31,0.55)]">
+          <BibiFace className="size-full" />
         </span>
-        비비
+        <span
+          aria-hidden="true"
+          className="absolute -bottom-2.5 left-1/2 inline-grid h-[15px] -translate-x-1/2 place-items-center rounded-[4px] border border-[#e2ddcf] bg-white px-1 text-[8.5px] leading-none font-bold text-[#8a8478]"
+        >
+          Enter
+        </span>
       </button>
-      {hotbarSlots.slice(3).map((item, index) => slot(item, index + 3))}
     </nav>
   )
 }

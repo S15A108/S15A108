@@ -24,7 +24,7 @@ const steps: { target: Target; title: string; body: string }[] = [
   {
     target: 'hotbar',
     title: '단축 바',
-    body: '일할 때 여는 메뉴예요. 공용 문서함부터 대시보드까지 6개가 있고 숫자 키 1~6로도 열 수 있어요. 가운데 큰 버튼은 비비예요. 처리할 일이 생기면 칸에 빨간 숫자가 붙어요. 팀 관리와 에이전트 연결은 설정에 있어요.',
+    body: '일할 때 여는 메뉴예요. 공용 문서함부터 대시보드까지 6개가 있고 숫자 키 1~6으로도 열 수 있어요. 바 오른쪽 둥근 버튼은 비비예요. 처리할 일이 생기면 칸에 빨간 숫자가 붙어요. 팀 관리와 에이전트 연결은 설정에 있어요.',
   },
   {
     target: 'todo',
@@ -97,7 +97,7 @@ const mapNotes: {
 const radius: Record<Target | 'view', number> = {
   office: 28,
   card: 22,
-  hotbar: 24,
+  hotbar: 999,
   todo: 22,
   top: 16,
   bibi: 999,
@@ -119,7 +119,8 @@ function areaOf(target: Target | 'view') {
     .querySelector(`[data-tour="${target}"]`)
     ?.getBoundingClientRect()
   if (!rect) return undefined
-  const pad = target === 'bibi' ? 2 : 6
+  // 비비는 노란 테두리 바깥으로 틀이 보이게 조금 더 띄운다.
+  const pad = target === 'bibi' ? 8 : 6
   return {
     left: rect.left - pad,
     top: rect.top - pad,
@@ -163,20 +164,25 @@ function bubbleOf(target: Target, area: Area | undefined) {
         box: { right: 16, top: area.top + area.height + 20 },
         arrow: { right: 46, top: -7 },
       }
-    default: {
-      // 단축 바·비비: 가운데 위. 비비 버튼이 단축 바 위로 솟아 있어 더 높은 쪽 위에 둔다.
-      const bibiTop =
-        document.querySelector('[data-tour="bibi"]')?.getBoundingClientRect()
-          .top ?? area.top
+    case 'bibi':
+      // 비비: 바 오른쪽 둥근 버튼 위. 말풍선 오른쪽 끝을 버튼에 맞추고 꼬리는 버튼 가운데.
+      return {
+        box: {
+          right: width - area.left - area.width,
+          bottom: height - area.top + 12,
+        },
+        arrow: { right: area.width / 2 - 7, bottom: -7 },
+      }
+    default:
+      // 단축 바: 가운데 위.
       return {
         box: {
           left: '50%',
-          bottom: height - Math.min(area.top, bibiTop) + 16,
+          bottom: height - area.top + 24,
           transform: 'translateX(-50%)',
         },
         arrow: { left: '50%', bottom: -7, marginLeft: -7 },
       }
-    }
   }
 }
 
@@ -468,15 +474,12 @@ function MapNote({
         : note.target === 'card'
           ? { left: area.left + area.width + 14, top: area.top + 86 }
           : note.target === 'hotbar'
-            ? { left: area.left + area.width + 15, bottom: 30 }
+            ? { left: area.left + 3, bottom: height - area.top + 24 }
             : note.target === 'todo'
               ? { right: width - area.left + 18, top: area.top + 30 }
               : note.target === 'top'
                 ? { right: width - area.left + 10, top: area.top + 4 }
-                : {
-                    left: area.left + area.width + 6,
-                    bottom: height - area.top + 8,
-                  }
+                : { left: area.left + area.width + 14, bottom: 30 }
   return (
     <div
       className={cn(
