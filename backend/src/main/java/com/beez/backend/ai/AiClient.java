@@ -23,7 +23,11 @@ public class AiClient {
 
     public AiClient(BeezProperties props) {
         BeezProperties.Ai ai = props.ai();
-        HttpClient http = HttpClient.newBuilder().connectTimeout(ai.connectTimeout()).build();
+        // Uvicorn uses HTTP/1.1; avoid h2c upgrades on streamed request bodies.
+        HttpClient http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(ai.connectTimeout())
+                .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(ai.readTimeout());
         this.rest = RestClient.builder()
