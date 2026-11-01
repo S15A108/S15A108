@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from app.schemas.retrieval import EmbeddingUsage
 from app.services.retrieval.context_selection import (
     ApprovedEvidence,
     ApprovedItem,
@@ -192,6 +193,60 @@ async def test_rejects_unknown_or_duplicate_model_ids_and_provider_failure():
 
     with pytest.raises(ContextSelectionError, match="selection_failed"):
         await select_context(snapshot(), Failure())
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider_error_does_not_expose_sensitive_code_and_keeps_usage():
+    usage = EmbeddingUsage(
+        request_key="request-1",
+        model="model",
+        latency_ms=10,
+        failed=True,
+        tokens_known=True,
+        input_tokens=2,
+        output_tokens=0,
+    )
+
+    class Failure:
+        async def select(self, request):
+            raise ContextSelectionError("secret-token-in-provider-error", (usage,))
+
+    with pytest.raises(ContextSelectionError) as exc:
+        await select_context(snapshot(), Failure())
+    assert exc.value.code == "selection_failed"
+    assert str(exc.value) == "selection_failed"
+    assert exc.value.usage == (usage,)
+    assert exc.value.__suppress_context__
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code",
+    [
+        "invalid_embedding_input",
+        "embedding_profile_mismatch",
+        "embedding_limit_exceeded",
+        "tokenizer_failure",
+        "embedding_timeout",
+        "invalid_embedding_usage",
+        "embedding_provider_failed",
+        "invalid_embedding_output",
+        "selection_incomplete",
+        "selection_failed",
+        "context_not_ready",
+        "search_failed",
+        "invalid_selection",
+    ],
+)
+async def test_known_provider_error_codes_remain_distinguishable(code):
+    class Failure:
+        async def select(self, request):
+            raise ContextSelectionError(code)
+
+    with pytest.raises(ContextSelectionError) as exc:
+        await select_context(snapshot(), Failure())
+    assert exc.value.code == code
+    assert str(exc.value) == code
 
 
 def test_invalid_scope_or_task_ref_rejected_before_model_call():

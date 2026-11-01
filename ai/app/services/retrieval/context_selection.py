@@ -16,6 +16,25 @@ Id = Annotated[str, Field(min_length=1, max_length=256, pattern=r"^\S+$")]
 ShortText = Annotated[str, Field(min_length=1, max_length=2000)]
 CandidateText = Annotated[str, Field(min_length=1, max_length=100_000)]
 
+# Only stable, non-sensitive codes may cross the selector boundary.
+_SAFE_SELECTION_ERROR_CODES = frozenset(
+    {
+        "invalid_embedding_input",
+        "embedding_profile_mismatch",
+        "embedding_limit_exceeded",
+        "tokenizer_failure",
+        "embedding_timeout",
+        "invalid_embedding_usage",
+        "embedding_provider_failed",
+        "invalid_embedding_output",
+        "selection_incomplete",
+        "selection_failed",
+        "context_not_ready",
+        "search_failed",
+        "invalid_selection",
+    }
+)
+
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -162,8 +181,13 @@ async def select_context(
             proposal = await selector.select(request)
             if not isinstance(proposal, SelectionProposal):
                 raise TypeError("invalid result")
-        except ContextSelectionError:
-            raise
+        except ContextSelectionError as exc:
+            code = (
+                exc.code
+                if isinstance(exc.code, str) and exc.code in _SAFE_SELECTION_ERROR_CODES
+                else "selection_failed"
+            )
+            raise ContextSelectionError(code, exc.usage) from None
         except Exception:  # noqa: BLE001
             # Provider exceptions can contain prompts, URLs, or secrets.
             raise ContextSelectionError("selection_failed") from None
