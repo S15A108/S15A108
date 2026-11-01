@@ -21,11 +21,8 @@ class Source(ContractModel):
     document_id: TextId
     document_version_id: TextId
     version_no: int = Field(ge=1)
-    # Existing BE responses may omit the location or serialize it as an empty
-    # string. Such sources remain incomplete and are never sent as evidence.
-    location: (
-        Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None
-    ) = None
+    # Preserve BE's saved location verbatim, including an unverified location.
+    location: Annotated[str, StringConstraints(max_length=10000)] | None = None
 
 
 class DesignItemVersion(ContractModel):
@@ -46,13 +43,59 @@ class DesignItemVersion(ContractModel):
             encoded = json.dumps(self.content, ensure_ascii=False, allow_nan=False)
         except (TypeError, ValueError, RecursionError) as exc:
             raise ValueError("invalid design content") from exc
-        if len(encoded.encode("utf-8")) > 16_000:
-            raise ValueError("design content exceeds the limit")
+        if len(encoded.encode("utf-8")) > 1_048_576:
+            raise ValueError("design content exceeds transport limit")
         return self
+
+
+class SearchEvidence(ContractModel):
+    source: Source
+    verification: Literal["VERIFIED", "UNVERIFIED"] = "UNVERIFIED"
+    # Sharing a document version is a candidate link, not direct proof.
+    association: Literal["SAME_DOCUMENT_VERSION", "EXPLICIT_LINK"]
 
 
 class RecommendationCandidate(ContractModel):
     design_item_version: DesignItemVersion
+    design_source_verification: Literal["VERIFIED", "UNVERIFIED"] = "UNVERIFIED"
+    search_evidence: list[SearchEvidence] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def valid_verification(self) -> Self:
+        source = self.design_item_version.source
+        if self.design_source_verification == "VERIFIED" and (
+            source is None or not source.location or not source.location.strip()
+        ):
+            raise ValueError("verified design source requires a location")
+        for evidence in self.search_evidence:
+            if evidence.verification == "VERIFIED" and (
+                not evidence.source.location or not evidence.source.location.strip()
+            ):
+                raise ValueError("verified search evidence requires a location")
+            if evidence.association == "SAME_DOCUMENT_VERSION" and (
+                source is None
+                or source.document_version_id != evidence.source.document_version_id
+                or source.document_id != evidence.source.document_id
+                or source.version_no != evidence.source.version_no
+            ):
+                raise ValueError(
+                    "same document version association must match saved source"
+                )
+        return self
+
+
+class OmittedCandidate(ContractModel):
+    design_item_version_id: TextId
+    reason: Literal["CONTENT_TOO_LARGE", "CANDIDATE_LIMIT", "OTHER"]
+
+
+class OmissionInfo(ContractModel):
+    identified_candidates: list[OmittedCandidate] = Field(
+        default_factory=list, max_length=100
+    )
+    unexamined_scope: bool = False
+    # None means unknown; do not infer a count from a truncated page.
+    unexamined_count: int | None = Field(default=None, ge=1)
 
 
 class RecommendationRequest(ContractModel):
@@ -64,8 +107,15 @@ class RecommendationRequest(ContractModel):
     search_status: Literal["READY", "NOT_READY", "FAILED"]
     search_truncated: bool
     mapping_complete: bool
+    search_observation: Literal["UNKNOWN", "NO_DOCUMENTS", "DOCUMENTS_FOUND"] = (
+        "UNKNOWN"
+    )
+    unlinked_documents: bool = False
+    omissions: OmissionInfo = Field(default_factory=OmissionInfo)
     execution_budget_ms: int = Field(ge=1, le=60_000)
-    candidates: list[RecommendationCandidate] = Field(max_length=20)
+    # A separate hard transport bound protects the service; 20 candidates may
+    # be analyzed and the remaining known IDs are reported as omitted.
+    candidates: list[RecommendationCandidate] = Field(max_length=100)
 
     @model_validator(mode="after")
     def distinct_versions(self) -> Self:
@@ -75,6 +125,24 @@ class RecommendationRequest(ContractModel):
             raise ValueError("duplicate candidate")
         if self.search_status != "READY" and self.candidates:
             raise ValueError("failed or unavailable search cannot provide candidates")
+        omitted_ids = [
+            item.design_item_version_id for item in self.omissions.identified_candidates
+        ]
+        if len(set(omitted_ids)) != len(omitted_ids) or set(omitted_ids) & set(
+            versions
+        ):
+            raise ValueError("duplicate or conflicting omitted candidate")
+        if self.search_observation == "NO_DOCUMENTS" and self.unlinked_documents:
+            raise ValueError("no search documents cannot include unlinked documents")
+        if self.search_observation == "NO_DOCUMENTS" and any(
+            item.search_evidence for item in self.candidates
+        ):
+            raise ValueError("no search documents cannot include search evidence")
+        if (
+            self.omissions.unexamined_count is not None
+            and not self.omissions.unexamined_scope
+        ):
+            raise ValueError("unexamined count requires unexamined scope")
         return self
 
 

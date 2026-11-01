@@ -1,19 +1,20 @@
-# S15P31A108-185 설계 근거 추천 내부 계약 초안
+# S15P31A108-185 설계 근거 추천 내부 계약
 
-> **제안 및 부분 구현:** AI 내부 추천 기능의 시작 범위를 기록한다. 공개 API·BE/AI 연동·DB 저장·화면 계약의 합의를 뜻하지 않는다. 실제 변경은 구현과 담당자 검토에 맞춰 갱신한다.
+> **BE–AI 내부 계약 구현 및 연동 제안.** 공개 CTX-A05 변경이나 #131·#223·BE·FE 연동 완료를 뜻하지 않는다. 실제 DB·화면에 연결하기 전에 담당자와 필드 및 책임을 확정한다.
 
-## 기존 계약과 담당 경계
+## 역할과 검색 경계
 
-- 공개 BE API는 기존 [CTX-A05](../api/01-backend-rest.md#ctx-a05)다. 요청은 `request`, 선택 `task_id`이고, 응답은 `candidates[]`다. 각 [DesignSuggestion](../api/00-common.md#schema-designsuggestion)은 `design_item_version`, `reason`, `sources`를 가진다. 이 문서는 공개 계약을 재정의하지 않는다.
-- BE는 회원·프로젝트·승인 기준과 작업의 접근 권한을 확인하고 #129 검색 결과에서 허용된 현재 승인 설계 후보만 AI에 보낸다. 키워드 및 의미 검색, DB 질의, 기준선 최신성 재확인과 결과 공개는 BE·검색 담당 범위다.
-- AI는 BE가 전달한 후보만 선별하고 추천 이유를 제안한다. 프로젝트나 DB를 직접 검색하지 않으며 설계 관계를 확정하거나 자동 저장하지 않는다. 모델이 반환한 식별자는 입력 후보에 속해야 한다. 화면의 확인·추가·제거는 #151 범위다.
-- 후보 추천과 MCP-01 컨텍스트 패킷은 같은 검색을 활용해도 서로 다른 출력이다. #184의 검증 finding·원문 근거와 #159 결과 저장 계약을 대체하지 않는다.
+- BE는 호출자 권한과 현재 baseline을 확인하고, #129의 문서 검색 및 명시적 문서 버전 등 관계로 **승인 설계 후보**를 구성한다. 같은 문서 버전이라는 사실은 후보 연결 기준일 수 있지만, 검색 청크가 해당 설계의 직접 근거라는 의미는 아니다.
+- BE는 검색된 원문이 없는 경우, 원문이 있으나 연결된 설계가 없는 경우, 연결 여부를 확인하지 못한 경우를 구분해 전달한다. `mapping_complete=true`는 **조회된 검색 결과 전체에 대한 연결 확인을 마쳤다**는 의미이며, 검색된 모든 문서가 반드시 설계에 연결됐다는 뜻이나 미조회 범위가 없다는 뜻은 아니다. 연결이 확인된 설계가 없는 문서는 `unlinked_documents=true`, 확인 자체를 끝내지 못한 경우는 `mapping_complete=false`로 표현한다. 검색이 잘렸으면 별도로 `search_truncated=true`다.
+- BE는 AI 응답을 공개하기 전에 권한·baseline과 입력 버전의 최신성을 다시 확인한다. 권한 실패·기준 변경·검색 장애는 부분 성공이나 정상 0건으로 바꾸지 않는다. 현재 AI는 BE의 DB와 원문을 직접 확인하지 않으므로 이 보장은 BE 연동의 책임이다.
+- AI는 전달된 승인 설계 내용에서 추천 후보와 이유를 생성한다. 승인 여부·권한·문서 위치의 실제 일치 여부는 확인하지 않는다. AI가 고른 ID가 BE가 보낸 분석 가능 후보 안에 있는지 검사하며, 추천 결과는 확정된 관계가 아니다.
+- #131과 권한, baseline 스냅샷·최종 재확인, 검색 어댑터 등의 재사용 가능성을 확인한다. 후보 선택·출력 및 부분 결과 정책은 기능별로 정한다. #131의 완전 검색 정책을 #185에 자동으로 적용하지 않는다. #132 컨텍스트 패킷과 추천 결과는 별도 출력이다.
 
-## 내부 API 제안
+## 내부 API
 
-`POST /v1/design-reference-recommendations`는 서비스 내부에서만 사용한다. AI 내부 토큰과 공통 오류·사용량 봉투는 [내부 API 공통 규칙](../api/03-ai-internal.md)을 따른다. 실제 배포 및 호출 계약은 BE 담당자와 합의해야 한다.
+`POST /v1/design-reference-recommendations`는 내부 인증이 필요하다. 추천 모델 호출은 설정 `design_recommendation_enabled=false`가 기본이며, 활성화 및 `llm_usage.feature` 저장은 BE와 별도 연동이 필요하다.
 
-### 입력 예시
+### 요청 예시
 
 ```json
 {
@@ -23,131 +24,117 @@
   "request": "로그인 화면을 구현하고 싶어요.",
   "task_id": "501",
   "search_status": "READY",
-  "search_truncated": false,
+  "search_observation": "DOCUMENTS_FOUND",
+  "search_truncated": true,
   "mapping_complete": true,
+  "unlinked_documents": false,
+  "omissions": {
+    "identified_candidates": [],
+    "unexamined_scope": true,
+    "unexamined_count": null
+  },
   "execution_budget_ms": 15000,
   "candidates": [
     {
       "design_item_version": {
-        "id": "311",
-        "design_item_id": "301",
-        "key": "API-001",
-        "kind": "API_CONTRACT",
-        "version_no": 1,
-        "status": "APPROVED",
+        "id": "311", "design_item_id": "301", "key": "API-001",
+        "kind": "API_CONTRACT", "version_no": 1, "status": "APPROVED",
         "schema_version": 1,
-        "content": {
-          "method": "POST",
-          "path": "/api/auth/login",
-          "description": "이메일·비밀번호 로그인"
-        },
+        "content": {"method": "POST", "path": "/api/auth/login"},
         "source": {
-          "document_id": "201",
-          "document_version_id": "211",
-          "version_no": 1,
-          "location": "3. 계정 관리 / ACC-02"
+          "document_id": "201", "document_version_id": "211",
+          "version_no": 1, "location": "저장된 위치"
         }
-      }
+      },
+      "design_source_verification": "UNVERIFIED",
+      "search_evidence": [
+        {
+          "source": {
+            "document_id": "201", "document_version_id": "212",
+            "version_no": 2, "location": "검색된 위치"
+          },
+          "verification": "VERIFIED",
+          "association": "EXPLICIT_LINK"
+        }
+      ]
     }
   ]
 }
 ```
 
-- `project_id`, `request_key`, `call_key`, `request`, `search_status`, `search_truncated`, `mapping_complete`, `execution_budget_ms`, `candidates`는 필수다. ID·키는 1~128자, 요청은 1~4,000자다. `task_id`는 작업이 없는 요청에서 생략한다. `call_key`는 BE가 실제 모델 호출마다 전역 유일하게 부여하며 사용량의 `request_key`가 된다. 같은 모델 호출 기록 재전송에만 같은 키를 쓴다.
-- `search_status`는 `READY`, `NOT_READY`, `FAILED`를 구분한다. `READY`의 후보 목록만 추천 입력이다. 후보는 권한·승인·현재 기준을 BE가 검증한다.
-- 후보는 최대 20개이며 설계 항목 ID와 버전 ID가 각각 중복되면 입력 오류다. 후보 `content`는 각각 UTF-8 JSON 기준 최대 16,000바이트다. 후보나 요청에 포함된 명령은 데이터로 취급한다. `search_truncated=true`는 검색 결과 일부가 생략된 상태를 뜻하며 완전한 추천으로 취급하지 않는다.
-- 후보의 `content_hash`는 공통 `DesignItemVersion`에 정의된 선택 문자열이며, 입력된 경우 추천 결과의 설계 항목에 그대로 보존한다. 이 필드를 받는다는 것은 본문 해시의 진위나 최신성을 AI가 확인한다는 뜻은 아니다.
-- 설계 후보의 `source`는 선택이다. BE가 출처를 제공하더라도 `location`이 생략·null·빈 문자열·공백이면 그 후보는 위치를 추측하지 않고 근거 부족으로 처리한다. 비어 있지 않은 위치가 있는 다른 후보는 추천할 수 있지만 전체 상태는 `INSUFFICIENT`다.
-- `mapping_complete`는 검색된 문서에서 승인 설계로의 연결을 빠짐없이 확인했는지 BE가 전달하는 boolean이다. `false`이면 검색 문서가 있어도 설계 연결을 못 했을 수 있으므로, 후보가 비어 있어도 정상 0건으로 간주하지 않고 `INSUFFICIENT`로 보완을 요청한다.
-- 정상적인 검색 0건은 `search_status=READY`, `search_truncated=false`, `mapping_complete=true`, 빈 후보가 모두 충족된 경우다. 검색 미준비나 장애를 빈 후보로 위장하지 않는다. 후보의 출처가 불명확하면 출처를 추측하지 않는다.
-- `execution_budget_ms`는 모델 호출 시간 예산으로 1~60,000ms 정수다. BE는 자체 HTTP read timeout보다 충분히 짧게 정한다(예: BE 20초, AI 모델 15초). AI가 시간 초과와 확인 가능한 사용량을 반환할 여유를 위한 설정이나, 네트워크 단절·BE 측 시간 초과까지 usage 수신을 보장하지는 않는다.
+`source`는 **설계 항목에 저장된 출처**다. `search_evidence`는 이번 검색에서 찾은 원문과 BE가 판단한 후보 연결을 별도 보존한다. 위 예에서 저장 출처와 검색 결과는 다른 버전이다. BE는 현재 baseline과의 관계를 확인해야 하며, 과거 출처를 현재 검색 근거로 옮겨 적어서는 안 된다. 예시는 두 출처의 구조적 분리를 설명하며, 예시 자체가 둘 사이의 유효한 연결을 증명하지 않는다.
+
+- `design_source_verification`과 각 `search_evidence.verification`은 BE가 전달하는 `VERIFIED` 또는 `UNVERIFIED`이며 생략 시 `UNVERIFIED`다. `VERIFIED`는 위치 문자열이 비어 있으면 거부한다. 그 외 원문 일치 여부·현재 baseline 소속은 BE가 확인해야 한다. AI가 검증했다는 뜻이 아니다.
+- `association`은 `SAME_DOCUMENT_VERSION` 또는 `EXPLICIT_LINK`다. `SAME_DOCUMENT_VERSION`은 저장 출처의 문서 ID·버전 ID가 검색 출처와 일치할 때만 허용한다. `EXPLICIT_LINK`도 BE가 보고한 연결이며, 둘 다 **검색 청크가 설계의 직접 근거라는 AI 판정이 아니다.** 검색 원문의 실제 위치·다중 span 복원과 검증은 #223 및 BE와 연동해 확인한다.
+- `search_observation`은 `NO_DOCUMENTS`, `DOCUMENTS_FOUND`, `UNKNOWN`이다. 이전 호출자는 생략 가능하지만 이 경우 `UNKNOWN`으로 처리해 검색 0건을 확정하지 않는다. `unlinked_documents=true`는 검색 문서 중 설계에 연결된 항목이 없는 문서가 있음을 뜻한다. 검색 실패와 준비 중은 각각 `search_status=FAILED`, `NOT_READY`다.
+- `omissions.identified_candidates`에는 **알고 있는** 생략 후보의 버전 ID와 `CONTENT_TOO_LARGE`, `CANDIDATE_LIMIT`, `OTHER` 사유를 넣는다. `unexamined_scope=true`는 확인하지 못한 범위가 있다는 뜻이며, 개수를 모르면 `unexamined_count=null`이다. 검색이 잘렸으면 AI도 미조회 범위로 표시한다. 아직 조회하지 못한 후보의 ID나 총개수를 추측하지 않는다.
+- 각 입력 후보는 현재 baseline에 속한 승인 설계여야 한다. `source`가 없거나 위치가 미확인이어도 **설계 항목 내용 자체로 추천할 수 있다.** 위치는 추측하지 않는다.
+- `request`, ID, `execution_budget_ms` 등 나머지 필드와 오류·사용량 봉투는 기존 내부 API 공통 규칙을 따른다. 예산은 1~60,000ms이며 BE HTTP 제한보다 짧게 설정한다.
 
 ### 응답 예시
 
 ```json
 {
   "result": {
-    "status": "RECOMMENDED",
-    "candidates": [
-      {
-        "design_item_version": {
-          "id": "311",
-          "design_item_id": "301",
-          "key": "API-001",
-          "kind": "API_CONTRACT",
-          "version_no": 1,
-          "status": "APPROVED",
-          "schema_version": 1,
-          "content": {
-            "method": "POST",
-            "path": "/api/auth/login",
-            "description": "이메일·비밀번호 로그인"
-          },
-          "source": {
-            "document_id": "201",
-            "document_version_id": "211",
-            "version_no": 1,
-            "location": "3. 계정 관리 / ACC-02"
-          }
-        },
-        "reason": "로그인 화면에 필요한 로그인 API 계약입니다.",
-        "sources": [
-          {
-            "document_id": "201",
-            "document_version_id": "211",
-            "version_no": 1,
-            "location": "3. 계정 관리 / ACC-02"
-          }
-        ]
-      }
-    ],
-    "follow_up": null
+    "status": "INSUFFICIENT",
+    "candidates": [{
+      "design_item_version": {
+        "id": "311", "design_item_id": "301", "key": "API-001",
+        "kind": "API_CONTRACT", "version_no": 1, "status": "APPROVED",
+        "schema_version": 1,
+        "content": {"method": "POST", "path": "/api/auth/login"},
+        "source": {"document_id": "201", "document_version_id": "211",
+                   "version_no": 1, "location": "저장된 위치"}
+      },
+      "reason": "로그인 기능에 필요한 API 계약입니다.",
+      "sources": [],
+      "design_source_status": "UNVERIFIED",
+      "design_source": {
+        "source": {"document_id": "201", "document_version_id": "211",
+                   "version_no": 1, "location": "저장된 위치"},
+        "verification": "UNVERIFIED"
+      },
+      "search_evidence": [{
+        "source": {"document_id": "201", "document_version_id": "212",
+                   "version_no": 2, "location": "검색된 위치"},
+        "verification": "VERIFIED", "association": "EXPLICIT_LINK"
+      }]
+    }],
+    "follow_up": "검색 범위와 분석하지 못한 항목을 확인해 주세요.",
+    "incomplete_reasons": ["SEARCH_TRUNCATED", "UNEXAMINED_SCOPE"],
+    "omissions": {"identified_candidates": [], "unexamined_scope": true,
+                  "unexamined_count": null},
+    "search_observation": "DOCUMENTS_FOUND",
+    "unlinked_documents": false
   },
-  "origin": "MODEL",
-  "model": "configured-model",
-  "usage": [
-    {
-      "request_key": "llm-recommendation-101-1-call-1",
-      "feature": "DESIGN_RECOMMENDATION",
-      "model": "configured-model",
-      "latency_ms": 100,
-      "failed": false,
-      "tokens_known": true,
-      "input_tokens": 100,
-      "output_tokens": 40
-    }
-  ]
+  "origin": "MODEL", "model": "configured-model", "usage": []
 }
 ```
 
-- 모델이 고르는 후보는 입력된 버전 ID 안으로 제한한다. 응답의 설계 항목·출처는 입력에서 복원하며, 모델이 임의로 만든 설계·문서 ID와 출처는 허용하지 않는다. BE도 응답 직전 권한·기준선과 ID 소속을 재확인한다.
-- `RECOMMENDED`는 추천 후보이고 확정 관계가 아니다. 정상 검색 0건(`READY`, `search_truncated=false`, `mapping_complete=true`, 후보 0건)은 `EMPTY`, `origin=TEMPLATE`, `model=null`, `usage=[]`로 모델 호출 없이 반환한다. 검색이 잘렸거나 문서→설계 매핑이 불완전하거나, 출처가 없거나 위치가 빈 후보가 일부 포함되거나, 모델이 후보를 고르지 못하면 `INSUFFICIENT`와 보완 요청을 반환한다. 출처나 위치가 없는 후보는 추천하지 않고, 모든 후보가 이 경우에는 모델을 호출하지 않는다. 위치가 비어 있지 않은 출처가 있는 다른 후보의 추천 결과는 `INSUFFICIENT`에 일부 포함될 수 있다.
-- ID와 출처를 입력에서 복원하는 것은 참조 위조를 막기 위한 구조 검증이다. AI는 위치 문자열이 비어 있는지만 확인하며, 실제 원문을 조회하거나 위치가 원문에 맞는지 검증하지 않는다. 이유 문장이 실제 설계 내용과 의미적으로 일치하는지도 보장하지 않으므로, 담당자 계약·평가 사례와 사용자 확인이 필요하다.
-- 내부 `status`·`follow_up`의 공개 CTX-A05 응답 반영 및 보완 요청 표시 방식은 기존 공개 명세에 없으므로 BE·FE와 별도 협의한다.
-- 검색 미준비는 503 `search_not_ready`, 검색 실패는 502 `search_failed`, 입력 오류는 400 `validation_failed`다. 모델 시간 초과는 504 `model_timeout`, 잘못된 모델 출력과 호출 오류는 502로 반환하며 확인 가능한 실패 usage를 보존한다. 성공 0건이나 추천 성공으로 변환하지 않는다. 공개 CTX-A05 오류 매핑은 BE와 별도 합의한다.
+응답의 `sources`는 기존 후보 형태를 유지하기 위한 필드이며 **BE가 `VERIFIED`로 전달한 설계 저장 출처만** 담는다. 미확인 출처는 `design_source`에 원래 값과 상태를 보존하되 확인된 인용 목록에 넣지 않는다. `design_source_status`는 `VERIFIED`, `UNVERIFIED`, `ABSENT` 중 하나이며 문서 출처가 없으면 `ABSENT`, `design_source=null`, `sources=[]`다. 검색 근거는 `search_evidence`에만 있으며 자동으로 설계의 직접 인용에 넣지 않는다. 실제 usage는 공통 LLM 클라이언트가 전달한다. 예시의 `usage=[]`는 형태만 보여주며 모델 호출 시 사용량이 없다고 보장하지 않는다.
 
-## 사용량 기록 경계
+## 결과·누락 처리
 
-실제 모델 호출에는 공통 LLM 클라이언트로 요청별 유일 호출 키·모델·토큰·성공/실패를 기록하고, 실패 이후에도 가능한 usage를 BE에 전달한다. 빈 후보·입력 거부처럼 모델을 호출하지 않은 경우 가짜 usage를 만들지 않는다.
+| 조건 | 내부 결과 |
+| --- | --- |
+| 검색 완료·원문 0건·후보 0건·누락 없음 | 모델 호출 없이 `EMPTY` |
+| 검색 원문은 있으나 연결 설계가 없거나, 매핑을 확인하지 못함 | `INSUFFICIENT`. `unlinked_documents` 또는 `MAPPING_INCOMPLETE`로 구분 |
+| 검색 잘림·미조회·식별된 생략 후보 | 분석 가능한 후보를 반환하되 `INSUFFICIENT`와 사유·누락 정보 포함 |
+| 문서 출처 없는 현재 baseline 승인 설계 | 설계 내용으로 추천 가능. 문서 출처 없음 표시 |
+| 모델이 추천할 후보를 찾지 못함 | `INSUFFICIENT`와 `NO_RECOMMENDATIONS`. 검색 원문 0건으로 바꾸지 않음 |
+| 검색 준비 중·검색 오류 | 각각 503 `search_not_ready`·502 `search_failed`; 정상 0건 아님 |
+| 권한 실패·baseline 변경 | BE가 오류 또는 재검토로 처리. AI 응답만으로 성공을 확정하지 않음 |
 
-LLM 추천 호출은 `design_recommendation_enabled` 설정으로 보호되며 기본값은 `false`다. 후보가 없거나 비어 있지 않은 출처 위치를 가진 후보가 하나도 없으면 모델 없이 결과를 반환한다. 명시적 활성화 전에는 LLM이 필요한 입력에 503 `recommendation_not_enabled`를 반환한다.
+한 요청에서 AI는 설계 본문이 UTF-8 JSON 기준 16,000바이트 이하인 후보를 **최대 20개** 분석한다. 이를 넘는 알려진 후보는 원문을 자르지 않고 각각 `CONTENT_TOO_LARGE` 또는 `CANDIDATE_LIMIT`으로 기록한다. 입력 자체는 최대 100개 후보, 후보 본문당 1MiB, 후보당 검색 근거 20개와 위치 최대 10,000자를 넘으면 계약 오류다. 이는 AI의 별도 안전 한도이며 BE가 허용하는 모든 입력과 일치한다는 보장은 없다. BE는 전송 전 초과 여부를 확인해 누락된 ID·사유나 개수 미상의 범위를 전달해야 한다. **전송 자체를 거절한 요청은 부분 결과가 아니다.** 최종 한도와 전송 초과 오류는 BE·FE와 확정한다.
 
-`DESIGN_RECOMMENDATION`은 **신규 제안 feature**다. 현재 `V2__init_schema.sql`의 `llm_usage.feature` CHECK 목록에는 없으므로 지금 BE DB에 그대로 저장할 수 있다고 가정하지 않는다. #168·BE 담당자와 feature 값 및 마이그레이션을 합의하고 실제 저장·중복 방지를 통합 테스트해야 한다.
+현재 구현의 `incomplete_reasons`는 `SEARCH_TRUNCATED`, `MAPPING_INCOMPLETE`, `UNLINKED_DOCUMENTS`, `SEARCH_OBSERVATION_UNKNOWN`, `CANDIDATES_OMITTED`, `UNEXAMINED_SCOPE`, `NO_RECOMMENDATIONS`를 사용한다. 사유는 실제 전달·처리된 사실만 기록하며 미조회 항목의 ID를 만들지 않는다.
 
-## 담당자와 합의가 필요한 항목
+## 남은 합의·연결
 
-- **출처 없는 승인 설계:** 공통 계약은 사람이 수동 등록한 출처 없는 설계를 허용한다. 현재 초안은 문서 위치가 없으면 해당 후보를 추천하지 않고 보완을 요청한다. 승인 설계 항목 자체를 충분한 근거로 취급할지, 부족한 위치를 어떻게 화면에 보여줄지는 담당자와 정한다.
-- **#131과 후보 선별:** #131의 자연어 개발 요청용 승인 설계 조회·후보 선별과 #185의 작업 시작용 추천은 목적과 출력이 다르지만 공통 검색이나 선택 로직을 재사용할 수 있다. 작업 준비 맥락에서의 사용 범위와 역할은 박상은 님과 확인한다. #131을 특정 인터페이스 전용이라고 가정하지 않는다.
-- **입력 크기 차이:** 기존 BE 등록 API는 더 긴 위치 문자열과 최대 1 MiB의 `content`를 허용하지만, 이 내부 제안은 후보 `content`를 16,000바이트로 제한한다. 현재 AI 위치 문자열 길이 제한과 BE 등록 제한도 다르므로 허용된 설계가 내부 입력 오류가 될 수 있다. 출처나 본문을 조용히 잘라 근거로 삼지 않고, BE에서 선별·요약할 수 있는 범위, 초과 시 보완·오류 처리와 토큰·보안 한도를 담당자와 정한다.
-- **공개 응답과 비용:** CTX-A05에서 `INSUFFICIENT`·보완 요청을 표현하는 방법은 BE·FE와 합의한다. 추천 feature의 DB 저장 및 제약 변경 책임과 실제 GMS 모델·예산·호출 실패/사용량 연동은 담당자와 확인하고 실제 연동 테스트 후 활성화한다.
+1. **BE·검색:** 실제 baseline에서 문서와 설계를 연결하는 조회 기준, 검색된 문서의 무연결·미확인 표시, 권한과 최종 최신성 재확인. 현재 AI 구현만으로는 검증할 수 없다.
+2. **#223·BE:** 다중 span·긴 행 원문 위치의 저장·복원 및 `VERIFIED`를 부여하는 검증 주체와 기준. 검색 근거는 직접 인용으로 자동 승격하지 않는다.
+3. **BE·FE:** 기존 공개 CTX-A05와 #151 화면에서 부분 결과·알려진 생략 후보·미조회 범위·문서 출처 없음을 어떻게 표시할지. 공개 API 변경은 이 PR에 포함되지 않는다.
+4. **BE·운영:** 추천 사용량 feature의 DB 제약·저장 책임과 실제 모델 활성화·호출 예산. DB 사용량 저장은 이 PR에 포함되지 않는다.
+5. **검증:** 실제 #131/#223 검색·원문, BE 권한/기준 변경, AI 호출, DB 저장과 화면까지 연결한 테스트 및 독립적인 추천 품질 평가.
 
-## 테스트할 사례
-
-1. 권한과 승인을 확인한 로그인 설계 후보 → 입력 ID·출처에 근거한 추천 이유 반환.
-2. READY + 후보 0건 + 잘림 없음 + 매핑 완료 → AI 호출 없이 EMPTY. 검색 미준비 및 실패는 각각 별도 오류.
-3. 검색된 문서의 설계 매핑이 불완전하거나 검색이 잘렸거나 출처 또는 위치가 부족함 → 후보가 0건이어도 EMPTY로 취급하지 않고 INSUFFICIENT 및 보완 요청. 위치가 비어 있지 않은 후보가 섞이면 해당 후보만 추천할 수 있고 전체는 INSUFFICIENT.
-   백엔드의 선택 `content_hash` 및 source.location의 생략·null·빈 문자열·공백을 포함한 실제 DTO 형식도 확인한다.
-4. 모델이 입력에 없는 후보 ID·출처를 반환하거나 구조가 잘못됨 → 결과 거부 및 실패 사용량 보존.
-5. BE 시간 제한보다 짧은 execution_budget_ms의 모델 타임아웃과 호출 실패 → 빈 성공 응답 금지, 모델 호출 사실을 아는 범위에서 usage 보존. 네트워크 단절·BE 자체 시간 초과에서 usage 수신을 보장하지 않음.
-6. 다른 프로젝트·비승인 항목·오래된 기준선 → BE 허용 집합 및 최종 최신성 확인으로 차단. AI 단독 테스트가 BE 권한 검증을 증명하지는 않는다.
-7. #151 화면 반영과 #159 검증 근거 응답의 연결은 각 서비스 완성 후 별도 통합 테스트한다.
+현재 모의 공급자 테스트는 위 내부 구조·상태와 거부 조건을 확인하지만, BE의 권한 검증이나 실제 출처·검색 정확성을 증명하지 않는다.

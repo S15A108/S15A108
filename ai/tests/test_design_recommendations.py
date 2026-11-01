@@ -1,5 +1,7 @@
 import json
+import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +30,8 @@ def candidate():
                 "version_no": 1,
                 "location": "3~5행",
             },
-        }
+        },
+        "design_source_verification": "VERIFIED",
     }
 
 
@@ -42,6 +45,7 @@ def request_body(**changes):
         "search_status": "READY",
         "search_truncated": False,
         "mapping_complete": True,
+        "search_observation": "DOCUMENTS_FOUND",
         "execution_budget_ms": 15000,
         "candidates": [candidate()],
     }
@@ -115,7 +119,7 @@ def test_model_selects_only_supplied_design_and_server_preserves_its_source(api)
 
 def test_empty_search_and_truncated_empty_are_distinct_without_model(api):
     client, state = api
-    empty = post(client, request_body(candidates=[]))
+    empty = post(client, request_body(candidates=[], search_observation="NO_DOCUMENTS"))
     incomplete = post(client, request_body(candidates=[], search_truncated=True))
     assert empty.json()["result"]["status"] == "EMPTY"
     assert incomplete.json()["result"]["status"] == "INSUFFICIENT"
@@ -144,16 +148,20 @@ def test_search_errors_are_not_empty_success(api, status, http_status, error):
     assert not state["calls"]
 
 
-def test_missing_source_and_truncation_never_claim_complete(api):
+def test_no_document_source_is_recommended_and_truncation_never_claims_complete(api):
     client, state = api
     item = candidate()
     item["design_item_version"].pop("source")
+    item["design_source_verification"] = "UNVERIFIED"
     missing = post(client, request_body(candidates=[item]))
-    assert missing.json()["result"]["status"] == "INSUFFICIENT"
-    assert not state["calls"]
+    assert missing.json()["result"]["status"] == "RECOMMENDED"
+    assert missing.json()["result"]["candidates"][0]["sources"] == []
+    assert missing.json()["result"]["candidates"][0]["design_source"] is None
+    assert missing.json()["result"]["candidates"][0]["design_source_status"] == "ABSENT"
     truncated = post(client, request_body(search_truncated=True))
     assert truncated.json()["result"]["status"] == "INSUFFICIENT"
-    assert len(state["calls"]) == 1
+    assert truncated.json()["result"]["omissions"]["unexamined_count"] is None
+    assert len(state["calls"]) == 2
 
 
 @pytest.mark.parametrize(
@@ -215,7 +223,7 @@ def test_rollout_guard_blocks_model_until_explicitly_enabled(api, monkeypatch):
 
 
 @pytest.mark.parametrize("location", ["", "   ", None, "__MISSING__"])
-def test_missing_source_location_is_insufficient_without_model(api, location):
+def test_missing_source_location_is_retained_as_unverified(api, location):
     client, state = api
     item = candidate()
     source = item["design_item_version"]["source"]
@@ -223,17 +231,19 @@ def test_missing_source_location_is_insufficient_without_model(api, location):
         source.pop("location")
     else:
         source["location"] = location
+    item["design_source_verification"] = "UNVERIFIED"
 
     response = post(client, request_body(candidates=[item]))
 
     assert response.status_code == 200
-    assert response.json()["result"]["status"] == "INSUFFICIENT"
-    assert response.json()["result"]["follow_up"]
-    assert response.json()["result"]["candidates"] == []
-    assert not state["calls"]
+    assert response.json()["result"]["status"] == "RECOMMENDED"
+    returned = response.json()["result"]["candidates"][0]
+    assert returned["sources"] == []
+    assert returned["design_source"]["verification"] == "UNVERIFIED"
+    assert len(state["calls"]) == 1
 
 
-def test_be_design_hash_is_preserved_and_incomplete_source_is_not_recommended(api):
+def test_be_design_hash_is_preserved_with_unverified_source(api):
     client, state = api
     usable = candidate()
     usable["design_item_version"]["content_hash"] = "sha256:" + "a" * 64
@@ -241,14 +251,14 @@ def test_be_design_hash_is_preserved_and_incomplete_source_is_not_recommended(ap
     incomplete["design_item_version"]["id"] = "312"
     incomplete["design_item_version"]["design_item_id"] = "302"
     incomplete["design_item_version"]["source"]["location"] = ""
+    incomplete["design_source_verification"] = "UNVERIFIED"
     incomplete["design_item_version"]["content_hash"] = "sha256:" + "b" * 64
 
     response = post(client, request_body(candidates=[usable, incomplete]))
 
     assert response.status_code == 200
     result = response.json()["result"]
-    assert result["status"] == "INSUFFICIENT"
-    assert result["follow_up"]
+    assert result["status"] == "RECOMMENDED"
     assert len(result["candidates"]) == 1
     assert (
         result["candidates"][0]["design_item_version"] == usable["design_item_version"]
@@ -257,15 +267,16 @@ def test_be_design_hash_is_preserved_and_incomplete_source_is_not_recommended(ap
         usable["design_item_version"]["source"]
     ]
     model_payload = json.loads(state["calls"][0].messages[1].content)
-    assert [item["id"] for item in model_payload["candidates"]] == ["311"]
+    assert [item["id"] for item in model_payload["candidates"]] == ["311", "312"]
+    assert all("source" not in item for item in model_payload["candidates"])
 
 
-def test_model_cannot_select_a_candidate_without_a_usable_location(api):
+def test_model_cannot_select_an_oversized_omitted_candidate(api):
     client, state = api
     incomplete = candidate()
     incomplete["design_item_version"]["id"] = "312"
     incomplete["design_item_version"]["design_item_id"] = "302"
-    incomplete["design_item_version"]["source"]["location"] = ""
+    incomplete["design_item_version"]["content"] = {"description": "x" * 17000}
     state["response"] = {
         "recommendations": [{"design_item_version_id": "312", "reason": "확인"}]
     }
@@ -286,3 +297,146 @@ def test_unsupported_candidate_fields_still_fail_before_model(api):
 
     assert response.status_code == 400
     assert not state["calls"]
+
+
+def test_saved_source_and_search_evidence_stay_separate_and_unverified(api):
+    client, state = api
+    item = candidate()
+    item["design_source_verification"] = "UNVERIFIED"
+    item["design_item_version"]["source"]["location"] = "  저장 위치  "
+    item["search_evidence"] = [
+        {
+            "source": {
+                "document_id": "201",
+                "document_version_id": "212",
+                "version_no": 2,
+                "location": "검색된 5행",
+            },
+            "verification": "VERIFIED",
+            "association": "EXPLICIT_LINK",
+        }
+    ]
+    response = post(client, request_body(candidates=[item]))
+    assert response.status_code == 200
+    result = response.json()["result"]["candidates"][0]
+    assert result["design_source"]["source"]["location"] == "  저장 위치  "
+    assert result["design_source"]["verification"] == "UNVERIFIED"
+    assert result["sources"] == []
+    assert result["search_evidence"] == item["search_evidence"]
+    assert (
+        "source"
+        not in json.loads(state["calls"][0].messages[1].content)["candidates"][0]
+    )
+
+
+def test_unlinked_document_and_unexamined_scope_are_not_normal_empty(api):
+    client, _ = api
+    unlinked = post(client, request_body(candidates=[], unlinked_documents=True))
+    assert unlinked.json()["result"]["status"] == "INSUFFICIENT"
+    assert "UNLINKED_DOCUMENTS" in unlinked.json()["result"]["incomplete_reasons"]
+    unknown = post(client, request_body(candidates=[], search_observation="UNKNOWN"))
+    assert unknown.json()["result"]["status"] == "INSUFFICIENT"
+    partial = post(client, request_body(search_truncated=True))
+    omission = partial.json()["result"]["omissions"]
+    assert partial.json()["result"]["status"] == "INSUFFICIENT"
+    assert omission["unexamined_scope"] is True
+    assert omission["unexamined_count"] is None
+    assert omission["identified_candidates"] == []
+
+
+def test_oversized_candidate_is_omitted_without_cutting_and_other_candidate_is_returned(
+    api,
+):
+    client, state = api
+    oversized = candidate()
+    oversized["design_item_version"]["id"] = "312"
+    oversized["design_item_version"]["design_item_id"] = "302"
+    oversized["design_item_version"]["content"] = {"description": "x" * 17000}
+    response = post(client, request_body(candidates=[candidate(), oversized]))
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["status"] == "INSUFFICIENT"
+    assert result["omissions"]["identified_candidates"] == [
+        {"design_item_version_id": "312", "reason": "CONTENT_TOO_LARGE"}
+    ]
+    assert [c["design_item_version"]["id"] for c in result["candidates"]] == ["311"]
+    assert [
+        c["id"] for c in json.loads(state["calls"][0].messages[1].content)["candidates"]
+    ] == ["311"]
+
+
+def test_candidate_limit_reports_known_omissions(api):
+    client, state = api
+    items = []
+    for index in range(21):
+        item = candidate()
+        item["design_item_version"]["id"] = str(311 + index)
+        item["design_item_version"]["design_item_id"] = str(301 + index)
+        items.append(item)
+    response = post(client, request_body(candidates=items))
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["status"] == "INSUFFICIENT"
+    assert result["omissions"]["identified_candidates"] == [
+        {"design_item_version_id": "331", "reason": "CANDIDATE_LIMIT"}
+    ]
+    assert len(json.loads(state["calls"][0].messages[1].content)["candidates"]) == 20
+
+
+def test_be_omissions_are_preserved_and_false_verified_location_rejected(api):
+    client, state = api
+    omitted = {
+        "identified_candidates": [{"design_item_version_id": "777", "reason": "OTHER"}],
+        "unexamined_scope": True,
+        "unexamined_count": None,
+    }
+    response = post(client, request_body(omissions=omitted))
+    assert response.json()["result"]["omissions"] == omitted
+    assert response.json()["result"]["status"] == "INSUFFICIENT"
+    invalid = candidate()
+    invalid["design_item_version"]["source"]["location"] = "  "
+    assert post(client, request_body(candidates=[invalid])).status_code == 400
+    assert len(state["calls"]) == 1
+
+
+def test_same_document_version_association_must_match_saved_source(api):
+    client, state = api
+    item = candidate()
+    item["search_evidence"] = [
+        {
+            "source": {
+                "document_id": "201",
+                "document_version_id": "212",
+                "version_no": 2,
+                "location": "5행",
+            },
+            "verification": "UNVERIFIED",
+            "association": "SAME_DOCUMENT_VERSION",
+        }
+    ]
+    assert post(client, request_body(candidates=[item])).status_code == 400
+    assert not state["calls"]
+
+
+def test_search_without_document_may_still_recommend_explicit_candidates(api):
+    client, state = api
+    response = post(client, request_body(search_observation="NO_DOCUMENTS"))
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "RECOMMENDED"
+    assert len(state["calls"]) == 1
+
+
+def test_documented_request_and_response_match_implemented_contract(api):
+    client, state = api
+    doc = (
+        Path(__file__).parents[2] / "docs/design/design-reference-recommendation-185.md"
+    ).read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\s*\n(.*?)\n```", doc, re.DOTALL)
+    assert len(blocks) == 2
+    request, expected = (json.loads(block) for block in blocks)
+    state["response"]["recommendations"][0]["reason"] = expected["result"][
+        "candidates"
+    ][0]["reason"]
+    response = post(client, request)
+    assert response.status_code == 200
+    assert response.json()["result"] == expected["result"]
