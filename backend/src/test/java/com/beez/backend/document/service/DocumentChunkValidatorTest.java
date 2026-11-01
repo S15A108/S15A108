@@ -16,6 +16,10 @@ class DocumentChunkValidatorTest {
     private Map<String, Object> fixture() {
         return JSON.readValue(getClass().getResourceAsStream("/document-chunks-223.json"), Map.class);
     }
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> plainFixture() {
+        return JSON.readValue(getClass().getResourceAsStream("/document-chunks-plain-223.json"), Map.class);
+    }
     @SuppressWarnings("unchecked") private static Map<String, Object> map(Object value) { return (Map<String, Object>) value; }
     @SuppressWarnings("unchecked") private static List<Object> list(Object value) { return (List<Object>) value; }
     private static Map<String, Object> result(Map<String, Object> fixture) { return map(map(fixture.get("response")).get("result")); }
@@ -91,14 +95,30 @@ class DocumentChunkValidatorTest {
     }
 
     @Test void parserProfileMustMatchTheRequestedMediaType() {
-        var plain = fixture();
-        map(plain.get("input")).put("media_type", "text/plain");
+        var plain = plainFixture();
+        assertThat(validate(plain)).hasSize(1);
+        map(result(plain).get("manifest")).put("parser_profile", "markdown-v1");
         assertThatThrownBy(() -> validate(plain)).isInstanceOf(ApiException.class);
-        map(result(plain).get("manifest")).put("parser_profile", "plain-v1");
-        assertThat(validate(plain)).hasSize(4);
         var markdown = fixture();
         map(result(markdown).get("manifest")).put("parser_profile", "plain-v1");
         assertThatThrownBy(() -> validate(markdown)).isInstanceOf(ApiException.class);
+    }
+
+    @Test void plainTextRejectsMarkdownExcludedRanges() {
+        for (var exclusion : Map.of("thematic_break", "---", "container_marker", ">  ").entrySet()) {
+            var plain = fixture();
+            var input = map(plain.get("input"));
+            input.put("content", ((String) input.get("content")).replace("---", exclusion.getValue()));
+            var ranges = list(result(plain).get("excluded_ranges"));
+            var marker = ranges.stream().map(DocumentChunkValidatorTest::map)
+                    .filter(range -> "thematic_break".equals(range.get("reason"))).findFirst().orElseThrow();
+            marker.put("reason", exclusion.getKey());
+            assertThat(validate(plain)).hasSize(4);
+            input.put("media_type", "text/plain");
+            map(result(plain).get("manifest")).put("parser_profile", "plain-v1");
+            assertThatThrownBy(() -> validate(plain)).isInstanceOf(ApiException.class)
+                    .hasMessage("invalid_excluded_range");
+        }
     }
 
     @Test void embeddingRequestMapsEmbeddingTextField() {
