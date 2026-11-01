@@ -121,7 +121,7 @@
 | 검색 원문은 있으나 연결 설계가 없거나, 매핑을 확인하지 못함 | `INSUFFICIENT`. `unlinked_documents` 또는 `MAPPING_INCOMPLETE`로 구분 |
 | 검색 잘림·미조회·식별된 생략 후보 | 분석 가능한 후보를 반환하되 `INSUFFICIENT`와 사유·누락 정보 포함 |
 | 문서 출처 없는 현재 baseline 승인 설계 | 설계 내용으로 추천 가능. 문서 출처 없음 표시 |
-| 모델이 추천할 후보를 찾지 못함 | `INSUFFICIENT`와 `NO_RECOMMENDATIONS`. 검색 원문 0건으로 바꾸지 않음 |
+| 모델이 추천할 후보를 찾지 못함 | `INSUFFICIENT`. 다른 불완전 사유가 없으면 `NO_RECOMMENDATIONS`를 표시하며 검색 원문 0건으로 바꾸지 않음 |
 | 검색 준비 중·검색 오류 | 각각 503 `search_not_ready`·502 `search_failed`; 정상 0건 아님 |
 | 권한 실패·baseline 변경 | BE가 오류 또는 재검토로 처리. AI 응답만으로 성공을 확정하지 않음 |
 

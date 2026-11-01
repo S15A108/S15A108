@@ -426,6 +426,15 @@ def test_search_without_document_may_still_recommend_explicit_candidates(api):
     assert len(state["calls"]) == 1
 
 
+def test_model_rejecting_supplied_candidates_is_not_empty_search(api):
+    client, state = api
+    state["response"] = {"recommendations": []}
+    response = post(client, request_body(search_observation="NO_DOCUMENTS"))
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "INSUFFICIENT"
+    assert "NO_RECOMMENDATIONS" in response.json()["result"]["incomplete_reasons"]
+
+
 def test_documented_request_and_response_match_implemented_contract(api):
     client, state = api
     doc = (
