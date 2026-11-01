@@ -37,8 +37,11 @@ export function PaneSheetHost({
   return (
     <PaneSheetContext value={{ host, track }}>
       <div className={className}>
-        <div hidden={open > 0}>{children}</div>
-        <div ref={setHost} />
+        {/* 부모가 세로 flex면 본문과 하위 화면이 남은 높이를 채운다. */}
+        <div hidden={open > 0} className="flex-1">
+          {children}
+        </div>
+        <div ref={setHost} className="flex-1 empty:hidden" />
       </div>
     </PaneSheetContext>
   )
@@ -137,7 +140,8 @@ export function PaneSheet({
           </p>
         )}
       </div>
-      <div className="grid flex-1 content-start gap-4">
+      {/* 폼은 남은 높이를 채워 아래 버튼 줄(SheetSubmit)을 맨 아래에 둔다. 격자 폼은 줄이 늘어나지 않게 위로 붙인다. */}
+      <div className="flex flex-1 flex-col gap-4 [&>form]:flex-1 [&>form.grid]:content-start">
         <PaneSheetBody value={{ onClose }}>{children}</PaneSheetBody>
       </div>
     </section>,
@@ -174,7 +178,7 @@ export function SheetSubmit({
   )
   if (!sheet) return submit
   return (
-    <div className="sticky -bottom-5 z-10 col-span-full -mx-6 -mb-5 flex items-center justify-end gap-2 rounded-b-2xl border-t bg-card px-6 pt-3.5 pb-5">
+    <div className="sticky -bottom-5 z-10 col-span-full -mx-6 mt-auto -mb-5 flex items-center justify-end gap-2 rounded-b-2xl border-t bg-card px-6 pt-3.5 pb-5">
       <Button
         type="button"
         variant="outline"

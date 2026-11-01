@@ -27,7 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePane } from '@/stores/workspaceStore'
 
@@ -61,8 +60,6 @@ function Workspace({ projectId }: { projectId: string }) {
   const session = useSession()
   const [params, setParams] = useSearchParams()
   const pane = useWorkspaceStore((state) => state.pane)
-  const tinted =
-    pane === 'tasks' || pane === 'relations' || pane === 'dashboard'
   const openPane = useWorkspaceStore((state) => state.openPane)
   const viewMode = useWorkspaceStore((state) => state.viewMode)
   const setViewMode = useWorkspaceStore((state) => state.setViewMode)
@@ -225,19 +222,11 @@ function Workspace({ projectId }: { projectId: string }) {
                 if (!open && !pendingMutations) openPane(null)
               }}
             >
+              {/* 보드처럼 위에서 40px에 두고, 아래 단축 바 자리(120px)를 비운다.
+                  비비 대화를 포함한 모든 업무 창은 내용이 적거나 비어 있어도 같은 폭·높이·바탕색으로 열고,
+                  넘치는 내용만 안에서 스크롤한다. */}
               <DialogContent
-                className={cn(
-                  // 보드처럼 위에서 40px에 두고, 아래 단축 바 자리(120px)를 비운다.
-                  'top-10 max-h-[calc(100dvh-160px)] translate-y-0 overflow-y-auto bg-background p-5 sm:p-8',
-                  // 작업 현황·설계 관계·대시보드: 창 바탕은 연회색, 머리는 흰 띠, 칸은 흰 카드(PNL-05·09 수정안 10-29)
-                  tinted && 'bg-[#f7f8fa]',
-                  pane === 'chat'
-                    ? 'sm:max-w-[min(1080px,94vw)]'
-                    : pane === 'documents'
-                      ? // 공용 문서함: 폭은 다른 업무 창과 같고, 높이는 화면에 맞춘 고정 높이에 본문만 안에서 스크롤
-                        'h-[calc(100dvh-160px)] content-start sm:max-w-[min(1180px,94vw)]'
-                      : 'sm:max-w-[min(1180px,94vw)]',
-                )}
+                className="top-10 h-[calc(100dvh-160px)] translate-y-0 grid-rows-[auto_1fr] overflow-y-auto bg-background p-5 sm:max-w-[min(1180px,94vw)] sm:p-8"
                 onEscapeKeyDown={(event) => {
                   if (pendingMutations) event.preventDefault()
                 }}
@@ -251,13 +240,7 @@ function Workspace({ projectId }: { projectId: string }) {
                     event.preventDefault()
                 }}
               >
-                <DialogHeader
-                  className={
-                    tinted
-                      ? '-mx-5 -mt-5 border-b bg-card px-5 py-4 sm:-mx-8 sm:-mt-8 sm:px-8 sm:py-5'
-                      : undefined
-                  }
-                >
+                <DialogHeader>
                   <div className="flex items-start justify-between gap-3 pr-8">
                     <DialogTitle>
                       {pane && pane !== 'settings' ? paneTitles[pane] : ''}
@@ -286,7 +269,8 @@ function Workspace({ projectId }: { projectId: string }) {
                 </DialogHeader>
                 <PaneSheetHost
                   key={`${projectId}:${pane}`}
-                  className="mt-4 min-w-0"
+                  // 본문 자리는 창 아래까지 채운다(비비 대화 입력줄, 하위 화면의 아래 버튼 줄).
+                  className="mt-4 flex min-w-0 flex-col"
                 >
                   {pane === 'documents' && <DocumentsPanel {...panelProps} />}
                   {pane === 'planning' && <PlanningPanel {...panelProps} />}

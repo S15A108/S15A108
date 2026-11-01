@@ -20,8 +20,9 @@ export function BibiPanel({ projectId }: { projectId: string }) {
   })
   const last = messages.at(-1)?.answer
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div className="grid min-w-0 content-start gap-4">
+    // 창 높이를 다 쓰고, 대화가 짧아도 질문 입력줄은 아래에 둔다.
+    <div className="grid min-h-full gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="flex min-w-0 flex-col gap-4">
         <div className="flex items-center gap-3">
           <BibiFace className="size-12 shrink-0" />
           <div>
@@ -40,7 +41,7 @@ export function BibiPanel({ projectId }: { projectId: string }) {
         <div
           role="log"
           aria-label="비비 설계 질의응답"
-          className="grid min-h-48 content-start gap-3"
+          className="grid min-h-48 flex-1 content-start gap-3"
         >
           <p className="max-w-xl justify-self-start rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2.5 text-sm">
             공용 문서의 승인된 내용에서 찾아 답해 드릴게요.

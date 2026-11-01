@@ -140,11 +140,9 @@ export function ActionForm({
   })
   const watched = useWatch({ control })
   return (
+    // 입력 칸은 안쪽 격자에 둔다. 창 안 하위 화면에서는 폼이 남은 높이를 채워 버튼 줄이 맨 아래로 간다.
     <form
-      className={cn(
-        'grid gap-5',
-        columns && 'md:grid-flow-dense md:grid-cols-2 md:items-start',
-      )}
+      className="flex flex-col gap-5"
       noValidate
       onSubmit={handleSubmit(async (values) => {
         setError('')
@@ -158,185 +156,192 @@ export function ActionForm({
         }
       })}
     >
-      {fields.map((field) =>
-        field.custom ? (
-          <div key={field.name}>{field.custom}</div>
-        ) : (
-          <div
-            key={field.name}
-            className={cn(
-              'grid gap-2',
-              columns &&
-                (field.column === 2 ? 'md:col-start-2' : 'md:col-start-1'),
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <Label
-                id={`${formId}-${field.name}-label`}
-                htmlFor={`${formId}-${field.name}`}
-              >
-                {field.label}
-                {field.required && !auth && (
-                  <span aria-hidden="true" className="text-destructive">
-                    {' '}
-                    *
+      <div
+        className={cn(
+          'grid gap-5',
+          columns && 'md:grid-flow-dense md:grid-cols-2 md:items-start',
+        )}
+      >
+        {fields.map((field) =>
+          field.custom ? (
+            <div key={field.name}>{field.custom}</div>
+          ) : (
+            <div
+              key={field.name}
+              className={cn(
+                'grid gap-2',
+                columns &&
+                  (field.column === 2 ? 'md:col-start-2' : 'md:col-start-1'),
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <Label
+                  id={`${formId}-${field.name}-label`}
+                  htmlFor={`${formId}-${field.name}`}
+                >
+                  {field.label}
+                  {field.required && !auth && (
+                    <span aria-hidden="true" className="text-destructive">
+                      {' '}
+                      *
+                    </span>
+                  )}
+                </Label>
+                {field.counter && field.max && (
+                  <span className="text-xs text-muted-foreground">
+                    {(watched[field.name] ?? '').length} / {field.max}
                   </span>
                 )}
-              </Label>
-              {field.counter && field.max && (
-                <span className="text-xs text-muted-foreground">
-                  {(watched[field.name] ?? '').length} / {field.max}
-                </span>
-              )}
-            </div>
-            {field.type === 'textarea' ? (
-              <Textarea
-                id={`${formId}-${field.name}`}
-                rows={4}
-                placeholder={field.placeholder}
-                disabled={isSubmitting}
-                aria-invalid={Boolean(errors[field.name])}
-                {...register(field.name)}
-              />
-            ) : field.type === 'select' ? (
-              <NativeSelect
-                id={`${formId}-${field.name}`}
-                disabled={isSubmitting}
-                aria-invalid={Boolean(errors[field.name])}
-                {...register(field.name)}
-              >
-                {field.options?.map((option) => (
-                  <NativeSelectOption key={option.value} value={option.value}>
-                    {option.label}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            ) : field.type === 'chips' ? (
-              <div
-                role="radiogroup"
-                aria-labelledby={`${formId}-${field.name}-label`}
-                aria-invalid={Boolean(errors[field.name])}
-                className="flex flex-wrap gap-1.5"
-              >
-                {field.options?.map((option) => (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      'cursor-pointer rounded-full border px-3 py-1 text-[13px] has-focus-visible:ring-2 has-focus-visible:ring-ring',
-                      watched[field.name] === option.value
-                        ? 'border-foreground font-semibold'
-                        : 'border-border text-muted-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      value={option.value}
-                      className="sr-only"
-                      disabled={isSubmitting}
-                      {...register(field.name)}
-                    />
-                    {option.label}
-                  </label>
-                ))}
               </div>
-            ) : field.type === 'color' ? (
-              <div
-                role="radiogroup"
-                aria-labelledby={`${formId}-${field.name}-label`}
-                className="flex flex-wrap gap-2.5"
-              >
-                {[
-                  ...DISPLAY_COLORS,
-                  ...(watched[field.name] &&
-                  !DISPLAY_COLORS.includes(watched[field.name]!)
-                    ? [watched[field.name]!]
-                    : []),
-                ].map((color) => (
-                  <label
-                    key={color}
-                    className={cn(
-                      'size-7 cursor-pointer rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]',
-                      watched[field.name] === color &&
-                        'shadow-[0_0_0_2px_#fff,0_0_0_4px_var(--foreground)]',
-                    )}
-                    style={{ backgroundColor: color }}
-                  >
-                    <input
-                      type="radio"
-                      value={color}
-                      aria-label={color}
-                      className="sr-only"
-                      disabled={isSubmitting}
-                      {...register(field.name)}
-                    />
-                  </label>
-                ))}
-              </div>
-            ) : field.type === 'password' ? (
-              <div className="relative">
-                <Input
+              {field.type === 'textarea' ? (
+                <Textarea
                   id={`${formId}-${field.name}`}
-                  type={shown[field.name] ? 'text' : 'password'}
-                  autoComplete={
-                    field.check || field.matches
-                      ? 'new-password'
-                      : 'current-password'
-                  }
-                  className={cn('pr-10', auth && 'h-10')}
+                  rows={4}
                   placeholder={field.placeholder}
                   disabled={isSubmitting}
                   aria-invalid={Boolean(errors[field.name])}
                   {...register(field.name)}
                 />
-                <button
-                  type="button"
-                  aria-label={
-                    shown[field.name] ? '비밀번호 숨기기' : '비밀번호 보기'
-                  }
-                  className="absolute top-0 right-0 grid h-full w-9 place-items-center text-muted-foreground hover:text-foreground"
-                  onClick={() =>
-                    setShown((state) => ({
-                      ...state,
-                      [field.name]: !state[field.name],
-                    }))
-                  }
+              ) : field.type === 'select' ? (
+                <NativeSelect
+                  id={`${formId}-${field.name}`}
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(errors[field.name])}
+                  {...register(field.name)}
                 >
-                  {shown[field.name] ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                </button>
-              </div>
-            ) : (
-              <Input
-                id={`${formId}-${field.name}`}
-                type={field.type ?? 'text'}
-                autoComplete={field.type === 'email' ? 'email' : 'off'}
-                className={cn(auth && 'h-10')}
-                placeholder={field.placeholder}
-                disabled={isSubmitting}
-                aria-invalid={Boolean(errors[field.name])}
-                {...register(field.name)}
-              />
-            )}
-            {errors[field.name] ? (
-              <p role="alert" className="text-xs text-destructive">
-                {String(errors[field.name]?.message ?? '')}
-              </p>
-            ) : (
-              field.hint && (
-                <p className="text-xs text-muted-foreground">{field.hint}</p>
-              )
-            )}
-          </div>
-        ),
-      )}
+                  {field.options?.map((option) => (
+                    <NativeSelectOption key={option.value} value={option.value}>
+                      {option.label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              ) : field.type === 'chips' ? (
+                <div
+                  role="radiogroup"
+                  aria-labelledby={`${formId}-${field.name}-label`}
+                  aria-invalid={Boolean(errors[field.name])}
+                  className="flex flex-wrap gap-1.5"
+                >
+                  {field.options?.map((option) => (
+                    <label
+                      key={option.value}
+                      className={cn(
+                        'cursor-pointer rounded-full border px-3 py-1 text-[13px] has-focus-visible:ring-2 has-focus-visible:ring-ring',
+                        watched[field.name] === option.value
+                          ? 'border-foreground font-semibold'
+                          : 'border-border text-muted-foreground hover:bg-muted/50',
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        value={option.value}
+                        className="sr-only"
+                        disabled={isSubmitting}
+                        {...register(field.name)}
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              ) : field.type === 'color' ? (
+                <div
+                  role="radiogroup"
+                  aria-labelledby={`${formId}-${field.name}-label`}
+                  className="flex flex-wrap gap-2.5"
+                >
+                  {[
+                    ...DISPLAY_COLORS,
+                    ...(watched[field.name] &&
+                    !DISPLAY_COLORS.includes(watched[field.name]!)
+                      ? [watched[field.name]!]
+                      : []),
+                  ].map((color) => (
+                    <label
+                      key={color}
+                      className={cn(
+                        'size-7 cursor-pointer rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]',
+                        watched[field.name] === color &&
+                          'shadow-[0_0_0_2px_#fff,0_0_0_4px_var(--foreground)]',
+                      )}
+                      style={{ backgroundColor: color }}
+                    >
+                      <input
+                        type="radio"
+                        value={color}
+                        aria-label={color}
+                        className="sr-only"
+                        disabled={isSubmitting}
+                        {...register(field.name)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : field.type === 'password' ? (
+                <div className="relative">
+                  <Input
+                    id={`${formId}-${field.name}`}
+                    type={shown[field.name] ? 'text' : 'password'}
+                    autoComplete={
+                      field.check || field.matches
+                        ? 'new-password'
+                        : 'current-password'
+                    }
+                    className={cn('pr-10', auth && 'h-10')}
+                    placeholder={field.placeholder}
+                    disabled={isSubmitting}
+                    aria-invalid={Boolean(errors[field.name])}
+                    {...register(field.name)}
+                  />
+                  <button
+                    type="button"
+                    aria-label={
+                      shown[field.name] ? '비밀번호 숨기기' : '비밀번호 보기'
+                    }
+                    className="absolute top-0 right-0 grid h-full w-9 place-items-center text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      setShown((state) => ({
+                        ...state,
+                        [field.name]: !state[field.name],
+                      }))
+                    }
+                  >
+                    {shown[field.name] ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <Input
+                  id={`${formId}-${field.name}`}
+                  type={field.type ?? 'text'}
+                  autoComplete={field.type === 'email' ? 'email' : 'off'}
+                  className={cn(auth && 'h-10')}
+                  placeholder={field.placeholder}
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(errors[field.name])}
+                  {...register(field.name)}
+                />
+              )}
+              {errors[field.name] ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {String(errors[field.name]?.message ?? '')}
+                </p>
+              ) : (
+                field.hint && (
+                  <p className="text-xs text-muted-foreground">{field.hint}</p>
+                )
+              )}
+            </div>
+          ),
+        )}
+      </div>
       {footer}
       {error && (
         <p
           role="alert"
-          className="col-span-full rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+          className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
         >
           {error}
         </p>
@@ -344,11 +349,7 @@ export function ActionForm({
       <SheetSubmit
         destructive={destructive}
         disabled={isSubmitting || disabled}
-        className={cn(
-          'col-span-full',
-          block ? 'w-full' : 'justify-self-end',
-          auth && 'h-10',
-        )}
+        className={cn(block ? 'w-full' : 'self-end', auth && 'h-10')}
       >
         {isSubmitting ? '처리 중…' : submitLabel}
       </SheetSubmit>
