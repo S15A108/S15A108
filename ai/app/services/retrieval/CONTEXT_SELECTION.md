@@ -53,6 +53,8 @@ async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as http:
     # 호출자는 result.usage를 프로젝트·요청에 맞춰 저장한다.
 ```
 
+`max_items` 또는 `max_evidence`를 0으로 지정하면 해당 종류는 선택하지 않는다. 그 종류의 후보가 실제로 존재하면 다른 종류에서 일치 항목이 있더라도 전체 결과가 불완전하므로 공급자 호출 전에 내부 오류 `selection_incomplete`로 실패한다. 후보가 없는 종류는 0으로 설정해도 된다. 이 오류는 내부 모듈 경계의 상태이며 BE·MCP의 HTTP 오류 계약이 확정됐다는 뜻이 아니다.
+
 이 선택기는 요청 문장과 **전달받은 각 후보 텍스트를 매 호출 새로 임베딩**해 코사인 유사도로 고른다. BE 색인의 벡터나 검색 결과를 재사용하지 않는다. 후보 수·길이와 재시도에 비례해 유료 호출 및 지연이 발생하며, `EmbeddingPolicy`의 배치·호출/전체 시간·입력 한도는 질의와 후보 임베딩 단계에 각각 적용된다. 성공 시 `result.usage`, 오류 시 `ContextSelectionError.usage`에 호출 기록이 담긴다. 비용 기록 저장은 호출자 책임이며 알 수 없는 토큰을 0으로 기록하지 않는다. 취소나 프로세스 종료 시 진행 중 호출의 사용량을 확인하지 못할 수 있다.
 
 ```text

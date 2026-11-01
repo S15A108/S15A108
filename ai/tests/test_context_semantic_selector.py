@@ -145,13 +145,50 @@ async def test_real_selection_keeps_scope_and_separate_query_document_usage():
 async def test_threshold_allows_real_zero_results_and_candidate_limits():
     provider = Provider()
     result = await select_context(
-        inputs(), selector(provider, min_similarity=1.0, max_items=0)
+        inputs().model_copy(update={"items": ()}),
+        selector(provider, min_similarity=1.0, max_items=0),
     )
     assert result.design_items == ()
     assert result.evidence_ids == ()
     assert result.unresolved == ("NO_MATCH",)
     assert all(t.key.startswith("evidence-") for t in provider.calls[1][0])
     assert len(result.usage) == 2
+
+
+@pytest.mark.parametrize("disabled_type", ["items", "evidence"])
+@pytest.mark.asyncio
+async def test_zero_limit_is_safe_when_disabled_candidate_type_is_empty(disabled_type):
+    request = inputs().model_copy(update={disabled_type: ()})
+    provider = Provider()
+    options = {"max_items": 0} if disabled_type == "items" else {"max_evidence": 0}
+    result = await select_context(request, selector(provider, **options))
+    assert not result.unresolved
+    if disabled_type == "items":
+        assert result.evidence_ids == ("e-1",)
+    else:
+        assert [item.design_item_version_id for item in result.design_items] == ["v-10"]
+    assert [call[2] for call in provider.calls] == ["query", "document"]
+
+
+@pytest.mark.parametrize(
+    ("disabled_type", "only_disabled"),
+    [("items", False), ("items", True), ("evidence", False), ("evidence", True)],
+)
+@pytest.mark.asyncio
+async def test_cannot_report_no_match_when_candidates_were_skipped(
+    disabled_type, only_disabled
+):
+    request = inputs()
+    if only_disabled:
+        other_type = "evidence" if disabled_type == "items" else "items"
+        request = request.model_copy(update={other_type: ()})
+    provider = Provider()
+    options = {"max_items": 0} if disabled_type == "items" else {"max_evidence": 0}
+    with pytest.raises(ContextSelectionError) as exc:
+        await select_context(request, selector(provider, **options))
+    assert exc.value.code == "selection_incomplete"
+    assert exc.value.usage == ()
+    assert not provider.calls
 
 
 @pytest.mark.asyncio

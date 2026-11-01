@@ -79,6 +79,14 @@ class EmbeddingContextSelector:
                 else "search_failed"
             )
 
+        # A zero limit skips a category, so a nonempty skipped category would
+        # make the result incomplete even when another category matches.
+        # Fail before any paid provider call rather than report a complete search.
+        if (self._max_items == 0 and request.items) or (
+            self._max_evidence == 0 and request.evidence
+        ):
+            raise ContextSelectionError("selection_incomplete")
+
         # Provider keys are internal, opaque and independent of user-provided IDs.
         items = request.items if self._max_items else ()
         evidence = request.evidence if self._max_evidence else ()
