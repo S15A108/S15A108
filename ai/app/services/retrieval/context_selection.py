@@ -6,6 +6,8 @@ baseline and recheck them before using the result. Raw source evidence is never
 promoted to an approved design item, nor is a model allowed to create IDs.
 """
 
+import hashlib
+import json
 from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -153,6 +155,23 @@ class SelectionResult(_Frozen):
     unresolved: tuple[Literal["NO_MATCH"], ...]
     search_status: Literal["COMPLETE"] = "COMPLETE"
     usage: tuple[EmbeddingUsage, ...] = ()
+    # In-process consistency marker only; never part of the external payload.
+    snapshot_binding: str | None = Field(default=None, exclude=True, repr=False)
+
+
+def _selection_binding(snapshot, items, evidence_ids, unresolved) -> str:
+    """Detect accidental mixing of inputs and selected output, not authorization."""
+    payload = {
+        "snapshot": snapshot.model_dump(mode="json"),
+        "items": [item.model_dump(mode="json") for item in items],
+        "evidence_ids": list(evidence_ids),
+        "unresolved": list(unresolved),
+    }
+    encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    digest = hashlib.sha256()
+    for part in encoder.iterencode(payload):
+        digest.update(part.encode("ascii"))
+    return digest.hexdigest()
 
 
 class ContextSelectionError(Exception):
@@ -245,11 +264,15 @@ async def select_context(
         for item in request.items
         if item.design_item_version_id in reasons
     )
+    unresolved = ("NO_MATCH",) if not matched and not evidence_ids else ()
     return SelectionResult(
         design_items=selected,
         evidence_ids=evidence_ids,
         # A task reference is useful context, but does not prove the search
         # found a relevant item or source for this particular request.
-        unresolved=("NO_MATCH",) if not matched and not evidence_ids else (),
+        unresolved=unresolved,
         usage=proposal.usage,
+        snapshot_binding=_selection_binding(
+            request, selected, evidence_ids, unresolved
+        ),
     )

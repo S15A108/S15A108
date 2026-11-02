@@ -16,7 +16,10 @@ from app.services.retrieval.context_selection import (
     ApprovedItem,
     SelectedItem,
     SelectionInput,
+    SelectionProposal,
     SelectionResult,
+    _selection_binding,
+    select_context,
 )
 from app.services.retrieval.context_unresolved import (
     LLMUnresolvedAssessor,
@@ -64,10 +67,21 @@ def snapshot():
 
 
 def selection():
-    return SelectionResult(
+    selected = SelectionResult(
         design_items=(SelectedItem(design_item_version_id="v1", reasons=("MATCHED",)),),
         evidence_ids=("e1",),
         unresolved=(),
+    )
+    return bind(snapshot(), selected)
+
+
+def bind(data, selected):
+    return selected.model_copy(
+        update={
+            "snapshot_binding": _selection_binding(
+                data, selected.design_items, selected.evidence_ids, selected.unresolved
+            )
+        }
     )
 
 
@@ -161,6 +175,7 @@ async def test_rejects_unknown_selection_before_calling_assessor():
     selected = SelectionResult(
         design_items=(), evidence_ids=("unknown",), unresolved=()
     )
+    selected = bind(snapshot(), selected)
     assessor = Assessor({"candidates": []})
     with pytest.raises(ValueError):
         await review_unresolved(snapshot(), selected, assessor)
@@ -181,6 +196,7 @@ async def test_no_match_remains_visible_even_when_review_returns_no_candidates()
     selected = SelectionResult(
         design_items=(), evidence_ids=(), unresolved=("NO_MATCH",)
     )
+    selected = bind(snapshot(), selected)
     result = await review_unresolved(snapshot(), selected, Assessor({"candidates": []}))
     assert result.result == {
         "scope": "selected_context_only",
@@ -205,6 +221,7 @@ async def test_duplicate_selected_ids_are_rejected_before_assessment():
     selected = SelectionResult(
         design_items=(), evidence_ids=("e1", "e1"), unresolved=()
     )
+    selected = bind(snapshot(), selected)
     assessor = Assessor({"candidates": []})
     with pytest.raises(ValueError):
         await review_unresolved(snapshot(), selected, assessor)
@@ -344,3 +361,88 @@ async def test_invalid_output_parameter_is_rejected_without_model_call(parameter
     with pytest.raises(LLMError) as error:
         await review_unresolved(snapshot(), selection(), assessor)
     assert error.value.code == "invalid_input" and not provider.calls
+
+
+@pytest.mark.parametrize("changed", ["request", "task", "baseline", "text"])
+@pytest.mark.asyncio
+async def test_selection_from_another_snapshot_is_rejected_before_assessment(changed):
+    class Selector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("v1",), evidence_ids=("e1",)
+            )
+
+    original = snapshot()
+    selected = await select_context(original, Selector())
+    payload = original.model_dump(mode="json")
+    if changed == "request":
+        payload["request"] = "다른 요청"
+    elif changed == "task":
+        payload["task_id"] = "new-task"
+    elif changed == "baseline":
+        payload["baseline_id"] = "new-baseline"
+        for item in payload["items"] + payload["evidence"]:
+            item["baseline_id"] = "new-baseline"
+    else:
+        payload["items"][0]["text"] = "업로드 한도는 100 MB입니다."
+    changed_snapshot = SelectionInput.model_validate_json(
+        json.dumps(payload, ensure_ascii=False)
+    )
+    assessor = Assessor({"candidates": []})
+    with pytest.raises(ValueError, match="selection snapshot"):
+        await review_unresolved(changed_snapshot, selected, assessor)
+    assert assessor.input is None
+
+
+@pytest.mark.asyncio
+async def test_serialized_selection_cannot_be_used_as_snapshot_proof():
+    class Selector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("v1",), evidence_ids=("e1",)
+            )
+
+    original = snapshot()
+    selected = await select_context(original, Selector())
+    exported = selected.model_dump(mode="json")
+    assert "snapshot_binding" not in exported
+    restored = SelectionResult.model_validate_json(json.dumps(exported))
+    assessor = Assessor({"candidates": []})
+    with pytest.raises(ValueError, match="selection snapshot"):
+        await review_unresolved(original, restored, assessor)
+    assert assessor.input is None
+
+
+@pytest.mark.asyncio
+async def test_changed_selected_ids_cannot_reuse_old_binding():
+    class Selector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("v1",), evidence_ids=("e1",)
+            )
+
+    original = snapshot()
+    selected = await select_context(original, Selector())
+    changed = selected.model_copy(update={"evidence_ids": ("e2",)})
+    assessor = Assessor({"candidates": []})
+    with pytest.raises(ValueError, match="selection snapshot"):
+        await review_unresolved(original, changed, assessor)
+    assert assessor.input is None
+
+
+@pytest.mark.parametrize("binding", [None, "가" * 64, "?" * 64, 42])
+@pytest.mark.asyncio
+async def test_invalid_snapshot_binding_is_rejected_before_assessment(binding):
+    class Selector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("v1",), evidence_ids=("e1",)
+            )
+
+    original = snapshot()
+    selected = await select_context(original, Selector())
+    changed = selected.model_copy(update={"snapshot_binding": binding})
+    assessor = Assessor({"candidates": []})
+    with pytest.raises(ValueError, match="selection snapshot"):
+        await review_unresolved(original, changed, assessor)
+    assert assessor.input is None

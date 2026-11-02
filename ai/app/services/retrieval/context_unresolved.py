@@ -6,6 +6,7 @@ its own selection from that same snapshot. Output is never an approval or proof
 that the project has no conflict or requirement.
 """
 
+import hmac
 import json
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -25,6 +26,7 @@ from app.services.retrieval.context_selection import (
     ApprovedItem,
     SelectionInput,
     SelectionResult,
+    _selection_binding,
 )
 
 
@@ -165,6 +167,17 @@ async def review_unresolved(
     """Return only bounded, source-checked candidates; preserve model usage."""
     if snapshot.search_status != "COMPLETE" or selection.search_status != "COMPLETE":
         raise ValueError("incomplete search")
+    expected_binding = _selection_binding(
+        snapshot, selection.design_items, selection.evidence_ids, selection.unresolved
+    )
+    binding = selection.snapshot_binding
+    if (
+        not isinstance(binding, str)
+        or len(binding) != 64
+        or any(character not in "0123456789abcdef" for character in binding)
+        or not hmac.compare_digest(binding, expected_binding)
+    ):
+        raise ValueError("selection snapshot mismatch")
     items = {item.design_item_version_id: item for item in snapshot.items}
     evidence = {item.evidence_id: item for item in snapshot.evidence}
     selected_ids = [item.design_item_version_id for item in selection.design_items]
