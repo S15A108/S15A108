@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
@@ -66,38 +66,6 @@ it('팀장은 탭으로 제안을 살펴보고 창 안에서 확인한 뒤 기�
   expect(await screen.findByText(/새 기준을 발행했어요/)).toBeInTheDocument()
 })
 
-it('새 변경 제안은 항목을 고르지 않으면 막고, 다 채우면 목록에 올린다', async () => {
-  const user = userEvent.setup()
-  renderPanel()
-  await screen.findByRole('heading', { name: /프로젝트 목록 빈 화면 안내/ })
-  await user.click(screen.getByRole('button', { name: '새 변경 제안' }))
-  await user.type(screen.getByLabelText('제목 *'), '로그인 실패 안내')
-  await user.type(
-    screen.getByLabelText('바꾸려는 이유 *'),
-    '실패 이유를 알려 줘야 해요.',
-  )
-  await user.click(screen.getByRole('button', { name: '제안 올리기' }))
-  expect(
-    await screen.findByText('바꿀 항목을 골라 주세요.'),
-  ).toBeInTheDocument()
-  const row = screen.getByRole('group', { name: '설계 항목 1' })
-  await user.selectOptions(
-    within(row).getByLabelText('항목 1 설계 항목'),
-    '301',
-  )
-  await user.type(
-    within(row).getByLabelText('항목 1 바뀔 문장'),
-    '실패하면 다시 시도하라고 안내한다.',
-  )
-  await user.click(screen.getByRole('button', { name: '제안 올리기' }))
-  expect(await screen.findByRole('status')).toHaveTextContent(
-    '변경 제안을 올렸어요.',
-  )
-  expect(
-    await screen.findByRole('heading', { name: /로그인 실패 안내/ }),
-  ).toBeInTheDocument()
-})
-
 // 사용자 결정(10-30, PR #42 CHG-A04): 올린 제안은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다.
 it('제안자는 검토 중인 제안을 고칠 수 없고, 반려되면 같은 제안을 고쳐 다시 올린다', async () => {
   await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
@@ -139,13 +107,10 @@ it('제안자는 검토 중인 제안을 고칠 수 없고, 반려되면 같은 
   ).toBeInTheDocument()
   expect(screen.getByText(/받은 초대를 먼저 보여 주는 안/)).toBeInTheDocument()
   expect(screen.getByRole('region', { name: '받은 의견' })).toBeInTheDocument()
-  const sentence = screen.getByLabelText('항목 1 바뀔 문장')
-  await user.clear(sentence)
-  await user.type(sentence, '없으면 받은 초대를 먼저 보여 준다.')
-  expect(screen.getByText('고친 항목')).toBeInTheDocument()
+  // 사람이 쓴 제안 폼에는 설계 항목 입력이 없고, 이 제안의 항목 변경은 보기만 하며 그대로 다시 올라간다.
   expect(
-    screen.getByText(/처음 올린 문장: 로그인한 사용자는/),
-  ).toBeInTheDocument()
+    screen.getByRole('region', { name: '함께 올라가는 설계 항목 변경' }),
+  ).toHaveTextContent('고치기 · REQ-001')
   await user.click(screen.getByRole('button', { name: '다시 올리기' }))
   expect(await screen.findByRole('status')).toHaveTextContent(
     '고친 내용을 올렸어요. 다시 검토 대기예요.',
@@ -270,42 +235,6 @@ it('조회한 리비전과 해시가 지금과 다르면 409 version_conflict', 
   expect(getApiErrorCode(stale)).toBe('version_conflict')
 })
 
-// PNL-04 수정안: 새 제안은 설계 항목만 보이고 '+ 문서 고치기'로 고칠 문서 칸을 연다.
-it('새 제안 폼은 문서 고치기를 눌러야 고칠 문서 칸이 열린다', async () => {
-  const user = userEvent.setup()
-  renderPanel()
-  await user.click(await screen.findByRole('button', { name: '새 변경 제안' }))
-  expect(screen.queryByLabelText(/고칠 문서/)).not.toBeInTheDocument()
-  await user.click(await screen.findByRole('button', { name: '문서 고치기' }))
-  expect(screen.getByLabelText(/고칠 문서/)).toBeInTheDocument()
-})
-
-// PNL-04-v2-edit: 반려된 제안을 고칠 때 뺀 항목은 점선 줄로 남겨 보여 준다.
-it('반려된 제안을 고치며 항목을 빼면 이번 제안에서 뺐다고 보여 준다', async () => {
-  const { proposal } = await changesApi.get('101', '71')
-  await changesApi.reject('101', '71', {
-    reason: '문서로 고쳐 주세요.',
-    expected_revision: proposal.revision,
-    expected_snapshot_hash: proposal.snapshot_hash,
-  })
-  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
-  const user = userEvent.setup()
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <ChangesPanel projectId="101" isLeader={false} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-  await user.click(
-    await screen.findByRole('button', { name: '고쳐서 다시 올리기' }),
-  )
-  await user.click(screen.getByRole('button', { name: '문서 고치기' }))
-  await user.selectOptions(await screen.findByLabelText(/고칠 문서/), '203')
-  await user.click(screen.getByRole('button', { name: '항목 1 빼기' }))
-  expect(screen.getByText('이번 제안에서 뺐어요')).toBeInTheDocument()
-})
-
 // '지금 할 일' 미리 보기용 항목별 −/+ 문장(item_texts, 195 미구현). 목은 채운다.
 it('목 상세는 항목별 바뀌기 전·뒤 문장을 item_texts로 준다', async () => {
   const detail = await changesApi.get('101', '71')
@@ -328,4 +257,18 @@ it('고칠 문서의 기준 원문을 받지 못하면 고친 글 칸 위에 오
     '',
   )
   vi.restoreAllMocks()
+})
+
+// 사용자 결정 11-02: 변경 제안 창은 올라온 제안을 모아 보는 곳이고, 제안은 공용 문서함의 문서 '고치기'로 만든다.
+it('변경 제안 창에는 새 제안 버튼 대신 공용 문서함으로 가는 버튼이 있다', async () => {
+  const user = userEvent.setup()
+  renderPanel()
+  await screen.findByRole('heading', { name: /프로젝트 목록 빈 화면 안내/ })
+  expect(
+    screen.queryByRole('button', { name: '새 변경 제안' }),
+  ).not.toBeInTheDocument()
+  await user.click(
+    screen.getByRole('button', { name: '공용 문서함에서 제안하기' }),
+  )
+  expect(useWorkspaceStore.getState().pane).toBe('documents')
 })

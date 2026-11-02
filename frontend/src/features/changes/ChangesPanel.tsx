@@ -6,7 +6,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
-  Plus,
+  FolderOpen,
   Search,
 } from 'lucide-react'
 import {
@@ -34,13 +34,7 @@ import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { foldDiff, lineDiff } from './lineDiff'
 import { ProposalForm } from './ProposalForm'
-import {
-  kindLabel,
-  operationLabel,
-  toChangeItems,
-  toDocumentChanges,
-  toRows,
-} from './proposalItems'
+import { kindLabel, operationLabel, toDocumentChanges } from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
 
 interface Props {
@@ -84,13 +78,14 @@ const statusOrder: Record<ChangeStatus, number> = {
   WITHDRAWN: 5,
 }
 
-// 변경 제안은 설계 항목(요구사항, API 계약, 데이터 계약, 정책, 제약)만 다룬다. 문서 새 버전은 공용 문서함에서 승인·반려한다.
+// 변경 제안 창은 올라온 제안을 모아 보고 검토하는 곳이다(사용자 결정 11-02). 사람이 쓰는 제안은 공용 문서함의
+// 문서 '고치기'로 만들고, 에이전트·회의가 만든 설계 항목 변경은 보기만 한다.
 // API 없음: 문서만 바꾸는 제안을 거르는 필터, 제목·항목 검색과 정렬 파라미터(백엔드 메모 1·2). 지금은 받은 목록을 화면에서 거른다.
 export function ChangesPanel({ projectId, isLeader }: Props) {
   const session = useSession()
-  // 'new'는 새 제안 폼, 'doc:문서ID'는 그 문서를 고르는 새 제안 폼(공용 문서함 '변경 제안 쓰기'·'고치기'). 그 밖은 제안 ID.
+  // 'doc:문서ID'는 그 문서를 고른 문서 수정 제안 폼(공용 문서함 '고치기'·'변경 제안 쓰기'). 그 밖은 제안 ID.
   const focus = useWorkspaceStore((state) => state.focusId)
-  const focusId = focus === 'new' || focus?.startsWith('doc:') ? null : focus
+  const focusId = focus?.startsWith('doc:') ? null : focus
   const openPane = useWorkspaceStore((state) => state.openPane)
   const [selected, setSelected] = useState<{
     id: string
@@ -101,7 +96,7 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   const [sort, setSort] = useState<'recent' | 'status'>('recent')
   const [tab, setTab] = useState<Tab>('overview')
   const [mode, setMode] = useState<Mode>(() =>
-    focus === 'new' || focus?.startsWith('doc:')
+    focus?.startsWith('doc:')
       ? { kind: 'form', documentId: focus.slice(4) || undefined }
       : { kind: 'detail' },
   )
@@ -253,7 +248,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
       ...(source?.status === 'WITHDRAWN' && !update
         ? { previous_proposal_id: source.id }
         : {}),
-      items: toChangeItems(values.items, approved),
+      // 설계 항목 변경은 에이전트·회의가 만든 것만 있고, 다시 낼 때 받은 그대로 보낸다.
+      items: source?.items ?? [],
       // 폼은 첫 문서만 고치고, 나머지 문서 변경은 원래 제안 값 그대로 함께 보낸다.
       documents: toDocumentChanges(
         values,
@@ -286,14 +282,13 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          설계 항목이나 문서를 바꾸자고 제안하고, 팀장이 승인하면 새 기준을
-          발행해요. 문서를 고치려면 제안에서 &apos;고칠 문서&apos;를 골라요.
+          팀원이 올린 문서 수정 제안을 모아 보고 검토해요. 팀장이 승인하면 새
+          기준을 발행해요. 제안은 공용 문서함에서 문서를 열고
+          &apos;고치기&apos;로 올려요.
         </p>
-        <Button
-          disabled={!baseline.data}
-          onClick={() => setMode({ kind: 'form' })}
-        >
-          <Plus />새 변경 제안
+        <Button variant="outline" onClick={() => openPane('documents')}>
+          <FolderOpen />
+          공용 문서함에서 제안하기
         </Button>
       </div>
       {baseline.error && (
@@ -443,13 +438,26 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       (item) => item.id === change.document_id,
                     )?.title ?? '문서',
                 )}
+              fixedItems={mode.source?.items.map((item) => ({
+                label: `${operationLabel[item.operation]} · ${
+                  item.operation === 'CREATE'
+                    ? item.kind
+                      ? kindLabel[item.kind]
+                      : '설계 항목'
+                    : itemKey(item.design_item_id)
+                }`,
+                detail:
+                  item.operation === 'RETIRE'
+                    ? undefined
+                    : describeContent(item.proposed_content),
+              }))}
               // 올린 제안(PROPOSED·IN_REVIEW)은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다(CHG-A04, 사용자 결정 10-30).
               heading={
                 mode.update
                   ? '고쳐서 다시 올리기'
                   : mode.source
                     ? '새 제안으로 다시 올리기'
-                    : '새 변경 제안'
+                    : '문서 수정 제안'
               }
               status={mode.source && <StatusPill value={mode.source.status} />}
               description={
@@ -465,10 +473,7 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                   : undefined
               }
               submitLabel={mode.update ? '다시 올리기' : '제안 올리기'}
-              items={approved}
               tasks={taskList}
-              baselineVersion={baseline.data?.version_no}
-              original={mode.source && toRows(mode.source.items)}
               comments={
                 mode.source &&
                 commentList.map((comment) => ({
@@ -487,7 +492,6 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       title: mode.source.title,
                       reason: mode.source.reason,
                       task_id: mode.source.task_id ?? '',
-                      items: toRows(mode.source.items),
                       document_id: mode.source.documents[0]?.document_id ?? '',
                       after_content:
                         mode.source.documents[0]?.after_content ?? '',
@@ -495,13 +499,13 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         0,
                         mode.source.documents.length - 1,
                       ),
+                      kept_items: mode.source.items.length,
                     }
                   : mode.documentId
                     ? {
                         title: '',
                         reason: '',
                         task_id: '',
-                        items: [],
                         document_id: mode.documentId,
                         // 기준 원문은 폼이 받아서 채운다.
                         after_content: '',
@@ -518,8 +522,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
               <strong className="text-base text-foreground">
                 변경 제안이 없어요
               </strong>
-              바꾸고 싶은 설계 항목이나 문서가 있으면 새 변경 제안을 올려
-              주세요.
+              공용 문서함에서 문서를 열고 고치기로 제안해요.
+              <Button size="sm" onClick={() => openPane('documents')}>
+                공용 문서함 열기
+              </Button>
             </EmptyState>
           ) : (
             <AsyncState query={detail}>

@@ -866,7 +866,7 @@ function UploadDocument({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => openPane('changes', 'new')}
+              onClick={() => openPane('changes', 'doc:')}
             >
               변경 제안 쓰기
             </Button>

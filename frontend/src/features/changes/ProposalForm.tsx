@@ -2,30 +2,22 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useFieldArray, useForm, useWatch } from 'react-hook-form'
-import { Plus, X } from 'lucide-react'
-import type { DesignItemVersion, TaskDetail } from '@/api/contracts/common'
+import { useForm, useWatch } from 'react-hook-form'
+import { Plus } from 'lucide-react'
+import type { TaskDetail } from '@/api/contracts/common'
 import { getApiErrorMessage } from '@/api/error'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { describeContent } from '@/lib/display'
-import { cn } from '@/lib/utils'
 import { normalizeDocument } from './normalizeDocument'
-import {
-  emptyRow,
-  kindLabel,
-  operationLabel,
-  proposalFormSchema,
-} from './proposalItems'
-import type { ProposalFormValues, ProposalRow } from './proposalItems'
+import { proposalFormSchema } from './proposalItems'
+import type { ProposalFormValues } from './proposalItems'
 
 interface Props {
   heading: string
   submitLabel: string
-  items: DesignItemVersion[]
   tasks: TaskDetail[]
   /** 고칠 수 있는 현재 문서. 목록 응답에는 본문이 없어 원문은 fetchDocumentContent로 따로 받는다. */
   documents?: { id: string; label: string }[]
@@ -33,14 +25,14 @@ interface Props {
   fetchDocumentContent?: (documentId: string) => Promise<string>
   /** 다시 내는 제안에서 폼 밖에 그대로 함께 올라가는 문서 이름 */
   keptDocuments?: string[]
+  /** 에이전트·회의가 만든 제안의 설계 항목 변경. 보기만 하고 다시 낼 때 받은 그대로 보낸다. */
+  fixedItems?: { label: string; detail?: string }[]
   defaultValues?: ProposalFormValues
   // 제안 고치기 · 고쳐서 새로 올리기에서 쓴다.
   status?: ReactNode
   description?: string
   footnote?: string
-  original?: ProposalRow[]
   comments?: { id: string; author: string; body: string }[]
-  baselineVersion?: number
   onShowComments?: () => void
   onSubmit: (values: ProposalFormValues) => Promise<unknown>
   onCancel: () => void
@@ -54,23 +46,21 @@ function FieldError({ message }: { message?: string }) {
   ) : null
 }
 
-// 새 변경 제안 · 창 안에서. 필수는 제목, 이유, 그리고 바꿀 설계 항목이나 고칠 문서 중 하나(PNL-04 수정안 문서 원문 포함).
-// 제안 고치기는 같은 폼에 지금 내용을 채우고, 받은 의견을 옆에 두고, 고친 항목에 처음 올린 문장을 보여 준다.
+// 문서 수정 제안 · 창 안에서. 공용 문서함 '고치기'로 그 문서를 고른 채 열리고, 필수는 제목, 이유, 고친 글이다.
+// 제안 고치기는 같은 폼에 지금 내용을 채우고 받은 의견을 옆에 둔다. 설계 항목 변경은 보기만 한다.
 export function ProposalForm({
   heading,
   submitLabel,
-  items,
   tasks,
   documents = [],
-  keptDocuments = [],
   fetchDocumentContent,
+  keptDocuments = [],
+  fixedItems = [],
   defaultValues,
   status,
   description,
   footnote = '올리면 관련 팀원에게 알림이 가고 AI 영향 분석이 시작돼요. 제출만으로 기준이 바뀌지는 않아요.',
-  original,
   comments,
-  baselineVersion,
   onShowComments,
   onSubmit,
   onCancel,
@@ -89,27 +79,14 @@ export function ProposalForm({
       title: '',
       reason: '',
       task_id: '',
-      items: [emptyRow],
       document_id: '',
       after_content: '',
     },
   })
-  const rows = useFieldArray({ control, name: 'items' })
-  // 고치기 화면은 처음 올린 줄을 필드 id로 기억한다. 줄을 빼도 나머지 줄의 비교가 어긋나지 않는다.
-  const [originalById] = useState(
-    () =>
-      new Map(
-        rows.fields.flatMap((field, index) =>
-          original?.[index] ? [[field.id, original[index]] as const] : [],
-        ),
-      ),
+  // 문서함 '고치기'로 오면 고칠 문서 칸이 열린 채, 설계 항목만 있던 제안은 '+ 문서 고치기'로 연다.
+  const [documentOpen, setDocumentOpen] = useState(
+    !!defaultValues?.document_id || !fixedItems.length,
   )
-  const removed = [...originalById].filter(
-    ([id]) => !rows.fields.some((field) => field.id === id),
-  )
-  // 새 제안은 설계 항목만 보이고 '+ 문서 고치기'로 고칠 문서 칸을 연다(PNL-04 수정안). 문서함 '고치기'로 오면 열린 채.
-  const [documentOpen, setDocumentOpen] = useState(!!defaultValues?.document_id)
-  const values = useWatch({ control, name: 'items' })
   const documentId = useWatch({ control, name: 'document_id' })
   const content = useQuery({
     queryKey: ['documents', documentId, 'approved-content'],
@@ -136,7 +113,7 @@ export function ProposalForm({
           base !== undefined &&
           normalizeDocument(form.after_content ?? '') ===
             normalizeDocument(base)
-        if (unchanged && !form.items.length && !keptDocuments.length) {
+        if (unchanged && !keptDocuments.length && !fixedItems.length) {
           setError('after_content', {
             message: '기준 문서와 달라진 내용이 없어요.',
           })
@@ -211,6 +188,26 @@ export function ProposalForm({
               </p>
             </section>
           )}
+          <details className="rounded-xl border p-3 text-sm">
+            <summary className="cursor-pointer font-medium">
+              관련 작업 연결 (선택)
+            </summary>
+            <NativeSelect
+              aria-label="관련 작업"
+              className="mt-3"
+              {...register('task_id')}
+            >
+              <NativeSelectOption value="">연결하지 않음</NativeSelectOption>
+              {tasks.map((task) => (
+                <NativeSelectOption key={task.id} value={task.id}>
+                  {task.key} · {task.current_plan_revision.plan.title}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            {/* API 없음: 검증·회의 출처 연결은 변경 제안 출처 필드가 정해지면 둔다(백엔드 메모 3). */}
+          </details>
+        </div>
+        <div className="grid content-start gap-4">
           {documents.length > 0 && !documentOpen && (
             <Button
               type="button"
@@ -225,25 +222,26 @@ export function ProposalForm({
           )}
           {documents.length > 0 && documentOpen && (
             <div className="grid gap-2 rounded-xl border p-3">
-              <Label htmlFor="proposal-document">
-                고칠 문서{' '}
-                <span className="text-xs font-normal text-muted-foreground">
-                  선택
-                </span>
-              </Label>
+              <Label htmlFor="proposal-document">고칠 문서</Label>
               <NativeSelect
                 id="proposal-document"
+                aria-invalid={!!errors.document_id}
                 {...register('document_id', {
                   onChange: () => setValue('after_content', ''),
                 })}
               >
-                <NativeSelectOption value="">고치지 않음</NativeSelectOption>
+                <NativeSelectOption value="">
+                  {keptDocuments.length || fixedItems.length
+                    ? '고치지 않음'
+                    : '문서 고르기'}
+                </NativeSelectOption>
                 {documents.map((item) => (
                   <NativeSelectOption key={item.id} value={item.id}>
                     {item.label}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
+              <FieldError message={errors.document_id?.message} />
               {documentId && (
                 <>
                   {content.isLoading && (
@@ -270,7 +268,7 @@ export function ProposalForm({
                   )}
                   <Textarea
                     aria-label="고친 글"
-                    rows={6}
+                    rows={10}
                     aria-invalid={!!errors.after_content}
                     {...register('after_content')}
                   />
@@ -292,167 +290,29 @@ export function ProposalForm({
               </span>
             </p>
           )}
-          <details className="rounded-xl border p-3 text-sm">
-            <summary className="cursor-pointer font-medium">
-              관련 작업 연결 (선택)
-            </summary>
-            <NativeSelect
-              aria-label="관련 작업"
-              className="mt-3"
-              {...register('task_id')}
+          {fixedItems.length > 0 && (
+            <section
+              aria-label="함께 올라가는 설계 항목 변경"
+              className="grid gap-1.5 rounded-xl bg-muted/40 p-3 text-sm"
             >
-              <NativeSelectOption value="">연결하지 않음</NativeSelectOption>
-              {tasks.map((task) => (
-                <NativeSelectOption key={task.id} value={task.id}>
-                  {task.key} · {task.current_plan_revision.plan.title}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            {/* API 없음: 검증·회의 출처 연결은 변경 제안 출처 필드가 정해지면 둔다(백엔드 메모 3). */}
-          </details>
+              <p className="font-semibold">
+                함께 올라가는 설계 항목 변경 {fixedItems.length}개
+              </p>
+              <ul className="grid gap-1">
+                {fixedItems.map((item, index) => (
+                  <li key={index} className="text-xs leading-5">
+                    <strong>{item.label}</strong>
+                    {item.detail && ` · ${item.detail}`}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                에이전트나 회의에서 만든 항목이라 여기서는 고치지 않고 처음 올린
+                그대로 다시 올라가요.
+              </p>
+            </section>
+          )}
         </div>
-        <fieldset className="grid content-start gap-3">
-          <legend className="mb-2 text-sm font-medium">바꿀 설계 항목</legend>
-          {rows.fields.map((field, index) => {
-            const row = values?.[index] ?? field
-            const rowErrors = errors.items?.[index]
-            const base = items.find(
-              (item) => item.design_item_id === row.design_item_id,
-            )
-            const before = originalById.get(field.id)
-            const changed =
-              !!before &&
-              (before.operation !== row.operation ||
-                before.design_item_id !== row.design_item_id ||
-                before.sentence !== row.sentence)
-            return (
-              <div
-                key={field.id}
-                className={cn(
-                  'grid gap-2 rounded-xl border p-3',
-                  changed && 'border-2 border-primary',
-                )}
-                aria-label={`설계 항목 ${index + 1}`}
-                role="group"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <NativeSelect
-                    aria-label={`항목 ${index + 1} 변경 종류`}
-                    {...register(`items.${index}.operation`)}
-                  >
-                    {Object.entries(operationLabel).map(([value, label]) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                  {row.operation === 'CREATE' ? (
-                    <NativeSelect
-                      aria-label={`항목 ${index + 1} 종류`}
-                      {...register(`items.${index}.kind`)}
-                    >
-                      {Object.entries(kindLabel).map(([value, label]) => (
-                        <NativeSelectOption key={value} value={value}>
-                          {label}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  ) : (
-                    <NativeSelect
-                      aria-label={`항목 ${index + 1} 설계 항목`}
-                      aria-invalid={!!rowErrors?.design_item_id}
-                      {...register(`items.${index}.design_item_id`)}
-                    >
-                      <NativeSelectOption value="">
-                        항목 고르기
-                      </NativeSelectOption>
-                      {items.map((item) => (
-                        <NativeSelectOption
-                          key={item.design_item_id}
-                          value={item.design_item_id}
-                        >
-                          {item.key} · 승인 v{item.version_no}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  )}
-                  {changed && (
-                    <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold">
-                      고친 항목
-                    </span>
-                  )}
-                  {(rows.fields.length > 1 || !!documentId) && (
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="ghost"
-                      className="ml-auto"
-                      aria-label={`항목 ${index + 1} 빼기`}
-                      onClick={() => rows.remove(index)}
-                    >
-                      <X />
-                    </Button>
-                  )}
-                </div>
-                <FieldError message={rowErrors?.design_item_id?.message} />
-                {row.operation !== 'RETIRE' && (
-                  <>
-                    <Input
-                      aria-label={`항목 ${index + 1} 바뀔 문장`}
-                      placeholder="바뀔 문장을 한 줄로 써 주세요"
-                      aria-invalid={!!rowErrors?.sentence}
-                      {...register(`items.${index}.sentence`)}
-                    />
-                    <FieldError message={rowErrors?.sentence?.message} />
-                  </>
-                )}
-                {base && row.operation !== 'CREATE' && (
-                  <p className="text-xs text-muted-foreground">
-                    {baselineVersion
-                      ? `지금 기준 v${baselineVersion}`
-                      : '지금 승인본'}
-                    : {describeContent(base.content)}
-                  </p>
-                )}
-                {changed && before.sentence && (
-                  <p className="text-xs text-muted-foreground">
-                    처음 올린 문장: {before.sentence}
-                  </p>
-                )}
-              </div>
-            )
-          })}
-          <FieldError
-            message={errors.items?.root?.message ?? errors.items?.message}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="justify-self-start"
-            onClick={() => rows.append(emptyRow)}
-          >
-            <Plus />
-            항목 추가
-          </Button>
-          {removed.map(([id, row]) => (
-            <p
-              key={id}
-              className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground"
-            >
-              {operationLabel[row.operation]} ·{' '}
-              {row.operation === 'CREATE'
-                ? kindLabel[row.kind]
-                : (items.find(
-                    (item) => item.design_item_id === row.design_item_id,
-                  )?.key ?? '설계 항목')}
-              {row.sentence && ` · ${row.sentence}`}
-              <span className="ml-2 font-semibold text-foreground">
-                이번 제안에서 뺐어요
-              </span>
-            </p>
-          ))}
-        </fieldset>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
         <p className="mr-auto text-xs text-muted-foreground">{footnote}</p>
