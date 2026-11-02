@@ -23,8 +23,11 @@ public class AiClient {
 
     public AiClient(BeezProperties props) {
         BeezProperties.Ai ai = props.ai();
-        // Plain HTTP/1.1: the JDK client's default HTTP/2 h2c upgrade is rejected by uvicorn with 400.
-        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(ai.connectTimeout()).build();
+        // Uvicorn uses HTTP/1.1; avoid h2c upgrades on streamed request bodies.
+        HttpClient http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(ai.connectTimeout())
+                .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(ai.readTimeout());
         this.rest = RestClient.builder()
@@ -59,6 +62,12 @@ public class AiClient {
     @SuppressWarnings("unchecked")
     public java.util.Map<String, Object> documentEmbeddings(java.util.Map<String, Object> input) {
         return rest.post().uri("/v1/embeddings").body(input).retrieve().body(java.util.Map.class);
+    }
+
+    /** Analyze a proposal; callers must retain the usage envelope and handle failures explicitly. */
+    @SuppressWarnings("unchecked")
+    public java.util.Map<String, Object> changeImpact(java.util.Map<String, Object> input) {
+        return rest.post().uri("/v1/impact").body(input).retrieve().body(java.util.Map.class);
     }
 
     /** BE adapter contract; AI feature implementation belongs to the AI owner. */
