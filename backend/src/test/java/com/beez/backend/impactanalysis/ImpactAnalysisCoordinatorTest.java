@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.RestClientResponseException;
+import tools.jackson.databind.json.JsonMapper;
 
 class ImpactAnalysisCoordinatorTest {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
@@ -43,6 +44,37 @@ class ImpactAnalysisCoordinatorTest {
         return new ImpactContextQuery.TaskReference(30, "TASK-1", "READY", null, 0, NOW, NOW, 40L, 50, 1,
                 "작업", "목표", "[\"회원 조회\"]", "[]", "방법", "[]", "[]", "[]", false,
                 null, 4, null, NOW, itemId, versionId, "READS", null, 60L, "PASS");
+    }
+
+    private ImpactContextQuery.Snapshot snapshotWithLocation(String location) {
+        var base = snapshot();
+        var source = new ImpactContextQuery.ApprovedItem(10, 100, "API-1", "API_CONTRACT", 1, 1,
+                "member", "{\"path\":\"/v1\"}", 7L, 8L, 1,
+                JsonMapper.builder().build().writeValueAsString(Map.of("location", location)));
+        return new ImpactContextQuery.Snapshot(base.proposal(), base.changes(), List.of(source),
+                base.dependencies(), base.taskReferences(), base.ruleCandidateStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {" lines 5-7 ", "\u00a0lines 5-7\u00a0", "\u0085lines 5-7\u0085"})
+    void normalizesSourceLocationExactlyBeforeSendingToAi(String location) {
+        var body = ImpactRequestAssembler.assemble(snapshotWithLocation(location), "request-1");
+        var approved = (Map<?, ?>) ((List<?>) body.get("approved_items")).getFirst();
+        assertThat(((Map<?, ?>) approved.get("source")).get("location")).isEqualTo("lines 5-7");
+    }
+
+    @Test
+    void retainsNonStrippedControlAndInternalWhitespace() {
+        var body = ImpactRequestAssembler.assemble(snapshotWithLocation("\u001clines  5-7\u001c"), "request-1");
+        var approved = (Map<?, ?>) ((List<?>) body.get("approved_items")).getFirst();
+        assertThat(((Map<?, ?>) approved.get("source")).get("location")).isEqualTo("\u001clines  5-7\u001c");
+    }
+
+    @Test
+    void whitespaceOnlySourceWithoutLineRangeIsNotSent() {
+        var body = ImpactRequestAssembler.assemble(snapshotWithLocation("\u00a0 \u0085"), "request-1");
+        var approved = (Map<?, ?>) ((List<?>) body.get("approved_items")).getFirst();
+        assertThat(approved.containsKey("source")).isFalse();
     }
 
     @Test
@@ -182,6 +214,25 @@ class ImpactAnalysisCoordinatorTest {
         assertThat(outcome.status()).isEqualTo(ImpactAnalysisCoordinator.Status.INSUFFICIENT_EVIDENCE);
         assertThat(outcome.errorCode()).isEqualTo("rule_candidates_not_connected");
         assertThat(outcome.aiEnvelope()).isNotNull();
+    }
+
+    @Test
+    void rejectsAChangedSourceAfterLocationNormalization() {
+        var snapshot = snapshotWithLocation(" lines 5-7 ");
+        var query = mock(ImpactContextQuery.class);
+        var ai = mock(AiClient.class);
+        var caller = CallerContext.human(4L);
+        when(query.load(caller, 1, 71)).thenReturn(snapshot);
+        var forged = Map.of("document_id", "7", "document_version_id", "8", "version_no", 1,
+                "location", "lines 5-8");
+        var candidate = Map.of("design_item_id", "10", "reason", "변경 검토", "sources", List.of(forged));
+        when(ai.changeImpact(any())).thenReturn(Map.of("result", Map.of("candidates", List.of(candidate),
+                "evidence_status", "SUFFICIENT"), "usage", List.of(Map.of("request_key", "call-1"))));
+
+        var outcome = new ImpactAnalysisCoordinator(query, ai).analyze(caller, 1, 71, "req");
+
+        assertThat(outcome.status()).isEqualTo(ImpactAnalysisCoordinator.Status.AI_FAILED);
+        assertThat(outcome.errorCode()).isEqualTo("invalid_output");
     }
     @Test
     void unavailableProposedSchemaVersionRemainsUnassessedAndDoesNotCallAi() {

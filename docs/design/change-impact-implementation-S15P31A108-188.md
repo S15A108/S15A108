@@ -23,6 +23,8 @@
 
 ## 검증과 한계
 
+- 출처 위치는 AI의 Pydantic 모델과 같은 공백 기준으로 **요청 조립 시에만** 앞뒤를 정규화하며 저장 원본은 바꾸지 않는다. 응답의 문서 ID·버전·위치는 기존처럼 요청과 정확하게 대조한다. 일반 공백·NBSP·NEL과 정규화 대상이 아닌 제어 문자를 실제 FastAPI HTTP 왕복으로 검증했고, 다른 위치는 거부하는 단위 테스트도 확인했다. 이 테스트는 DB 조회와 모델을 대역으로 사용한다.
+- 위 HTTP 왕복 테스트는 AI 가상환경을 준비한 뒤 저장소 루트에서 `ai/.venv/Scripts/python.exe backend/src/test/resources/run_impact_source_http_test.py`(Windows) 또는 `ai/.venv/bin/python backend/src/test/resources/run_impact_source_http_test.py`로 실행한다. 임시 로컬 서버·무작위 토큰·모의 LLM을 사용하고 Docker나 외부 LLM은 필요 없다.
 - 격리 PostgreSQL(Testcontainers)과 별도 FastAPI 프로세스 간 실제 HTTP 시험에서 영향 분석 성공·모델 타임아웃 응답 및 사용량을 확인했다. 모델과 타임아웃은 테스트 제공자이며 청킹·임베딩 회귀에는 테스트 토큰 계산기·임베딩 제공자를 사용한다. 데이터는 가상이며 운영 설정은 변경하지 않는다. 테스트는 opt-in으로, 실행 방법은 [AI 모듈 README](../../ai/app/services/change_impact/README.md#be와-ai의-http-연동-시험)를 참고한다.
 - 최종 테스트 설정의 별도 GMS `gpt-6-luna` 실제 호출 1회에서 AI 후보 1건, AI 근거 상태 `INSUFFICIENT`, 사용량 입력 878·출력 724 토큰을 확인했다. 규칙 후보 미연결로 BE 최종 상태는 `INSUFFICIENT_EVIDENCE`였다. 단일 가상 사례로 품질·반복 안정성을 보장하지 않는다. 이전 서버 기동 실패는 원인을 확인하지 못했고 재현되지 않았다.
 - 공통 `AiClient`는 Uvicorn httptools의 h2c 업그레이드·chunked 요청에서 발생한 400을 피하도록 HTTP/1.1을 사용한다. 공개 BE API가 없어 이 HTTP 시험은 Spring 서비스를 직접 호출해 시작하므로 사용자용 BE HTTP API를 검증하지 않으며, #197 결과·사용량 DB 저장이나 #227 CDC 연결도 검증하지 않는다.

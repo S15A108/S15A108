@@ -81,8 +81,8 @@ class FakeImpactProvider:
             "candidates": [
                 {
                     "design_item_id": first["design_item_id"],
-                    "reason": "Fixture reports a possible design impact; source unavailable.",
-                    "sources": [],
+                    "reason": "Fixture reports a possible design impact.",
+                    "sources": [first["source"]] if first.get("source") else [],
                 }
             ],
             "evidence_status": "INSUFFICIENT",

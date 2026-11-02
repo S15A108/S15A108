@@ -156,8 +156,9 @@ public final class ImpactRequestAssembler {
         }
         Object parsed = JSON.readValue(item.sourceLocator(), Object.class);
         if (!(parsed instanceof Map<?, ?> locator)) return Optional.empty();
-        Object location = locator.get("location");
-        if (!(location instanceof String text) || text.isBlank()) {
+        Object rawLocation = locator.get("location");
+        String location = rawLocation instanceof String text ? stripAiWhitespace(text) : "";
+        if (location.isEmpty()) {
             Object start = locator.get("start_line"), end = locator.get("end_line");
             if ("text_lines".equals(locator.get("type")) && start instanceof Number a && end instanceof Number b
                     && a.longValue() > 0 && b.longValue() >= a.longValue()) {
@@ -169,6 +170,28 @@ public final class ImpactRequestAssembler {
         return Optional.of(Map.of("document_id", id(item.sourceDocumentId()),
                 "document_version_id", id(item.sourceDocumentVersionId()),
                 "version_no", item.sourceDocumentVersionNo(), "location", location));
+    }
+
+    /** Match the Unicode whitespace stripped by the AI's Pydantic model. */
+    private static String stripAiWhitespace(String value) {
+        int start = 0, end = value.length();
+        while (start < end) {
+            int ch = value.codePointAt(start);
+            if (!isAiWhitespace(ch)) break;
+            start += Character.charCount(ch);
+        }
+        while (end > start) {
+            int ch = value.codePointBefore(end);
+            if (!isAiWhitespace(ch)) break;
+            end -= Character.charCount(ch);
+        }
+        return value.substring(start, end);
+    }
+
+    private static boolean isAiWhitespace(int ch) {
+        // Java regards U+001C–U+001F as whitespace; Pydantic does not strip them.
+        return !(ch >= 0x1c && ch <= 0x1f)
+                && (Character.isWhitespace(ch) || Character.isSpaceChar(ch) || ch == 0x85);
     }
 
     @SuppressWarnings("unchecked")
