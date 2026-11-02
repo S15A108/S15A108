@@ -5,6 +5,18 @@ export const idSchema = z
   .string()
   .regex(/^(0|[1-9]\d*)$/, '십진 문자열 ID가 필요합니다.')
 export const timeSchema = z.iso.datetime()
+// 추정 비용: 명세는 십진 문자열이지만 서버(BigDecimal)는 JSON 숫자로 주고, 단가가 없으면 null을 준다.
+// 숫자·문자열 모두 받아 문자열로 맞추고 null은 없는 값으로 본다(PR #72 전수 리뷰 SC-1).
+export const costAmountSchema = z
+  .union([z.number(), z.string()])
+  .nullish()
+  .transform((value) => (value == null ? undefined : String(value)))
+  .optional()
+export const currencySchema = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? undefined)
+  .optional()
 export const structuredContentSchema = z.record(z.string(), z.unknown())
 export const pageQuerySchema = z.object({
   cursor: z.string().optional(),
@@ -265,8 +277,8 @@ export const usageSchema = z.object({
   output_tokens: z.number().int().optional(),
   latency_ms: z.number().int(),
   failed: z.boolean(),
-  estimated_cost_amount: z.string().optional(),
-  currency: z.string().optional(),
+  estimated_cost_amount: costAmountSchema,
+  currency: currencySchema,
   tokens_known: z.boolean(),
 })
 export type Usage = z.infer<typeof usageSchema>
@@ -939,7 +951,7 @@ export const usageBucketSchema = z.object({
   input_tokens: z.number().int(),
   output_tokens: z.number().int(),
   call_count: z.number().int(),
-  estimated_cost_amount: z.string().optional(),
+  estimated_cost_amount: costAmountSchema,
 })
 export type UsageBucket = z.infer<typeof usageBucketSchema>
 
@@ -949,8 +961,8 @@ export const usageSummarySchema = z.object({
   input_tokens: z.number().int(),
   output_tokens: z.number().int(),
   call_count: z.number().int(),
-  estimated_cost_amount: z.string().optional(),
-  currency: z.string().optional(),
+  estimated_cost_amount: costAmountSchema,
+  currency: currencySchema,
   by_feature: usageBucketSchema.array(),
   by_task: usageBucketSchema.array(),
   by_validation: usageBucketSchema.array(),
