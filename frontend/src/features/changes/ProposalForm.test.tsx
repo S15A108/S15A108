@@ -109,3 +109,63 @@ it('기준 원문을 받지 못하면 고친 글을 써도 올리지 않는다',
   ).toBeInTheDocument()
   expect(onSubmit).not.toHaveBeenCalled()
 })
+
+// 추가 점검 3: 기준이 바뀌어 반려된 제안을 다시 내면, 승인본이 바뀐 문서는 옛 글 대신 새 기준 원문에서 다시 시작한다.
+it('기준이 바뀐 제안을 다시 낼 때 경고를 보이고 새 기준 원문에서 시작하며, 승인본이 바뀐 문서는 보내지 않는다', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <ProposalForm
+        heading="고쳐서 다시 올리기"
+        submitLabel="다시 올리기"
+        tasks={[]}
+        documents={[
+          { id: '201', label: '기획안', versionId: '2012' },
+          { id: '203', label: '요구사항 명세서', versionId: '2031' },
+          { id: '205', label: 'ERD', versionId: '2052' },
+        ]}
+        fetchDocumentContent={() =>
+          Promise.resolve({ content: '# 기획안\n새 기준', versionId: '2012' })
+        }
+        sourceDocuments={[
+          {
+            id: '201',
+            title: '기획안',
+            afterContent: '# 기획안\n옛 기준에서 쓴 글',
+            stale: true,
+          },
+          {
+            id: '203',
+            title: '요구사항 명세서',
+            afterContent: '요구사항 글',
+            stale: false,
+          },
+          { id: '205', title: 'ERD', afterContent: 'ERD 글', stale: true },
+        ]}
+        baseChangedTo={2}
+        defaultValues={{
+          title: '빈 목록 안내',
+          reason: '안내가 필요해요.',
+          task_id: '',
+          document_id: '201',
+          after_content: '',
+        }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    </QueryClientProvider>,
+  )
+  expect(screen.getByText('기준이 v2(으)로 바뀌었어요')).toBeInTheDocument()
+  await waitFor(() =>
+    expect(screen.getByLabelText('고친 글')).toHaveValue('# 기획안\n새 기준'),
+  )
+  expect(
+    screen.getByText('반려된 제안의 글 보기 (비교용)').closest('details'),
+  ).toHaveTextContent('옛 기준에서 쓴 글')
+  expect(screen.getByText(/함께 올라가는 문서 변경 1개/)).toHaveTextContent(
+    '요구사항 명세서',
+  )
+  expect(screen.getByText(/승인본이 바뀐 문서 1개/)).toHaveTextContent('ERD')
+})

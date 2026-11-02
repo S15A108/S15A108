@@ -59,6 +59,20 @@ export const proposalFormSchema = z
   })
 export type ProposalFormValues = z.infer<typeof proposalFormSchema>
 
+// 다시 내는 제안의 문서 변경 중 기준 버전이 지금 승인본과 다른 것(그 사이 다른 변경이 승인됨)은 그대로 낼 수 없다.
+// 그대로 내면 승인된 변경을 되돌리거나 409가 나므로, 새 기준에서 다시 쓰게 따로 나눈다.
+export function isStaleDocument(
+  change: Pick<
+    ResolvedDocumentChange,
+    'document_id' | 'base_document_version_id'
+  >,
+  currentVersionOf: (documentId: string) => string | undefined,
+) {
+  return (
+    currentVersionOf(change.document_id) !== change.base_document_version_id
+  )
+}
+
 // 제안의 문서 변경. 폼은 문서 하나(document_id)를 고치고, 원래 제안의 나머지 문서 변경은 받은 값 그대로 함께 보낸다.
 // 폼에서 같은 문서를 고르면 폼의 글이 그 문서를 대신한다.
 export function toDocumentChanges(

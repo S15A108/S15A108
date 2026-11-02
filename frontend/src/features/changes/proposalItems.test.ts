@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest'
-import { proposalFormSchema, toDocumentChanges } from './proposalItems'
+import {
+  isStaleDocument,
+  proposalFormSchema,
+  toDocumentChanges,
+} from './proposalItems'
 
 // PR #72 리뷰 1: 문서 2개짜리 반려 제안을 그대로 다시 내면 두 문서 변경이 모두 요청에 남아야 한다.
 it('다시 내는 제안은 폼에서 고친 첫 문서와 나머지 문서 변경을 모두 보낸다', () => {
@@ -86,4 +90,51 @@ it('고친 문서의 기준 버전을 모르면 문서 변경을 만들지 않�
   expect(() =>
     toDocumentChanges({ document_id: '203', after_content: '글' }, undefined),
   ).toThrow('고친 문서의 기준 버전을 알 수 없어요.')
+})
+
+// 추가 점검 1: 폼에서 고칠 문서를 다른 문서로 바꿔도 원래 첫 문서의 변경은 남는다.
+it('다시 낼 때 남길 문서는 원래 제안의 모든 문서 중 폼에서 지금 고치는 문서만 뺀다', () => {
+  const source = [
+    {
+      document_id: '201',
+      base_document_version_id: '2011',
+      proposed_document_version_id: '2019',
+      after_content: '기획안 고친 글',
+      content_hash: 'sha256:a',
+    },
+    {
+      document_id: '203',
+      base_document_version_id: '2031',
+      proposed_document_version_id: '2039',
+      after_content: '요구사항 고친 글',
+      content_hash: 'sha256:b',
+    },
+  ]
+  expect(
+    toDocumentChanges(
+      { document_id: '203', after_content: '요구사항 새 글' },
+      '2031',
+      source,
+    ).map((change) => [change.document_id, change.after_content]),
+  ).toEqual([
+    ['203', '요구사항 새 글'],
+    ['201', '기획안 고친 글'],
+  ])
+})
+
+// 추가 점검 3: 기준 버전이 지금 승인본과 다른 문서 변경은 그대로 낼 수 없다.
+it('문서 변경의 기준 버전이 지금 승인본과 다르면 기준이 바뀐 문서로 본다', () => {
+  const current = (id: string) => ({ '201': '2012', '203': '2031' })[id]
+  expect(
+    isStaleDocument(
+      { document_id: '201', base_document_version_id: '2011' },
+      current,
+    ),
+  ).toBe(true)
+  expect(
+    isStaleDocument(
+      { document_id: '203', base_document_version_id: '2031' },
+      current,
+    ),
+  ).toBe(false)
 })

@@ -34,7 +34,12 @@ import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { foldDiff, lineDiff } from './lineDiff'
 import { ProposalForm } from './ProposalForm'
-import { kindLabel, operationLabel, toDocumentChanges } from './proposalItems'
+import {
+  isStaleDocument,
+  kindLabel,
+  operationLabel,
+  toDocumentChanges,
+} from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
 
 interface Props {
@@ -232,6 +237,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
   }
   const publishedVersion = (id: string) =>
     baselines.data?.items.find((item) => item.id === id)?.version_no
+  const currentVersionOf = (documentId: string) =>
+    documentOptions.find((item) => item.id === documentId)?.versionId
   const perform = (operation: () => Promise<unknown>, message: string) =>
     action.run(operation, message).catch(() => undefined)
   const submitForm = async (
@@ -250,12 +257,14 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
         : {}),
       // 설계 항목 변경은 에이전트·회의가 만든 것만 있고, 다시 낼 때 받은 그대로 보낸다.
       items: source?.items ?? [],
-      // 폼은 첫 문서만 고치고, 나머지 문서 변경은 원래 제안 값 그대로 함께 보낸다.
-      // 고친 문서의 기준 버전은 화면이 보여 준 원문의 버전이다.
+      // 폼은 문서 하나를 고치고, 원래 제안의 나머지 문서 변경(폼에서 지금 고치는 문서만 빼고)은 받은 값 그대로 보낸다.
+      // 기준이 바뀐 문서는 그대로 낼 수 없어 빼고(폼에 안내), 고친 문서의 기준 버전은 화면이 보여 준 원문의 버전이다.
       documents: toDocumentChanges(
         values,
         values.base_version_id,
-        source?.documents.slice(1),
+        source?.documents.filter(
+          (change) => !isStaleDocument(change, currentVersionOf),
+        ),
       ),
     }
     await action.run(
@@ -431,14 +440,21 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                   versionId: result.version.id,
                 }))
               }
-              keptDocuments={mode.source?.documents
-                .slice(1)
-                .map(
-                  (change) =>
-                    documentOptions.find(
-                      (item) => item.id === change.document_id,
-                    )?.title ?? '문서',
-                )}
+              sourceDocuments={mode.source?.documents.map((change) => ({
+                id: change.document_id,
+                title:
+                  documentOptions.find((item) => item.id === change.document_id)
+                    ?.title ?? '문서',
+                afterContent: change.after_content,
+                stale: isStaleDocument(change, currentVersionOf),
+              }))}
+              baseChangedTo={
+                mode.source &&
+                baseline.data &&
+                mode.source.base_baseline_id !== baseline.data.id
+                  ? baseline.data.version_no
+                  : undefined
+              }
               fixedItems={mode.source?.items.map((item) => ({
                 label: `${operationLabel[item.operation]} · ${
                   item.operation === 'CREATE'
@@ -494,12 +510,15 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       reason: mode.source.reason,
                       task_id: mode.source.task_id ?? '',
                       document_id: mode.source.documents[0]?.document_id ?? '',
+                      // 기준이 바뀐 문서는 옛 글 대신 새 기준 원문에서 다시 시작한다(옛 글은 폼에서 비교용으로 보여 준다).
                       after_content:
-                        mode.source.documents[0]?.after_content ?? '',
-                      kept_documents: Math.max(
-                        0,
-                        mode.source.documents.length - 1,
-                      ),
+                        mode.source.documents[0] &&
+                        !isStaleDocument(
+                          mode.source.documents[0],
+                          currentVersionOf,
+                        )
+                          ? mode.source.documents[0].after_content
+                          : '',
                       kept_items: mode.source.items.length,
                     }
                   : mode.documentId

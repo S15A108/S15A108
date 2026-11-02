@@ -25,8 +25,15 @@ interface Props {
   fetchDocumentContent?: (
     documentId: string,
   ) => Promise<{ content: string; versionId: string }>
-  /** 다시 내는 제안에서 폼 밖에 그대로 함께 올라가는 문서 이름 */
-  keptDocuments?: string[]
+  /** 다시 내는 제안의 문서 변경. 폼에서 고치는 문서 말고는 그대로 함께 올라가고, 기준이 바뀐 문서(stale)는 빠진다. */
+  sourceDocuments?: {
+    id: string
+    title: string
+    afterContent: string
+    stale: boolean
+  }[]
+  /** 다시 내는 제안의 기준이 지금 기준과 다르면 지금 기준 버전 */
+  baseChangedTo?: number
   /** 에이전트·회의가 만든 제안의 설계 항목 변경. 보기만 하고 다시 낼 때 받은 그대로 보낸다. */
   fixedItems?: { label: string; detail?: string }[]
   defaultValues?: ProposalFormValues
@@ -56,7 +63,8 @@ export function ProposalForm({
   tasks,
   documents = [],
   fetchDocumentContent,
-  keptDocuments = [],
+  sourceDocuments = [],
+  baseChangedTo,
   fixedItems = [],
   defaultValues,
   status,
@@ -116,6 +124,16 @@ export function ProposalForm({
       setValue('base_version_id', loaded.versionId)
     }
   }, [documentId, content.data, getValues, setValue])
+  // 원래 제안의 문서 중 폼에서 지금 고치는 문서만 빼고 함께 올라간다. 기준이 바뀐 문서는 그대로 낼 수 없어 뺀다.
+  const kept = sourceDocuments.filter((item) => item.id !== documentId)
+  const keptFresh = kept.filter((item) => !item.stale)
+  const keptStale = kept.filter((item) => item.stale)
+  const editingStale = sourceDocuments.find(
+    (item) => item.id === documentId && item.stale,
+  )
+  useEffect(() => {
+    setValue('kept_documents', keptFresh.length)
+  }, [keptFresh.length, setValue])
   const shownVersion = useWatch({ control, name: 'base_version_id' })
   const latestVersion = useWatch({ control, name: 'latest_version_id' })
   const outdated =
@@ -151,7 +169,7 @@ export function ProposalForm({
           base !== undefined &&
           normalizeDocument(form.after_content ?? '') ===
             normalizeDocument(base)
-        if (unchanged && !keptDocuments.length && !fixedItems.length) {
+        if (unchanged && !keptFresh.length && !fixedItems.length) {
           setError('after_content', {
             message: '기준 문서와 달라진 내용이 없어요.',
           })
@@ -172,6 +190,24 @@ export function ProposalForm({
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         )}
       </div>
+      {(baseChangedTo !== undefined ||
+        sourceDocuments.some((item) => item.stale)) && (
+        <div
+          role="alert"
+          className="grid gap-1 rounded-[14px] bg-[#fdf8e6] px-3.5 py-3 text-[13px] leading-5"
+        >
+          <strong className="text-sm">
+            {baseChangedTo !== undefined
+              ? `기준이 v${baseChangedTo}(으)로 바뀌었어요`
+              : '그 사이 문서의 승인본이 바뀌었어요'}
+          </strong>
+          <span className="text-muted-foreground">
+            이 제안은 옛 기준에서 쓴 글이라 그대로 내면 그 사이 승인된 변경을
+            되돌릴 수 있어요. 승인본이 바뀐 문서는 새 기준 원문에서 다시
+            시작하고, 반려된 제안의 글은 비교용으로 보여 줘요.
+          </span>
+        </div>
+      )}
       <div className="grid gap-5 xl:grid-cols-2">
         <div className="grid content-start gap-4">
           <div className="grid gap-1.5">
@@ -274,7 +310,7 @@ export function ProposalForm({
                 })}
               >
                 <NativeSelectOption value="">
-                  {keptDocuments.length || fixedItems.length
+                  {sourceDocuments.length || fixedItems.length
                     ? '고치지 않음'
                     : '문서 고르기'}
                 </NativeSelectOption>
@@ -341,12 +377,32 @@ export function ProposalForm({
               )}
             </div>
           )}
-          {keptDocuments.length > 0 && (
+          {editingStale && (
+            <details className="rounded-xl border p-3 text-sm">
+              <summary className="cursor-pointer font-medium">
+                반려된 제안의 글 보기 (비교용)
+              </summary>
+              <pre className="mt-2 max-h-48 overflow-auto font-mono text-xs whitespace-pre-wrap">
+                {editingStale.afterContent}
+              </pre>
+            </details>
+          )}
+          {keptFresh.length > 0 && (
             <p className="rounded-xl bg-muted/40 p-3 text-sm">
-              함께 올라가는 문서 변경 {keptDocuments.length}개:{' '}
-              {keptDocuments.join(', ')}
+              함께 올라가는 문서 변경 {keptFresh.length}개:{' '}
+              {keptFresh.map((item) => item.title).join(', ')}
               <span className="block text-xs text-muted-foreground">
                 고치지 않아도 처음 올린 글 그대로 다시 올라가요.
+              </span>
+            </p>
+          )}
+          {keptStale.length > 0 && (
+            <p className="rounded-xl bg-[#fdf8e6] p-3 text-sm">
+              승인본이 바뀐 문서 {keptStale.length}개:{' '}
+              {keptStale.map((item) => item.title).join(', ')}
+              <span className="block text-xs text-muted-foreground">
+                옛 기준에서 쓴 글이라 이번에는 함께 보내지 않아요. 고칠 문서로
+                골라 새 기준 원문에서 다시 써 주세요.
               </span>
             </p>
           )}
