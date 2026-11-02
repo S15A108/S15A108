@@ -1,7 +1,8 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { AxiosError, AxiosHeaders } from 'axios'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { authApi } from '@/api/services'
@@ -159,5 +160,45 @@ it('올린 사람이 아니면 검토를 부르지 않고 자동 검토 안내�
     await screen.findByText(/올린 문서는 비비가 바로 검토해요/),
   ).toBeInTheDocument()
   expect(request).not.toHaveBeenCalled()
+  request.mockRestore()
+})
+
+// PR #72 리뷰 2: 참고 승인본이 바뀌어 409 review_stale이면 검토를 무효로 보이고, 다시 열어도 '비비 검토 다시 받기'로 이어진다.
+it('반영이 review_stale로 막히면 검토 무효 안내와 다시 받기를 보이고, 다시 열어도 그대로다', async () => {
+  const user = userEvent.setup()
+  const stale = new AxiosError(
+    'Conflict',
+    'ERR_BAD_REQUEST',
+    undefined,
+    undefined,
+    {
+      status: 409,
+      statusText: 'Conflict',
+      headers: {},
+      config: { headers: new AxiosHeaders() },
+      data: {
+        error: { code: 'review_stale', message: '참고 승인본이 바뀌었어요.' },
+      },
+    },
+  )
+  const decide = vi
+    .spyOn(documentsApi, 'decideSuggestion')
+    .mockRejectedValue(stale)
+  mount(true)
+  await screen.findByText(/비비가 수정 제안 \d개를 남겼어요/)
+  await user.click(screen.getAllByRole('button', { name: '반영하기' })[0])
+  expect(
+    await screen.findByText(/이 검토는 더 쓸 수 없어요/),
+  ).toBeInTheDocument()
+  expect(screen.queryAllByRole('button', { name: '반영하기' })).toHaveLength(0)
+  cleanup()
+  mount(true)
+  expect(
+    await screen.findByRole('button', { name: '비비 검토 다시 받기' }),
+  ).toBeInTheDocument()
+  decide.mockRestore()
+  const request = vi.spyOn(documentsApi, 'requestBeeReview')
+  await user.click(screen.getByRole('button', { name: '비비 검토 다시 받기' }))
+  await waitFor(() => expect(request).toHaveBeenCalled())
   request.mockRestore()
 })

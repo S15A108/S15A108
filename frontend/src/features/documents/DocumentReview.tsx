@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
 import { getApiErrorCode, getApiErrorMessage } from '@/api/error'
@@ -26,6 +26,10 @@ const REVIEW_STEPS = [
   '요구사항과 비교',
   '수정 제안 정리',
 ]
+
+// 다른 문서가 승인돼 참고 승인본이 바뀌면 반영·넘기기·검토 요청이 409 review_stale로 막힌다. 응답에 낡은 검토라는
+// 표시가 없어, 한 번 받은 검토 id를 기억해 창을 다시 열어도 무효 안내와 '비비 검토 다시 받기'를 바로 보인다.
+const staleReviews = new Set<string>()
 
 // 공용 문서함 · 문서별 검토 흐름(PNL-02-m): 비비 검토 → 수정 제안 반영 → 최종본 확인 → 팀장 승인·반려.
 export function DocumentReview({
@@ -104,8 +108,19 @@ export function DocumentReview({
   const nameOf = (accountId?: string) =>
     members.data?.items.find((member) => member.account_id === accountId)
       ?.name ?? '팀원'
+  const [, rerender] = useReducer((count: number) => count + 1, 0)
   const run = (operation: () => Promise<unknown>, message: string) =>
-    void action.run(operation, message).catch(() => undefined)
+    void action.run(operation, message).catch((cause: unknown) => {
+      const reviewId = currentStage?.review?.id
+      if (getApiErrorCode(cause) === 'review_stale' && reviewId) {
+        staleReviews.add(reviewId)
+        rerender()
+      }
+    })
+  const reviewStale =
+    !!currentStage?.review &&
+    current?.status !== 'SUBMITTED' &&
+    staleReviews.has(currentStage.review.id)
   return (
     <section
       aria-label={`${title} 검토`}
@@ -247,7 +262,38 @@ export function DocumentReview({
                   )}
                 </div>
               )}
-              {stage.step === 2 && stage.review && (
+              {reviewStale && (
+                <div
+                  role="alert"
+                  className="grid gap-2 rounded-xl border border-[#c99e1e]/45 bg-primary/10 p-4 text-sm"
+                >
+                  <strong>
+                    참고하던 승인 문서가 바뀌어 이 검토는 더 쓸 수 없어요
+                  </strong>
+                  <span className="text-muted-foreground">
+                    비비 검토를 다시 받으면 지금 승인본을 기준으로 수정 제안을
+                    새로 받아요.
+                  </span>
+                  {bee.error && !running && (
+                    <span className="text-destructive">
+                      {getApiErrorMessage(bee.error)}
+                    </span>
+                  )}
+                  {owner && (
+                    <Button
+                      variant="outline"
+                      className="justify-self-start"
+                      disabled={bee.isPending}
+                      onClick={() => bee.mutate(data.revision)}
+                    >
+                      {bee.isPending
+                        ? '다시 검토하는 중…'
+                        : '비비 검토 다시 받기'}
+                    </Button>
+                  )}
+                </div>
+              )}
+              {stage.step === 2 && stage.review && !reviewStale && (
                 <Suggestions
                   review={stage.review}
                   owner={owner}
@@ -271,7 +317,8 @@ export function DocumentReview({
               )}
               {stage.step === 3 &&
                 data.status !== 'SUBMITTED' &&
-                stage.review && (
+                stage.review &&
+                !reviewStale && (
                   <div className="grid gap-3">
                     <h4 className="font-semibold">최종본 확인</h4>
                     <p className="rounded-lg bg-primary/10 px-3 py-2 text-sm">
