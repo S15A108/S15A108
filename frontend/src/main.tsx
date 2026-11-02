@@ -4,18 +4,14 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router/dom'
 import './index.css'
 import { router } from './router'
-import { isMissingApi } from '@/api/error'
+import { shouldRetryQuery } from '@/api/error'
 import { reloadOnStaleChunk } from '@/lib/reloadOnStaleChunk'
 
 reloadOnStaleChunk()
 
-// 서버에 아직 없는 API(isMissingApi)는 다시 불러도 같으니 재시도하지 않고 바로 '준비 중'을 보인다. 나머지는 기본 3번.
+// 5xx와 네트워크 오류만 재시도한다. 다시 불러도 같은 4xx(없는 API의 '준비 중' 포함)는 바로 보인다.
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (count, error) => !isMissingApi(error) && count < 3,
-    },
-  },
+  defaultOptions: { queries: { retry: shouldRetryQuery } },
 })
 
 async function bootstrap() {

@@ -1,6 +1,11 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { expect, it } from 'vitest'
-import { getApiErrorMessage, isMissingApi, MISSING_API_MESSAGE } from './error'
+import {
+  getApiErrorMessage,
+  isMissingApi,
+  MISSING_API_MESSAGE,
+  shouldRetryQuery,
+} from './error'
 
 const failure = (code: string) =>
   new AxiosError('conflict', 'ERR_BAD_REQUEST', undefined, undefined, {
@@ -55,4 +60,16 @@ it('서버에 없는 경로·메서드만 준비 중으로 보고, 있는 API의
   expect(getApiErrorMessage(missingPath)).toBe(
     '이 기능은 서버에서 아직 준비 중이에요.',
   )
+})
+
+// 추가 점검 6: 다시 불러도 같은 4xx는 재시도하지 않고, 5xx와 네트워크 오류만 3번까지 다시 부른다.
+it('조회는 5xx와 네트워크 오류만 3번까지 다시 부르고 4xx는 바로 보인다', () => {
+  for (const status of [400, 401, 403, 404, 405, 409])
+    expect(shouldRetryQuery(0, response(status))).toBe(false)
+  expect(shouldRetryQuery(0, response(500))).toBe(true)
+  expect(shouldRetryQuery(2, response(503))).toBe(true)
+  expect(shouldRetryQuery(3, response(503))).toBe(false)
+  const offline = new AxiosError('Network Error', 'ERR_NETWORK')
+  expect(shouldRetryQuery(0, offline)).toBe(true)
+  expect(shouldRetryQuery(0, new Error('schema'))).toBe(false)
 })

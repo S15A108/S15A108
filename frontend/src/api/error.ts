@@ -24,6 +24,14 @@ export function isMissingApi(error: unknown): boolean {
   return !parsed.success || parsed.data.error.message === MISSING_API_MESSAGE
 }
 
+// 조회 재시도: 다시 불러도 같은 4xx(400·401·403·404·409, 없는 API 포함)와 응답 모양 오류는 바로 보이고,
+// 서버 오류(5xx)와 응답을 못 받은 네트워크 오류만 3번까지 다시 부른다.
+export function shouldRetryQuery(failureCount: number, error: unknown) {
+  if (!isAxiosError(error)) return false
+  const status = error.response?.status
+  return (status === undefined || status >= 500) && failureCount < 3
+}
+
 // 아직 없다고 알고 부르는 API(호출하는 쪽이 고른다)는 404·405·501이면 undefined로 바꿔,
 // 그 부분만 '준비 중'으로 두고 화면 전체가 실패하지 않게 한다.
 export const unlessMissing = <T>(request: Promise<T>) =>
