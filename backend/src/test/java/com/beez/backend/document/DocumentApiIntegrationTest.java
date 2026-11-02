@@ -711,6 +711,98 @@ class DocumentApiIntegrationTest {
         }
     }
 
+    List<String> listIds(String query) throws Exception {
+        var response = send("GET", "/api/projects/" + project + "/documents" + query, null, false);
+        assertThat(response.statusCode()).withFailMessage(response.body()).isEqualTo(200);
+        var ids = new ArrayList<String>();
+        JSON.readTree(response.body()).get("items").forEach(item -> ids.add(item.get("id").asText()));
+        return ids;
+    }
+
+    @Test void listFiltersByKindAndStageAndMovesApprovedDocumentToCurrent() throws Exception {
+        var requirements = uploaded();
+        var planResponse = upload(UUID.randomUUID().toString(), "# 기획".getBytes(StandardCharsets.UTF_8), "PLAN");
+        assertThat(planResponse.statusCode()).withFailMessage(planResponse.body()).isEqualTo(201);
+        var plan = JSON.readTree(planResponse.body()).get("document");
+        String requirementsId = requirements.get("id").asText(), planId = plan.get("id").asText();
+        assertThat(listIds("?kind=PLAN")).containsExactly(planId);
+        assertThat(listIds("?kind=REQUIREMENTS&domain=account")).containsExactly(requirementsId);
+        assertThat(listIds("?stage=IN_PROGRESS")).containsExactlyInAnyOrder(requirementsId, planId);
+        assertThat(listIds("?stage=CURRENT")).isEmpty();
+
+        jdbc.update("UPDATE document_working_copy SET status='SUBMITTED' WHERE document_id=?", Long.parseLong(planId));
+        assertThat(listIds("?stage=IN_PROGRESS&kind=PLAN")).containsExactly(planId);
+        jdbc.update("UPDATE document_working_copy SET status='REJECTED' WHERE document_id=?", Long.parseLong(planId));
+        assertThat(listIds("?stage=IN_PROGRESS&kind=PLAN")).containsExactly(planId);
+
+        publish(requirements.get("id").asLong(), requirements.get("latest_draft").get("id").asLong());
+        jdbc.update("UPDATE document_working_copy SET status='APPROVED' WHERE document_id=?", requirements.get("id").asLong());
+        assertThat(listIds("?stage=IN_PROGRESS")).containsExactly(planId);
+        assertThat(listIds("?stage=CURRENT")).containsExactly(requirementsId);
+        assertThat(listIds("?stage=CURRENT&kind=PLAN")).isEmpty();
+        assertThat(listIds("?stage=IN_PROGRESS&limit=1")).containsExactly(planId);
+        assertThat(send("GET", "/api/projects/" + project + "/documents?stage=BOGUS", null, false).statusCode()).isEqualTo(400);
+
+        long otherProject = jdbc.queryForObject("INSERT INTO project(name,owner_account_id) VALUES ('other',?) RETURNING id", Long.class, leader);
+        jdbc.update("INSERT INTO project_member(project_id,account_id,role) VALUES (?,?,'LEADER')", otherProject, leader);
+        assertThat(JSON.readTree(send("GET", "/api/projects/" + otherProject + "/documents?stage=IN_PROGRESS", null, false).body()).get("items")).isEmpty();
+    }
+
+    @Test void previewFollowsInProgressWorkingCopyUntilApproval() throws Exception {
+        var document = uploaded();
+        long id = document.get("id").asLong(), version = document.get("latest_draft").get("id").asLong();
+        String path = "/api/projects/" + project + "/documents/" + id + "/working-copy";
+        var edit = send("PATCH", path, "{\"expected_revision\":1,\"content\":\"# 수정본\\n\\n작성 중   내용\",\"file_name\":\"input.md\"}", true);
+        assertThat(edit.statusCode()).withFailMessage(edit.body()).isEqualTo(200);
+        String listPath = "/api/projects/" + project + "/documents?stage=IN_PROGRESS";
+        assertThat(JSON.readTree(send("GET", listPath, null, false).body()).get("items").get(0).get("preview_text").asText()).isEqualTo("# 수정본 작성 중 내용");
+
+        jdbc.update("UPDATE document_working_copy SET status='REJECTED' WHERE document_id=?", id);
+        jdbc.update("UPDATE document_version SET status='SUPERSEDED' WHERE id=?", version);
+        var rejected = JSON.readTree(send("GET", listPath, null, false).body()).get("items").get(0);
+        assertThat(rejected.has("latest_draft")).isFalse();
+        assertThat(rejected.get("preview_text").asText()).isEqualTo("# 수정본 작성 중 내용");
+
+        jdbc.update("UPDATE document_working_copy SET status='APPROVED' WHERE document_id=?", id);
+        jdbc.update("UPDATE document_version SET status='DRAFT' WHERE id=?", version);
+        publish(id, version);
+        var approved = JSON.readTree(send("GET", "/api/projects/" + project + "/documents", null, false).body()).get("items").get(0);
+        assertThat(approved.get("preview_text").asText()).isEqualTo("# 요구사항 REQ-01: 로그인한 멤버만 조회한다.");
+    }
+
+    @Test void documentAndVersionResponsesCarryPreviewCreatorAndBaselineFlag() throws Exception {
+        String longLine = "가".repeat(299) + "😀😀 tail";
+        var response = upload(UUID.randomUUID().toString(), ("# 제목\r\n\r\n본문   첫 줄\n" + longLine + "\n").getBytes(StandardCharsets.UTF_8), "REQUIREMENTS");
+        assertThat(response.statusCode()).withFailMessage(response.body()).isEqualTo(201);
+        var document = JSON.readTree(response.body()).get("document");
+        long id = document.get("id").asLong(), first = document.get("latest_draft").get("id").asLong();
+        String preview = document.get("preview_text").asText();
+        assertThat(preview.codePointCount(0, preview.length())).isEqualTo(300);
+        assertThat(preview).startsWith("# 제목 본문 첫 줄 가가").doesNotContain("\n");
+        assertThat(document.get("latest_draft").get("created_by").asText()).isEqualTo(Long.toString(leader));
+        assertThat(document.get("latest_draft").get("is_current_baseline").asBoolean()).isFalse();
+
+        publish(id, first);
+        String path = "/api/projects/" + project + "/documents/" + id;
+        var listed = JSON.readTree(send("GET", "/api/projects/" + project + "/documents", null, false).body()).get("items").get(0);
+        assertThat(listed.get("preview_text").asText()).isEqualTo(preview);
+        assertThat(listed.get("approved_version").get("is_current_baseline").asBoolean()).isTrue();
+        var detail = JSON.readTree(send("GET", path, null, false).body());
+        assertThat(detail.get("document").get("preview_text").asText()).isEqualTo(preview);
+        assertThat(detail.get("version").get("created_by").asText()).isEqualTo(Long.toString(leader));
+        assertThat(detail.get("version").get("is_current_baseline").asBoolean()).isTrue();
+
+        long second = jdbc.queryForObject("INSERT INTO document_version(document_id,version_no,status,parse_status,storage_key,content_hash,content_text,created_by,parent_version_id) SELECT document_id,2,'DRAFT','PENDING',storage_key,'hash-2','v2',?,id FROM document_version WHERE id=? RETURNING id", Long.class, member, first);
+        var versions = JSON.readTree(send("GET", path + "/versions", null, false).body()).get("items");
+        assertThat(versions).hasSize(2);
+        for (var version : versions) {
+            boolean isFirst = version.get("id").asLong() == first;
+            assertThat(version.get("is_current_baseline").asBoolean()).isEqualTo(isFirst);
+            assertThat(version.get("created_by").asText()).isEqualTo(Long.toString(isFirst ? leader : member));
+        }
+        assertThat(second).isNotEqualTo(first);
+    }
+
     int originalCount() {
         return storageClient.listObjectsV2(software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
                 .bucket(SeaweedTestContainer.BUCKET).build()).contents().size();
