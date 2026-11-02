@@ -45,7 +45,10 @@ _SCHEMA = {
 
 def _prepare(body: RecommendationRequest) -> tuple[dict, list, dict]:
     eligible = {}
-    omitted = [item.model_dump() for item in body.omissions.identified_candidates]
+    omitted = [
+        item.model_dump(exclude_none=True)
+        for item in body.omissions.identified_candidates
+    ]
     reasons = []
     if body.search_truncated:
         reasons.append("SEARCH_TRUNCATED")
@@ -68,11 +71,19 @@ def _prepare(body: RecommendationRequest) -> tuple[dict, list, dict]:
         )
         if size > _MAX_CONTENT_BYTES:
             omitted.append(
-                {"design_item_version_id": item.id, "reason": "CONTENT_TOO_LARGE"}
+                {
+                    "design_item_version_id": item.id,
+                    "key": item.key,
+                    "reason": "CONTENT_TOO_LARGE",
+                }
             )
         elif len(eligible) >= _MAX_ANALYZED:
             omitted.append(
-                {"design_item_version_id": item.id, "reason": "CANDIDATE_LIMIT"}
+                {
+                    "design_item_version_id": item.id,
+                    "key": item.key,
+                    "reason": "CANDIDATE_LIMIT",
+                }
             )
         else:
             eligible[item.id] = candidate

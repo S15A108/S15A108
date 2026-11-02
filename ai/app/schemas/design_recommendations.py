@@ -86,6 +86,8 @@ class RecommendationCandidate(ContractModel):
 
 class OmittedCandidate(ContractModel):
     design_item_version_id: TextId
+    # BE may know only the version ID; never infer a key for unseen candidates.
+    key: TextId | None = None
     reason: Literal["CONTENT_TOO_LARGE", "CANDIDATE_LIMIT", "OTHER"]
 
 

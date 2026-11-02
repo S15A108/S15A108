@@ -29,7 +29,9 @@
   "mapping_complete": true,
   "unlinked_documents": false,
   "omissions": {
-    "identified_candidates": [],
+    "identified_candidates": [
+      {"design_item_version_id": "312", "key": "API-007", "reason": "OTHER"}
+    ],
     "unexamined_scope": true,
     "unexamined_count": null
   },
@@ -67,7 +69,7 @@
 - `design_source_verification`과 각 `search_evidence.verification`은 BE가 전달하는 `VERIFIED` 또는 `UNVERIFIED`이며 생략 시 `UNVERIFIED`다. `VERIFIED`는 위치 문자열이 비어 있으면 거부한다. 그 외 원문 일치 여부·현재 baseline 소속은 BE가 확인해야 한다. AI가 검증했다는 뜻이 아니다.
 - `association`은 `SAME_DOCUMENT_VERSION` 또는 `EXPLICIT_LINK`다. `SAME_DOCUMENT_VERSION`은 저장 출처의 문서 ID·버전 ID가 검색 출처와 일치할 때만 허용한다. `EXPLICIT_LINK`도 BE가 보고한 연결이며, 둘 다 **검색 청크가 설계의 직접 근거라는 AI 판정이 아니다.** 검색 원문의 실제 위치·다중 span 복원과 검증은 #223 및 BE와 연동해 확인한다.
 - `search_observation`은 `NO_DOCUMENTS`, `DOCUMENTS_FOUND`, `UNKNOWN`이다. 이전 호출자는 생략 가능하지만 이 경우 `UNKNOWN`으로 처리해 검색 0건을 확정하지 않는다. `unlinked_documents=true`는 검색 문서 중 설계에 연결된 항목이 없는 문서가 있음을 뜻한다. 검색 실패와 준비 중은 각각 `search_status=FAILED`, `NOT_READY`다.
-- `omissions.identified_candidates`에는 **알고 있는** 생략 후보의 버전 ID와 `CONTENT_TOO_LARGE`, `CANDIDATE_LIMIT`, `OTHER` 사유를 넣는다. `unexamined_scope=true`는 확인하지 못한 범위가 있다는 뜻이며, 개수를 모르면 `unexamined_count=null`이다. 검색이 잘렸으면 AI도 미조회 범위로 표시한다. 아직 조회하지 못한 후보의 ID나 총개수를 추측하지 않는다.
+- `omissions.identified_candidates`에는 **알고 있는** 생략 후보의 버전 ID와 `CONTENT_TOO_LARGE`, `CANDIDATE_LIMIT`, `OTHER` 사유를 넣는다. `key`는 BE가 알면 전달하는 선택 필드다. AI가 전달받은 후보를 크기·개수 한도로 생략하면 입력의 `design_item_version.key`를 사용한다. BE가 먼저 생략하면서 키를 전달하지 않았으면 AI는 키를 만들지 않고 생략한다. `unexamined_scope=true`는 확인하지 못한 범위가 있다는 뜻이며, 개수를 모르면 `unexamined_count=null`이다. 검색이 잘렸으면 AI도 미조회 범위로 표시한다. 아직 조회하지 못한 후보의 ID·키나 총개수를 추측하지 않는다.
 - 각 입력 후보는 현재 baseline에 속한 승인 설계여야 한다. `source`가 없거나 위치가 미확인이어도 **설계 항목 내용 자체로 추천할 수 있다.** 위치는 추측하지 않는다.
 - `request`, ID, `execution_budget_ms` 등 나머지 필드와 오류·사용량 봉투는 기존 내부 API 공통 규칙을 따른다. 예산은 1~60,000ms이며 BE HTTP 제한보다 짧게 설정한다.
 
@@ -101,8 +103,10 @@
       }]
     }],
     "follow_up": "검색 범위와 분석하지 못한 항목을 확인해 주세요.",
-    "incomplete_reasons": ["SEARCH_TRUNCATED", "UNEXAMINED_SCOPE"],
-    "omissions": {"identified_candidates": [], "unexamined_scope": true,
+    "incomplete_reasons": ["SEARCH_TRUNCATED", "CANDIDATES_OMITTED", "UNEXAMINED_SCOPE"],
+    "omissions": {"identified_candidates": [
+                    {"design_item_version_id": "312", "key": "API-007", "reason": "OTHER"}
+                  ], "unexamined_scope": true,
                   "unexamined_count": null},
     "search_observation": "DOCUMENTS_FOUND",
     "unlinked_documents": false

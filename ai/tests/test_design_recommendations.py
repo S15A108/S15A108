@@ -357,7 +357,11 @@ def test_oversized_candidate_is_omitted_without_cutting_and_other_candidate_is_r
     result = response.json()["result"]
     assert result["status"] == "INSUFFICIENT"
     assert result["omissions"]["identified_candidates"] == [
-        {"design_item_version_id": "312", "reason": "CONTENT_TOO_LARGE"}
+        {
+            "design_item_version_id": "312",
+            "key": "API-001",
+            "reason": "CONTENT_TOO_LARGE",
+        }
     ]
     assert [c["design_item_version"]["id"] for c in result["candidates"]] == ["311"]
     assert [
@@ -372,15 +376,34 @@ def test_candidate_limit_reports_known_omissions(api):
         item = candidate()
         item["design_item_version"]["id"] = str(311 + index)
         item["design_item_version"]["design_item_id"] = str(301 + index)
+        item["design_item_version"]["key"] = f"API-{index + 1:03}"
         items.append(item)
     response = post(client, request_body(candidates=items))
     assert response.status_code == 200
     result = response.json()["result"]
     assert result["status"] == "INSUFFICIENT"
     assert result["omissions"]["identified_candidates"] == [
-        {"design_item_version_id": "331", "reason": "CANDIDATE_LIMIT"}
+        {"design_item_version_id": "331", "key": "API-021", "reason": "CANDIDATE_LIMIT"}
     ]
     assert len(json.loads(state["calls"][0].messages[1].content)["candidates"]) == 20
+
+
+def test_all_oversized_candidates_return_known_key_without_model_call(api):
+    client, state = api
+    oversized = candidate()
+    oversized["design_item_version"]["content"] = {"description": "x" * 17000}
+    response = post(client, request_body(candidates=[oversized]))
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["status"] == "INSUFFICIENT"
+    assert result["omissions"]["identified_candidates"] == [
+        {
+            "design_item_version_id": "311",
+            "key": "API-001",
+            "reason": "CONTENT_TOO_LARGE",
+        }
+    ]
+    assert not state["calls"]
 
 
 def test_be_omissions_are_preserved_and_false_verified_location_rejected(api):
@@ -397,6 +420,29 @@ def test_be_omissions_are_preserved_and_false_verified_location_rejected(api):
     invalid["design_item_version"]["source"]["location"] = "  "
     assert post(client, request_body(candidates=[invalid])).status_code == 400
     assert len(state["calls"]) == 1
+
+
+@pytest.mark.parametrize("provided_key", ["API-007", None])
+def test_be_omitted_candidate_returns_key_only_when_supplied(api, provided_key):
+    client, _ = api
+    omitted = {
+        "identified_candidates": [
+            {"design_item_version_id": "777", "key": provided_key, "reason": "OTHER"}
+        ],
+        "unexamined_scope": True,
+        "unexamined_count": None,
+    }
+    response = post(client, request_body(omissions=omitted))
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["status"] == "INSUFFICIENT"
+    identified = result["omissions"]["identified_candidates"]
+    assert identified == [
+        {"design_item_version_id": "777", "reason": "OTHER"}
+        | ({"key": provided_key} if provided_key is not None else {})
+    ]
+    assert result["omissions"]["unexamined_scope"] is True
+    assert result["omissions"]["unexamined_count"] is None
 
 
 def test_same_document_version_association_must_match_saved_source(api):
