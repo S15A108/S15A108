@@ -76,6 +76,40 @@ describe('명세 REST 교환', () => {
     expect(keys[2]).not.toBe(keys[1])
   })
 
+  // PR #72 리뷰 3: 서버가 오류 코드로 실패를 확정한 5xx 뒤에는 새 키로 다시 실행하고, 본문 없는 5xx는 같은 키로 재확인한다.
+  it('실패가 확정된 5xx 뒤에는 새 키를 쓰고, 결과를 모르는 5xx는 키를 유지한다', async () => {
+    const keys: string[] = []
+    const failures = [
+      { status: 503, data: { error: { code: 'ai_unavailable' } } },
+      { status: 502, data: '' },
+    ]
+    api.defaults.adapter = async (config) => {
+      keys.push(String(config.headers.get('Idempotency-Key')))
+      const failure = failures.shift()
+      if (failure)
+        throw new AxiosError('failed', 'ERR_BAD_RESPONSE', config, undefined, {
+          config,
+          data: failure.data,
+          status: failure.status,
+          statusText: '',
+          headers: new AxiosHeaders(),
+        })
+      return {
+        config,
+        data: project,
+        status: 201,
+        statusText: 'Created',
+        headers: new AxiosHeaders(),
+      }
+    }
+    const create = () => projectsApi.create({ name: '확정된 실패 뒤 재시도' })
+    await expect(create()).rejects.toBeInstanceOf(AxiosError)
+    await expect(create()).rejects.toBeInstanceOf(AxiosError)
+    await create()
+    expect(keys[1]).not.toBe(keys[0])
+    expect(keys[2]).toBe(keys[1])
+  })
+
   it('문자열 BIGINT와 선택 필드 생략을 유지하며 페이지의 중첩 DTO까지 검증한다', async () => {
     respond({ items: [project], has_more: false })
     const result = await projectsApi.list({ limit: 20 })
@@ -256,10 +290,10 @@ describe('계약 경계', () => {
     ).toBe(false)
   })
 
-  it('108개 REST 계약은 중복 없이 기록하고 확장 미결 기능에는 실행 경로를 만들지 않는다', () => {
-    expect(endpointRegistry).toHaveLength(108)
+  it('119개 REST 계약은 중복 없이 기록하고 확장 미결 기능에는 실행 경로를 만들지 않는다', () => {
+    expect(endpointRegistry).toHaveLength(119)
     expect(new Set(endpointRegistry.map((endpoint) => endpoint.id)).size).toBe(
-      108,
+      119,
     )
     expect(
       new Set(
@@ -267,7 +301,7 @@ describe('계약 경계', () => {
           (endpoint) => `${endpoint.method} ${endpoint.path}`,
         ),
       ).size,
-    ).toBe(108)
+    ).toBe(119)
     expect(
       endpointRegistry.find((endpoint) => endpoint.id === 'PLN-A10')?.path,
     ).toBe('/human/baselines')

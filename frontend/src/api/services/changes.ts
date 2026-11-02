@@ -142,6 +142,22 @@ export const changesApi = {
       },
       options,
     ),
+  withdraw: (
+    projectId: string,
+    proposalId: string,
+    input: schemas.WithdrawInput,
+    options?: RequestOptions,
+  ) =>
+    callEndpoint(
+      schemas.withdrawResponseSchema,
+      {
+        method: 'POST',
+        url: `/projects/${encodeURIComponent(String(idSchema.parse(projectId)))}/change-proposals/${encodeURIComponent(String(idSchema.parse(proposalId)))}/withdraw`,
+        data: schemas.withdrawInputSchema.parse(input),
+        idempotent: true,
+      },
+      options,
+    ),
   approval: (projectId: string, proposalId: string, options?: RequestOptions) =>
     callEndpoint(
       schemas.approvalResponseSchema,
