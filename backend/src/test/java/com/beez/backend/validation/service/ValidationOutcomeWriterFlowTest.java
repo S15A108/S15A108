@@ -27,6 +27,8 @@ class ValidationOutcomeWriterFlowTest {
     private final List<Write> writes = new ArrayList<>();
     private long currentBaseline = 5L;
     private long currentPlanRevision = 6L;
+    private List<Map<String, Object>> acceptedTaskRefs = List.of();
+    private List<Map<String, Object>> currentTaskRefs = List.of();
     private final ValidationOutcomeWriter.Execution execution = new ValidationOutcomeWriter.Execution(
             1, 2, 3, 4, 1, UUID.randomUUID(), 5, 6, Map.of(), "gms", CallerContext.human(1L));
     private final ValidationOutcomeWriter writer = new ValidationOutcomeWriter(jdbc, JsonMapper.builder().build(), rules, assembler, related);
@@ -49,7 +51,11 @@ class ValidationOutcomeWriterFlowTest {
         JdbcClient.ResultQuerySpec rowQuery = mock(JdbcClient.ResultQuerySpec.class);
         JdbcClient.MappedQuerySpec<Long> countQuery = mock(JdbcClient.MappedQuerySpec.class);
         when(countQuery.single()).thenReturn(1L);
-        if (sql.startsWith("select p.current_baseline_id,t.current_plan_revision_id")) {
+        if (sql.startsWith("select related_task_id, related_plan_revision_id from validation_task_ref")) {
+            when(rowQuery.listOfRows()).thenReturn(acceptedTaskRefs);
+        } else if (sql.startsWith("select t.id as task_id, t.current_plan_revision_id as plan_revision_id")) {
+            when(rowQuery.listOfRows()).thenReturn(currentTaskRefs);
+        } else if (sql.startsWith("select p.current_baseline_id,t.current_plan_revision_id")) {
             when(rowQuery.listOfRows()).thenReturn(List.of(Map.of(
                     "current_baseline_id", currentBaseline, "current_plan_revision_id", currentPlanRevision)));
         } else if (sql.startsWith("select kind,severity from validation_finding")) {
@@ -151,6 +157,30 @@ class ValidationOutcomeWriterFlowTest {
         assertThat(validationWrite().sql()).contains("status='STALE'");
         assertThat(validationWrite().params()).containsEntry("reason", "INPUT_CHANGED");
         assertThat(wrote("insert into validation_finding")).isFalse();
+    }
+
+    @Test void newlyRelatedExplicitTaskStopsBeforeAnalysis() {
+        currentTaskRefs = List.of(Map.of("task_id", 99L, "plan_revision_id", 100L));
+        assertThat(writer.discardIfRelatedInputsChanged(execution)).isTrue();
+        assertThat(validationWrite().params()).containsEntry("reason", "RELATED_PLAN_CHANGED");
+        assertThat(wrote("insert into llm_usage")).isFalse();
+    }
+
+    @Test void changedOrClosedRelatedExplicitTaskDiscardsResultAndRetainsUsage() {
+        acceptedTaskRefs = List.of(Map.of("related_task_id", 99L, "related_plan_revision_id", 100L));
+        currentTaskRefs = List.of(Map.of("task_id", 99L, "plan_revision_id", 101L));
+        assertThat(writer.complete(execution, request(), response(complete(List.of())), true))
+                .isEqualTo(ValidationOutcomeWriter.Applied.DISCARDED);
+        assertThat(validationWrite().params()).containsEntry("reason", "RELATED_PLAN_CHANGED");
+        assertThat(wrote("insert into llm_usage")).isTrue();
+        assertThat(wrote("insert into validation_finding")).isFalse();
+    }
+
+    @Test void unchangedExplicitReferencesAllowAnalysis() {
+        acceptedTaskRefs = List.of(Map.of("related_task_id", 99L, "related_plan_revision_id", 100L));
+        currentTaskRefs = List.of(Map.of("task_id", 99L, "plan_revision_id", 100L));
+        assertThat(writer.discardIfRelatedInputsChanged(execution)).isFalse();
+        assertThat(writes).noneMatch(w -> w.sql().startsWith("update validation set status"));
     }
 
     @Test void planChangedWhileAnalyzingRecordsPlanChangedReason() {

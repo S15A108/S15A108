@@ -87,6 +87,7 @@ public class ValidationAcceptService {
         if (!designLookup.lockProject(projectId)) {
             throw AccessErrors.notFound("project_missing project=" + projectId);
         }
+        actor = access.requireMember(caller, projectId);
         Task task = tasks.findByIdAndProjectId(taskId, projectId)
                 .orElseThrow(() -> AccessErrors.notFound("task_not_in_project task=" + taskId + " project=" + projectId));
         actor.requireMemberId(task.getAssigneeMemberId(), "담당자만 검증을 요청할 수 있습니다");

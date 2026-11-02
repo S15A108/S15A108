@@ -91,14 +91,19 @@ class ValidationBridgeIntegrationTest extends IntegrationTestSupport {
     }
 
     @Test void synchronousValidationChecksExplicitDependenciesBeforePass() throws Exception {
+        var predecessor = api.post("/api/projects/" + project + "/tasks",
+                api.planJson("선행 작업", api.readsRef("API-02"), "[]"), owner);
+        assertThat(predecessor.statusCode()).as(predecessor.body()).isEqualTo(201);
+        long predecessorId = TaskApiSupport.longField(predecessor.body(), "id");
         var task = api.post("/api/projects/" + project + "/tasks",
-                api.planJson("의존성 확인", api.readsRef("API-01"), "[]"), owner);
+                api.planJson("의존성 확인", api.readsRef("API-01"), "[\"" + predecessorId + "\"]"), owner);
+        assertThat(task.statusCode()).as(task.body()).isEqualTo(201);
         long taskId = TaskApiSupport.longField(task.body(), "id");
         long revision = api.jdbc.sql("select current_plan_revision_id from task where id=:t")
                 .param("t", taskId).query(Long.class).single();
-        // Simulate a persisted stale dependency; registration validation is not the subject here.
-        api.jdbc.sql("update task_plan_revision set dependency_task_ids='[999999]'::jsonb where id=:r")
-                .param("r", revision).update();
+        // Simulate the dependency graph changing after the immutable plan was accepted.
+        api.jdbc.sql("insert into task_dependency(project_id,task_id,depends_on_task_id,kind) values(:p,:from,:to,'BLOCKS')")
+                .param("p", project).param("from", predecessorId).param("to", taskId).update();
         var result = api.postWithHeaders("/api/projects/" + project + "/tasks/" + taskId + "/validations",
                 "{\"plan_revision_id\":\"" + revision + "\",\"expected_lock_version\":"
                         + TaskApiSupport.longField(task.body(), "lock_version") + "}", owner,

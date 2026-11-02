@@ -94,8 +94,12 @@ public class ValidationWorker {
 
     private boolean executeClaim(Claim claim) {
         var execution = claim.execution(Map.of(), provider);
+        var acceptedExecution = execution;
         try {
-            if (ruleWriter.apply(execution, claim.caller()) != ValidationRuleOutcomeWriter.Applied.CONTINUE) return true;
+            boolean stopped = Boolean.TRUE.equals(tx.execute(status ->
+                    writer.discardIfRelatedInputsChanged(acceptedExecution)
+                            || ruleWriter.apply(acceptedExecution, claim.caller()) != ValidationRuleOutcomeWriter.Applied.CONTINUE));
+            if (stopped) return true;
         } catch (RuntimeException e) {
             safeFail(execution, "worker_failure", false, List.of());
             return true;

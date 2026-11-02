@@ -7,7 +7,7 @@ import com.beez.backend.common.auth.CallerContext;
 import com.beez.backend.support.IntegrationTestSupport;
 import com.beez.backend.task.service.RelatedTaskCandidateFinder;
 import com.beez.backend.validation.service.ValidationOutcomeWriter;
-import com.beez.backend.validation.service.ValidationRequestService;
+import com.beez.backend.validation.service.ValidationAcceptService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -19,7 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 class RelatedTaskCandidateFinderIntegrationTests extends IntegrationTestSupport {
     @Autowired DataSource dataSource;
     @Autowired RelatedTaskCandidateFinder finder;
-    @Autowired ValidationRequestService requests;
+    @Autowired ValidationAcceptService requests;
     @Autowired ValidationOutcomeWriter writer;
     private TaskApiSupport api;
     private long project;
@@ -63,7 +63,7 @@ class RelatedTaskCandidateFinderIntegrationTests extends IntegrationTestSupport 
 
     @Test
     void newRelatedTaskDuringModelCallDiscardsTheOldResult() {
-        long target = create("target", api.readsRef("API-01"), "[]");
+        long target = create("target", api.implementsRef("API-01"), "[]");
         var targetRow = api.jdbc.sql("select current_plan_revision_id,lock_version from task where id=:id")
                 .param("id", target).query().singleRow();
         long revision = ((Number) targetRow.get("current_plan_revision_id")).longValue();
@@ -75,14 +75,15 @@ class RelatedTaskCandidateFinderIntegrationTests extends IntegrationTestSupport 
                 .param("baseline", baseline).param("item", item).query(Long.class).single();
         var caller = CallerContext.human(member);
         assertThat(finder.find(caller, project, target, revision, List.of(item), 20).candidates()).isEmpty();
-        long validation = Long.parseLong(requests.start(caller, project, target, Long.toString(revision), lock,
-                "freshness-integration").get("id").toString());
+        var accepted = requests.accept(caller, project, target, revision, lock, "freshness-integration");
+        assertThat(accepted.finished()).isFalse();
+        long validation = Long.parseLong(accepted.validation().id());
         UUID lease = UUID.randomUUID();
         api.jdbc.sql("update validation set input_snapshot_hash='sha256:fixture' where id=:id")
                 .param("id", validation).update();
         api.jdbc.sql("update validation_job set status='LEASED',attempts=1,lease_token=:token,lease_until=now()+interval '1 minute' where validation_id=:id")
                 .param("id", validation).param("token", lease).update();
-        long run = api.jdbc.sql("insert into validation_run(validation_id,attempt,lease_token,kind,status) values(:id,1,:token,'MODEL','RUNNING') returning id")
+        long run = api.jdbc.sql("update validation_run set lease_token=:token where validation_id=:id and attempt=1 returning id")
                 .param("id", validation).param("token", lease).query(Long.class).single();
         var execution = new ValidationOutcomeWriter.Execution(project, target, validation, run, 1, lease,
                 baseline, revision, Map.of(), "gms", caller);

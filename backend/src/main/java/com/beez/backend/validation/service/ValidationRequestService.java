@@ -7,21 +7,19 @@ import static com.beez.backend.designitem.support.DesignJson.time;
 import com.beez.backend.common.access.AccessErrors;
 import com.beez.backend.common.access.ProjectAccessChecker;
 import com.beez.backend.common.api.ApiException;
-import com.beez.backend.common.api.Ids;
 import com.beez.backend.common.auth.CallerContext;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
 
-/** Project-serialized idempotent acceptance; the worker owns the input snapshot and execution. */
+/** Idempotent retries and their response serialization. */
 @Service
 public class ValidationRequestService {
     private final JdbcClient jdbc;
@@ -30,81 +28,6 @@ public class ValidationRequestService {
     public ValidationRequestService(JdbcClient jdbc, ProjectAccessChecker access) {
         this.jdbc = jdbc;
         this.access = access;
-    }
-
-    @Transactional
-    public Map<String, Object> start(CallerContext caller, long project, long task,
-                                     String planRevision, int expectedLockVersion, String key) {
-        var actor = access.requireMember(caller, project);
-        if (key == null || key.isBlank() || key.length() > 128 || key.chars().anyMatch(Character::isISOControl)) {
-            throw invalid("Idempotency-Key는 제어 문자 없는 1~128자입니다.");
-        }
-        Long revision = Ids.parse(planRevision, "plan_revision_id");
-        if (revision == null || revision <= 0 || expectedLockVersion < 0) throw invalid("작업 리비전이 필요합니다.");
-        // Recheck membership and ownership while serializing requests for the project.
-        var projects = rows("select id,current_baseline_id from project where id=:project for update", Map.of("project", project));
-        if (projects.isEmpty()) throw AccessErrors.notFound("project_missing");
-        actor = access.requireMember(caller, project);
-        var tasks = rows("select id,assignee_member_id,current_plan_revision_id,lock_version from task where id=:task and project_id=:project for update",
-                Map.of("project", project, "task", task));
-        if (tasks.isEmpty()) throw AccessErrors.notFound("task_not_in_project");
-        var taskRow = tasks.getFirst();
-        actor.requireMemberId(number(taskRow.get("assignee_member_id")));
-
-        String operation = "validation:start:" + task;
-        String fingerprint = hash(Map.of("plan_revision_id", revision.toString(), "expected_lock_version", expectedLockVersion));
-        var previous = jdbc.sql("""
-                select v.summary->'idempotency' as saved from validation v
-                join task t on t.id=v.task_id and t.project_id=:project
-                where v.created_at > now() - interval '24 hours'
-                  and v.summary->'idempotency'->>'account_id'=:account
-                  and v.summary->'idempotency'->>'operation'=:operation
-                  and v.summary->'idempotency'->>'key'=:key
-                order by v.id desc limit 1
-                """).param("project", project).param("account", Long.toString(actor.accountId()))
-                .param("operation", operation).param("key", key).query().listOfRows();
-        if (!previous.isEmpty()) {
-            Map<String, Object> saved = jsonObject(previous.getFirst().get("saved"));
-            if (!fingerprint.equals(saved.get("fingerprint"))) {
-                throw new ApiException(HttpStatus.CONFLICT, "idempotency_conflict", "같은 요청 키에 다른 내용이 전달되었습니다.");
-            }
-            return jsonObjectValue(saved.get("response"));
-        }
-        if (number(taskRow.get("current_plan_revision_id")) == null
-                || !revision.equals(number(taskRow.get("current_plan_revision_id")))
-                || ((Number) taskRow.get("lock_version")).intValue() != expectedLockVersion) {
-            throw new ApiException(HttpStatus.CONFLICT, "revision_conflict", "작업 계획이 변경되었습니다.");
-        }
-        Long baseline = number(projects.getFirst().get("current_baseline_id"));
-        if (baseline == null) throw new ApiException(HttpStatus.CONFLICT, "baseline_missing", "승인된 기준 설계가 없습니다.");
-
-        var requestActor = new LinkedHashMap<String, Object>();
-        requestActor.put("account_id", caller.accountId());
-        requestActor.put("agent_token_id", caller.agentTokenId());
-        requestActor.put("kind", caller.kind().name());
-        var summary = Map.of("request_actor", requestActor);
-        var created = jdbc.sql("""
-                insert into validation(task_id,plan_revision_id,baseline_id,status,trigger,input_snapshot_hash,
-                  rule_version,current_attempt,summary)
-                values(:task,:revision,:baseline,'RUNNING','AGENT',:snapshot,'validation-v1',1,cast(:summary as jsonb))
-                returning id,created_at
-                """).param("task", task).param("revision", revision).param("baseline", baseline)
-                .param("snapshot", "pending:" + UUID.randomUUID()).param("summary", JSON.writeValueAsString(summary))
-                .query().singleRow();
-        long id = ((Number) created.get("id")).longValue();
-        jdbc.sql("insert into validation_job(validation_id,status,attempts) values(:id,'QUEUED',0)")
-                .param("id", id).update();
-        var response = new LinkedHashMap<String, Object>();
-        response.put("id", Long.toString(id)); response.put("task_id", Long.toString(task));
-        response.put("plan_revision_id", revision.toString()); response.put("baseline_id", baseline.toString());
-        response.put("status", "RUNNING"); response.put("trigger", "AGENT"); response.put("current_attempt", 1);
-        response.put("design_refs", List.of()); response.put("related_task_refs", List.of());
-        response.put("findings", List.of()); response.put("cache_hit", false); response.put("created_at", time(created.get("created_at")));
-        var idempotency = Map.of("account_id", Long.toString(actor.accountId()), "operation", operation,
-                "key", key, "fingerprint", fingerprint, "response", response);
-        jdbc.sql("update validation set summary=summary || cast(:addition as jsonb) where id=:id")
-                .param("addition", JSON.writeValueAsString(Map.of("idempotency", idempotency))).param("id", id).update();
-        return response;
     }
 
     @Transactional(readOnly = true)

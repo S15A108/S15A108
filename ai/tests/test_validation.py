@@ -424,6 +424,8 @@ async def test_provider_failure_keeps_one_failed_usage_without_retry():
 
 
 def test_http_auth_input_and_output_error_mapping(monkeypatch):
+    # This test exercises the validation route; tokenizer readiness has its own tests.
+    monkeypatch.setattr("app.main.EmbeddingTokenCounter", lambda: None)
     settings = Settings(_env_file=None, ai_internal_token="test-token")
     provider = Provider(result_for(fixture_request()))
 

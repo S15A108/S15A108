@@ -94,6 +94,13 @@ class ValidationWorkerTest {
                 && e.relatedPlanRevisions().equals(Map.of(8L, 9L)) && "gms".equals(e.provider())), eq(input.request()), eq(response), eq(true), eq(List.of()));
     }
 
+    @Test void changedAcceptedRelatedTasksStopBeforeRulesSearchAndAi() {
+        claimed();
+        when(writer.discardIfRelatedInputsChanged(any())).thenReturn(true);
+        assertThat(worker.runOnce()).isTrue();
+        verifyNoInteractions(rules, assembler, ai);
+    }
+
     @Test void configuredOpenAiProviderIsPassedToUsageWriter() {
         var properties = new BeezProperties(null, new BeezProperties.Ai("http://ai", "token", Duration.ofSeconds(1), Duration.ofSeconds(30)), null);
         worker = new ValidationWorker(jdbc, ai, assembler, writer, rules, transactions, properties, true, "openai");
@@ -161,14 +168,18 @@ class ValidationWorkerTest {
         claimed();
         when(rules.apply(any(), any())).thenReturn(ValidationRuleOutcomeWriter.Applied.FINALIZED);
         assertThat(worker.runOnce()).isTrue();
-        verifyNoInteractions(ai, assembler, writer);
+        verify(writer).discardIfRelatedInputsChanged(any());
+        verifyNoMoreInteractions(writer);
+        verifyNoInteractions(ai, assembler);
     }
 
     @Test void staleRuleAttemptDoesNotContinueToAi() {
         claimed();
         when(rules.apply(any(), any())).thenReturn(ValidationRuleOutcomeWriter.Applied.DISCARDED);
         assertThat(worker.runOnce()).isTrue();
-        verifyNoInteractions(ai, assembler, writer);
+        verify(writer).discardIfRelatedInputsChanged(any());
+        verifyNoMoreInteractions(writer);
+        verifyNoInteractions(ai, assembler);
     }
 
     @Test void ruleExecutionFailureProducesWorkerFailure() {

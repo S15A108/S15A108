@@ -2,6 +2,7 @@ package com.beez.backend.validation.service;
 
 import com.beez.backend.common.auth.CallerContext;
 import com.beez.backend.task.service.RelatedTaskCandidateFinder;
+import com.beez.backend.validation.repository.ValidationRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,6 +34,7 @@ public class ValidationOutcomeWriter {
     private static final int MAX_RELATED_TASKS = 20;
     private final ValidationInputAssembler assembler;
     private final RelatedTaskCandidateFinder relatedTasks;
+    private final ValidationRepository validationRepository;
     private final boolean fakeAnalyzerEnabled;
     @Autowired
     public ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
@@ -40,6 +42,7 @@ public class ValidationOutcomeWriter {
                                    @Value("${beez.validation.fake-analyzer:false}") boolean fakeAnalyzerEnabled) {
         this.jdbc = jdbc; this.json = json; this.rules = rules; this.assembler = assembler;
         this.relatedTasks = relatedTasks; this.fakeAnalyzerEnabled = fakeAnalyzerEnabled;
+        this.validationRepository = new ValidationRepository(jdbc, json);
     }
     ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
                             ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks) {
@@ -71,6 +74,7 @@ public class ValidationOutcomeWriter {
         catch (IllegalArgumentException bad) { return failLocked(execution, "invalid_ai_output", false, List.of(), "RETRY", null); }
         saveUsage(execution, usage);
         if (!owned(execution)) return discardIfObsolete(execution);
+        if (relatedInputsChanged(execution)) return stale(execution, "RELATED_PLAN_CHANGED");
         Map<String, Object> result;
         try {
             if (!"MODEL".equals(response.get("origin")) || !(response.get("model") instanceof String model)
@@ -163,6 +167,34 @@ public class ValidationOutcomeWriter {
         return stale(execution);
     }
 
+    /** Check acceptance-time explicit references under the same locks used by result writes. */
+    @Transactional
+    public boolean discardIfRelatedInputsChanged(Execution execution) {
+        lockContext(execution);
+        if (!owned(execution)) {
+            discardIfObsolete(execution);
+            return true;
+        }
+        if (!relatedInputsChanged(execution)) return false;
+        stale(execution, "RELATED_PLAN_CHANGED");
+        return true;
+    }
+
+    private boolean relatedInputsChanged(Execution e) {
+        Map<Long, Long> accepted = new HashMap<>();
+        for (Map<String, Object> row : validationRepository.taskRefs(e.validationId())) {
+            accepted.put(((Number) row.get("related_task_id")).longValue(),
+                    ((Number) row.get("related_plan_revision_id")).longValue());
+        }
+        Map<Long, Long> current = new HashMap<>();
+        for (Map<String, Object> row : validationRepository.openTasksSharingItems(
+                e.projectId(), e.taskId(), e.planRevisionId())) {
+            current.put(((Number) row.get("task_id")).longValue(),
+                    ((Number) row.get("plan_revision_id")).longValue());
+        }
+        return !accepted.equals(current);
+    }
+
     private Applied failLocked(Execution e, String code, boolean timeout, List<Map<String, Object>> ignored,
                                String resolution, Map<String, Object> details) {
         if (!owned(e)) return discardIfObsolete(e);
@@ -213,7 +245,19 @@ public class ValidationOutcomeWriter {
     }
 
     private Applied discardIfObsolete(Execution e) {
-        // Do not steal an expired current lease: the recovery worker must create ERROR/RETRY.
+        // If this exact lease expired before the response arrived, close it immediately.
+        // lockContext already holds project/task/validation/run/job locks in that order.
+        long expiredCurrent = jdbc.sql("""
+                select count(*) from validation v join validation_run r on r.validation_id=v.id
+                join validation_job j on j.validation_id=v.id
+                where v.id=:validation and v.status='RUNNING' and v.current_attempt=:attempt
+                  and r.id=:run and r.attempt=:attempt and r.status='RUNNING'
+                  and r.lease_token=:token and j.status='LEASED' and j.lease_token=:token
+                  and j.lease_until<=clock_timestamp()
+                """).param("validation", e.validationId()).param("attempt", e.attempt())
+                .param("run", e.runId()).param("token", e.leaseToken()).query(Long.class).single();
+        if (expiredCurrent == 1 && expire(e.validationId())) return Applied.APPLIED;
+        // A stale or recovered lease cannot modify another attempt.
         jdbc.sql("""
                 update validation_run r set status='DISCARDED',finished_at=now(),updated_at=now()
                  from validation v where r.id=:run and r.validation_id=v.id and r.status='RUNNING'
@@ -224,14 +268,19 @@ public class ValidationOutcomeWriter {
     }
 
     private Applied stale(Execution e) {
+        return stale(e, "INPUT_CHANGED");
+    }
+
+    private Applied stale(Execution e, String fallbackReason) {
         var current = jdbc.sql("""
                 select p.current_baseline_id,t.current_plan_revision_id from project p
                 join task t on t.project_id=p.id where p.id=:project and t.id=:task
                 """).param("project", e.projectId()).param("task", e.taskId()).query().listOfRows();
-        String reason = current.size() == 1
+        String snapshotReason = current.size() == 1
                 ? staleReason(e, number(current.getFirst().get("current_baseline_id")),
                         number(current.getFirst().get("current_plan_revision_id")))
                 : "INPUT_CHANGED";
+        String reason = "PLAN_CHANGED".equals(snapshotReason) ? snapshotReason : fallbackReason;
         jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
                 .param("id", e.runId()).update();
         jdbc.sql("update validation set status='STALE',stale_reason=:reason,finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
@@ -418,12 +467,8 @@ public class ValidationOutcomeWriter {
             if (jdbc.sql("select count(*) from validation_design_ref where validation_id=:validation and design_item_id=:item and design_item_version_id=:version and relation=:relation")
                     .param("validation", e.validationId()).param("item", id).param("version", version).param("relation", relation).query(Long.class).single() != 1) throw new IllegalArgumentException("conflicting design snapshot");
         }
-        for (var ref : e.relatedPlanRevisions().entrySet()) {
-            jdbc.sql("insert into validation_task_ref(validation_id,related_task_id,related_plan_revision_id) values (:validation,:task,:revision) on conflict do nothing")
-                    .param("validation", e.validationId()).param("task", ref.getKey()).param("revision", ref.getValue()).update();
-            if (jdbc.sql("select count(*) from validation_task_ref where validation_id=:validation and related_task_id=:task and related_plan_revision_id=:revision")
-                    .param("validation", e.validationId()).param("task", ref.getKey()).param("revision", ref.getValue()).query(Long.class).single() != 1) throw new IllegalArgumentException("conflicting task snapshot");
-        }
+        // validation_task_ref is the explicit acceptance-time snapshot owned by #159.
+        // Search-discovered candidates are not authoritative references and must not be added here.
     }
 
     private List<Map<String, Object>> existingRuleFindings(long validationId) {

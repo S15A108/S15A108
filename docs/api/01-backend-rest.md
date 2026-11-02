@@ -5651,6 +5651,7 @@ HTTP `200`.
 
 - 현재 승인본만 검색하고 권한·프로젝트 필터를 검색 전에 적용한다.
 - BE 키워드·벡터 저장/검색·실행/manifest는 오서현, 청킹·임베딩·검색 전략 AI는 박상은 담당이다. KEYWORD는 현재 baseline의 문서/항목을 검색해 DOCUMENT/DESIGN_ITEM을, SEMANTIC은 READY 청크의 DOCUMENT_CHUNK를 반환한다. 원문 키워드 검색은 색인과 독립적이다. 출처 없는 HUMAN 승인 항목은 source를 생략한다.
+- 새 의미 검색 색인의 `DOCUMENT_CHUNK`는 표시용 `source.location`과 함께 `chunk_key`, 정확한 `source_spans`, 보조 `context_refs`를 반환한다. 이전 색인에서 정확한 범위가 저장되지 않았다면 이 필드는 생략한다. offset은 정규화 원문의 Unicode 코드 포인트 기준이며 끝은 제외한다.
 - 검색 실패를 빈 결과로 표시하지 않는다. 유사도와 승인 근거를 구분한다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
@@ -9930,7 +9931,7 @@ HTTP `200`: 규칙 검사만으로 최초 응답 전에 종료한 경우. 최종
 - (BE 구현, -159) 입력 고정: 계획의 설계 참조를 `validation_design_ref`로, 같은 항목을 현재 계획에서 참조하는 READY·IN_PROGRESS·WAITING 작업의 현재 계획을 `validation_task_ref`로 복사한다. `input_snapshot_hash`는 계획 리비전·참조 버전·관련 계획·규칙 버전·기준의 정규 JSON SHA-256이다.
 - (BE 구현, -159) 규칙: 참조 항목이 현재 기준에 없거나 버전이 다르면 STALE_REF, `no_contract_change=true`인데 CHANGES가 있거나 false인데 CHANGES도 `unlinked`도 없으면 MISSING_INPUT → NEEDS_INPUT. 같은 항목을 CHANGES로 점유한 IN_PROGRESS·WAITING 작업이 있으면 CONFLICT → NEEDS_REVIEW. 구조화 계약 불일치 비교는 Q01 스키마 확정 뒤 규칙에 넣고 그때까지 의미 분석(DESIGN_ALIGNMENT)에 맡긴다.
 - (BE 구현, -159) 의미 분석은 `unlinked`가 있거나, CHANGES·IMPLEMENTS 참조가 있거나, 같은 항목을 보는 열린 다른 작업이 있으면 접수한다. 검사 목록은 계획 완결성(unlinked가 있을 때) + CHANGES·IMPLEMENTS 항목마다 설계 정합성 + 관련 작업마다 계획 충돌이다. 설계 정합성은 관련 작업 유무와 상관없이 넣는다(구조화 계약 비교 전까지 승인 설계와의 대조를 의미 분석이 맡는다). READS만 참조하고 unlinked·관련 작업이 없으면 규칙으로 PASS다.
-- (BE 구현, -159) 접수 시 `current_attempt=1`의 실행(run)과 작업 큐(job)를 함께 만든다. 워커는 큐에서 꺼내 AI를 DB 트랜잭션 밖에서 부르고, 반영 직전 아직 RUNNING·같은 시도·같은 리스인지 확인해 아니면 결과를 버린다(실행 DISCARDED). 같은 리스라도 job의 리스 유효기간이 지났으면 결과를 받지 않고, 회수가 아직 안 됐어도 그 자리에서 만료(`validation_lease_expired`, RETRY)로 닫는다. 큐에서 기다리거나 AI가 도는 사이 계획 리비전이 바뀌었으면 AI를 부르지 않거나 결과를 버리고 검증을 STALE(`PLAN_CHANGED`)로 닫는다. 작업 취소·담당자 인계로 무효화되면 접수 때 만든 실행도 DISCARDED로 닫는다. AI 응답은 필수 배열·원소 타입, 검사 키 분할, 항목·버전·관련 작업 ID, 출처(요청의 승인 항목·규칙 finding·근거에 넣은 출처만), 근거 키(그 근거의 출처가 sources에 함께 있어야 함), MISSING_INPUT·MISSING_POLICY의 BLOCKING을 검사해 어긋나거나 본문이 비면 `ai_invalid_output`, PARTIAL은 미검사 사유별 코드로 ERROR다. AI의 STALE_REF는 현재 기준과 다시 대조해 정말 낡았으면 NEEDS_INPUT, 최신이면 사람 검토(BLOCKING이면 NEEDS_REVIEW)다. 승인 항목에는 원문 출처가 있으면 `source`를 넣어 보낸다. `checks`·`checked_keys`·`unassessed`·model·usage는 `validation.summary`에 남기고, PARTIAL·계약 위반처럼 모델을 부른 실패도 같은 값과 부분 후보(`partial_findings`)를 진단용으로 남긴다. 후보의 `check_key`·`evidence_ids`는 `validation_finding`(V14)에 남긴다. 워커는 한 번에 한 건씩 처리하고, 스케줄 스레드는 워커마다 하나다(`spring.task.scheduling.pool.size`). 리스가 만료된 작업(워커가 AI 호출 중 죽었거나 재배포로 내려감)은 워커가 주기마다 회수해 실행 ERROR·검증 ERROR(`validation_lease_expired`, RETRY)로 닫는다. 같은 검증의 재시도(VAL-A04)는 -161이며, 그 전에는 새 검증을 요청한다. 승인 항목의 `source`는 위치(location)가 있는 출처만 넣는다. AI가 404(검증 경로 없음)를 주면 `ai_unavailable`이다. AI 서버에 검증 경로가 붙기 전(-184)까지 개발 서버는 가짜 분석기(`beez.validation.fake-analyzer=true`, 환경변수 `VALIDATION_FAKE_ANALYZER`)를 켤 수 있다. 켜면 AI를 부르지 않고 요청한 검사를 모두 후보 없이 완료로 돌려줘, 의미 분석이 필요한 검증도 PASS가 된다(실제 설계 대조 없음, 운영에서는 끔). 이때 summary.model과 실행 기록의 분석기 버전은 `fake-analyzer`다. 가짜 분석기를 끈 서버에서는 실행 기록의 분석기 버전이 `fake-analyzer`인 PASS로 START·RESUME할 수 없다(시작 관문 G1, `validation_not_passed`). 실제 AI로 바꾼 뒤에는 검증을 다시 요청해야 한다.
+- (BE 구현, -159) 접수 시 `current_attempt=1`의 실행(run)과 작업 큐(job)를 함께 만든다. 워커는 큐에서 꺼내 AI를 DB 트랜잭션 밖에서 부르고, 반영 직전 아직 RUNNING·같은 시도·같은 리스인지 확인해 아니면 결과를 버린다(실행 DISCARDED). 같은 리스라도 job의 리스 유효기간이 지났으면 결과를 받지 않고, 회수가 아직 안 됐어도 그 자리에서 만료(`validation_lease_expired`, RETRY)로 닫는다. 큐에서 기다리거나 AI가 도는 사이 분석 입력이 바뀌었으면 AI를 부르지 않거나 결과를 버리고 검증을 STALE로 닫는다 — 이 작업의 계획 리비전이 바뀌면 `PLAN_CHANGED`, 같은 항목을 보는 관련 작업이나 그 계획이 접수 때 고정한 것과 달라지면(계획 변경·새 관련 작업·관련 작업 종료) `RELATED_PLAN_CHANGED`. 작업 취소·담당자 인계로 무효화되면 접수 때 만든 실행도 DISCARDED로 닫는다. AI 응답은 필수 배열·원소 타입, 검사 키 분할, 항목·버전·관련 작업 ID, 출처(요청의 승인 항목·규칙 finding·근거에 넣은 출처만), 근거 키(그 근거의 출처가 sources에 함께 있어야 함), MISSING_INPUT·MISSING_POLICY의 BLOCKING을 검사해 어긋나거나 본문이 비면 `ai_invalid_output`, PARTIAL은 미검사 사유별 코드로 ERROR다. AI의 STALE_REF는 현재 기준과 다시 대조해 정말 낡았으면 NEEDS_INPUT, 최신이면 사람 검토(BLOCKING이면 NEEDS_REVIEW)다. 승인 항목에는 원문 출처가 있으면 `source`를 넣어 보낸다. 검사와 분석 결과는 `validation.summary`에 남기고, 모델별 사용량은 `llm_usage`에 기록한다. PARTIAL은 분석 결과와 미검사 사유를 요약에 남긴다. 후보의 `check_key`·`evidence_ids`는 `validation_finding`(V16)에 남긴다. 워커는 한 번에 한 건씩 처리하고, 스케줄 스레드는 워커마다 하나다(`spring.task.scheduling.pool.size`). 리스가 만료된 작업(워커가 AI 호출 중 죽었거나 재배포로 내려감)은 워커가 주기마다 회수해 실행 ERROR·검증 ERROR(`validation_lease_expired`, RETRY)로 닫는다. 같은 검증의 재시도(VAL-A04)는 -161이며, 그 전에는 새 검증을 요청한다. 승인 항목의 `source`는 위치를 만들 수 있는 출처만 넣는다 — 원문 위치의 `location`(앞뒤 공백 제거), 없으면 줄 범위(`text_lines`)로 `lines {시작}-{끝}`, 둘 다 없으면 source를 넣지 않는다(변경 영향 분석과 같은 규칙). AI가 404(검증 경로 없음)를 주면 `ai_unavailable`이다. AI 서버에 검증 경로가 붙기 전(-184)까지 개발 서버는 가짜 분석기(`beez.validation.fake-analyzer=true`, 환경변수 `VALIDATION_FAKE_ANALYZER`)를 켤 수 있다. 켜면 AI를 부르지 않고 요청한 검사를 모두 후보 없이 완료로 돌려줘, 의미 분석이 필요한 검증도 PASS가 된다(실제 설계 대조 없음, 운영에서는 끔). 이때 summary.model과 실행 기록의 분석기 버전은 `fake-analyzer`다. 가짜 분석기를 끈 서버에서는 실행 기록의 분석기 버전이 `fake-analyzer`인 PASS로 START·RESUME할 수 없다(시작 관문 G1, `validation_not_passed`). 실제 AI로 바꾼 뒤에는 검증을 다시 요청해야 한다.
 - (BE 구현, -159) `Idempotency-Key` 헤더는 다른 작업 변경 API(TSK-A04·A07)와 같이 Q12 확정 전이라 처리하지 않는다. MCP-11은 `idempotency_key`를 처리한다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
@@ -11805,7 +11806,7 @@ HTTP `201`.
 
 관련 요구사항: MTG-04  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -11853,6 +11854,10 @@ HTTP `200`.
       "project_id": "101",
       "title": "로그인 계약 변경 협의",
       "change_proposal_id": "71",
+      "origin": "BEE_CONFLICT",
+      "task_ids": ["31", "32"],
+      "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+      "status": "OPEN",
       "participants": [
         {
           "member_id": "21",
@@ -11888,6 +11893,7 @@ HTTP `200`.
 - 조회·변경 대상의 현재 프로젝트 소속과 권한을 검사한다.
 - (수정안 요청) 회의가 없으면 화면은 '회의가 없어요'와 비비가 회의를 연다는 안내만 보인다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 회의는 최근 회의 먼저(id 내림차순)이고 `cursor`는 이전 페이지 마지막 회의 ID다. `status`가 OPEN·CLOSED가 아니면 400이다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -11903,7 +11909,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-04  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -11940,6 +11946,12 @@ HTTP `200`.
 | `project_id` | `ID` | Y | 프로젝트 |
 | `title` | `string` | Y | 제목 |
 | `change_proposal_id` | `ID` | N | 연결 제안 |
+| `origin` | `BEE_CONFLICT\|HUMAN` | Y | 연 주체 |
+| `task_ids` | `ID[]` | Y | 충돌한 작업(오름차순) |
+| `conflict_summary` | `string` | N | 비비가 정리한 충돌 한 줄 |
+| `status` | `OPEN\|CLOSED` | Y | 회의 상태 |
+| `closed_at` | `Time` | N | 끝낸 시각 |
+| `closed_by` | `ID` | N | 끝낸 팀장 계정 |
 | `participants` | [Participant[]](00-common.md#schema-participant) | Y | 참여자 |
 | `created_at` | `Time` | Y | 생성 시각 |
 
@@ -11949,6 +11961,10 @@ HTTP `200`.
   "project_id": "101",
   "title": "로그인 계약 변경 협의",
   "change_proposal_id": "71",
+  "origin": "BEE_CONFLICT",
+  "task_ids": ["31", "32"],
+  "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+  "status": "OPEN",
   "participants": [
     {
       "member_id": "21",
@@ -11995,7 +12011,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-05  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 수정안 요청
+상태: 구현됨(S15P31A108-205, 참여 알림은 TODO)
 
 #### 인증
 
@@ -12047,6 +12063,12 @@ HTTP `200`.
 | `project_id` | `ID` | Y | 프로젝트 |
 | `title` | `string` | Y | 제목 |
 | `change_proposal_id` | `ID` | N | 연결 제안 |
+| `origin` | `BEE_CONFLICT\|HUMAN` | Y | 연 주체 |
+| `task_ids` | `ID[]` | Y | 충돌한 작업(오름차순) |
+| `conflict_summary` | `string` | N | 비비가 정리한 충돌 한 줄 |
+| `status` | `OPEN\|CLOSED` | Y | 회의 상태 |
+| `closed_at` | `Time` | N | 끝낸 시각 |
+| `closed_by` | `ID` | N | 끝낸 팀장 계정 |
 | `participants` | [Participant[]](00-common.md#schema-participant) | Y | 참여자 |
 | `created_at` | `Time` | Y | 생성 시각 |
 
@@ -12056,6 +12078,10 @@ HTTP `200`.
   "project_id": "101",
   "title": "로그인 계약 변경 협의",
   "change_proposal_id": "71",
+  "origin": "BEE_CONFLICT",
+  "task_ids": ["31", "32"],
+  "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+  "status": "OPEN",
   "participants": [
     {
       "member_id": "21",
@@ -12079,6 +12105,7 @@ HTTP `200`.
 | 401 | `unauthenticated` | 세션 인증이 유효하지 않음 |
 | 404 | `not_found` | 리소스가 없거나 프로젝트 소속·접근 권한이 없음 |
 | 400 | `validation_failed` | 필수 필드·타입·허용 값 오류 |
+| 403 | `forbidden` | 팀장이나 회의 참여자가 아님, 사람이 아닌 호출자 |
 | 409 | `meeting_closed` | 끝난 회의 |
 | 409 | `baseline_missing` | 기준 v1 전. 회의실이 닫혀 있음 |
 
@@ -12101,6 +12128,7 @@ HTTP `200`.
 - (수정안 요청) 참여자에 `added_by_member_id`를 남겨 화면이 '이팀장이 추가'처럼 누가 불렀는지 보여 준다.
 - (수정안 요청) 참여자를 빼는 것은 [MTG-A14](#mtg-a14)이고 팀장만 한다. 팀장이 아닌 참여자는 추가만 한다. MTG-A14로 빠진 사람은 이 API로 다시 추가할 수 있다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 한 번에 1~50명이고 활성 멤버만 받으며 하나라도 아니면 전체 400이다. 이미 참여 중인 사람은 건너뛴다. `reason`은 저장하지 않고 알림 문구용이다. 알림 전달은 알림 공통 서비스 연결(S15P31A108-237) 전까지 TODO다. 에이전트 호출은 403이다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -12219,7 +12247,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-06·08  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -12290,6 +12318,8 @@ HTTP `201`.
 | 401 | `unauthenticated` | 세션 인증이 유효하지 않음 |
 | 404 | `not_found` | 리소스가 없거나 프로젝트 소속·접근 권한이 없음 |
 | 400 | `validation_failed` | 필수 필드·타입·허용 값 오류 |
+| 403 | `forbidden` | 회의 참여자가 아니거나 빠진 사람, 사람이 아닌 호출자 |
+| 409 | `idempotency_conflict` | 같은 Idempotency-Key 에 다른 입력 |
 | 409 | `meeting_closed` | 끝난 회의 |
 | 409 | `baseline_missing` | 기준 v1 전. 회의실이 닫혀 있음 |
 
@@ -12308,6 +12338,7 @@ HTTP `201`.
 - TEXT 기록과 AI 분석·회의록을 entry kind로 구분한다.
 - (수정안 요청) 끝난 회의(status=CLOSED)에는 기록을 받지 않는다. 응답 기록에는 author_kind·author_member_id·author_name을 넣어 화면이 내 말은 오른쪽, 다른 사람은 이름과 함께 왼쪽, 비비는 노란 말풍선으로 그린다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 사람 참여자만 쓴다(에이전트 403). 본문은 앞뒤 공백을 지우고 4000자 이하이며 비면 400이다. `Idempotency-Key`는 선택이고 있으면 24시간 동안 같은 키·입력은 처음 응답을 돌려주며(끝난 회의여도) 다른 입력은 409 idempotency_conflict다. 요청 본문 필드는 `text`다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -12682,7 +12713,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-04·06·08  
 담당: BE: 오서현 / AI: — / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -12761,6 +12792,7 @@ HTTP `200`.
 - TEXT·BEE_ANALYSIS·MINUTES를 구분해 페이지로 반환한다.
 - (수정안 요청) CONFLICT_BRIEF·SUMMARY 기록도 함께 돌려준다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 기록은 작성 순서(오래된 순)이고 `cursor`는 이전 페이지 마지막 기록 ID다. `after_entry_id`가 오면 그 뒤 기록만 같은 순서로 돌려주며 `cursor`와 함께 오면 더 큰 쪽 뒤부터다. 비멤버·다른 프로젝트 회의는 404다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -13146,6 +13178,7 @@ HTTP `200`.
 - 끝난 회의는 읽기만 한다(MTG-A06 409 meeting_closed).
 - 회의 결과는 공용 문서함의 비비 검토·제출(DOC-A16·A18)을 거치지 않는다. 비비 회의 정리(MTG-A11)와 변경 제안 검토(CHG-A08)가 검토를 맡는다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 팀장만 호출한다(사람 세션). 잠금 뒤 팀장을 다시 확인하고, 회의 행 잠금으로 기록·참여자 추가와 직렬화한다. 제외 알림·활동은 알림 공통 서비스 연결(S15P31A108-237) 전까지 TODO다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -13161,7 +13194,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-05  
 담당: BE: 오서현 / AI: — / FE: 오서현  
-상태: 수정안 요청
+상태: 구현됨(S15P31A108-205, 제외 알림은 TODO)
 
 #### 인증
 

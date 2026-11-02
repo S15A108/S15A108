@@ -110,7 +110,7 @@ class LiveValidationPipelineIntegrationTests extends IntegrationTestSupport {
                 diagnostic("ai_http", error);
                 throw error;
             }
-        }).when(ai).validatePlan(anyMap());
+        }).when(ai).validate(anyMap());
         doAnswer(inv -> {
             try { return inv.callRealMethod(); }
             catch (RuntimeException error) { diagnostic("assembler", error); throw error; }

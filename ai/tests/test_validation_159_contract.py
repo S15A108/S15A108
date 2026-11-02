@@ -21,6 +21,7 @@ from app.services.llm_client import LLMClient, ProviderResponse
 def test_159_request_accepts_partial_analysis_without_fabricated_evidence(
     monkeypatch, include_source
 ):
+    monkeypatch.setattr("app.main.EmbeddingTokenCounter", lambda: None)
     body = json.loads(
         (
             Path(__file__).resolve().parents[2]
