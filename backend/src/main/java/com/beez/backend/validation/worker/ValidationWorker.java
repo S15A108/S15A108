@@ -215,10 +215,10 @@ public class ValidationWorker {
     private List<Map<String, Object>> withSources(List<Map<String, Object>> items, List<Long> versionIds) {
         Map<String, Map<String, Object>> sourceByVersion = new LinkedHashMap<>();
         for (Map<String, Object> row : validations.designSources(versionIds)) {
-            // 위치 없이 문서 버전만 지정한 출처(설계 항목 등록에서 허용)는 넣지 않는다. 명세 Source.location 은 필수이고
+            // 위치를 만들 수 없는 출처(문서 버전만 지정 — 설계 항목 등록에서 허용)는 넣지 않는다. 명세 Source.location 은 필수이고
             // AI 쪽 입력 검사도 빈 문자열을 거부해(422) 검증 전체가 ERROR 가 된다. 승인 항목의 source 는 선택이다
-            String location = String.valueOf(row.get("location"));
-            if (row.get("location") == null || location.isBlank()) {
+            String location = location(row.get("locator"));
+            if (location == null) {
                 continue;
             }
             Map<String, Object> source = new LinkedHashMap<>();
@@ -235,6 +235,30 @@ public class ValidationWorker {
             }
         }
         return items;
+    }
+
+    /**
+     * 원문 위치 JSON → 표시용 위치. 변경 영향 분석(ImpactRequestAssembler)과 같은 규칙:
+     * locator.location 이 있으면 그 값(앞뒤 공백 제거), 없고 줄 범위(type=text_lines)면 "lines {시작}-{끝}", 둘 다 아니면 null.
+     */
+    @SuppressWarnings("unchecked")
+    private String location(Object locatorJson) {
+        if (locatorJson == null) {
+            return null;
+        }
+        Object parsed = json.readValue(String.valueOf(locatorJson), Object.class);
+        if (!(parsed instanceof Map<?, ?> locator)) {
+            return null;
+        }
+        if (locator.get("location") instanceof String text && !text.isBlank()) {
+            return text.strip();
+        }
+        if ("text_lines".equals(locator.get("type")) && locator.get("start_line") instanceof Number start
+                && locator.get("end_line") instanceof Number end && start.longValue() > 0
+                && end.longValue() >= start.longValue()) {
+            return "lines " + start.longValue() + "-" + end.longValue();
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
