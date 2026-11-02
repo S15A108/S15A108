@@ -46,3 +46,27 @@ export function foldDiff(lines: DiffLine[], context = 1): FoldedLine[] {
   })
   return folded
 }
+
+// 설계 항목 내용(구조화 객체)에서 설명(description) 밖의 바뀐 필드. 설명 문장만 비교하면 API의 method·path나
+// DATA_CONTRACT.fields가 바뀐 것이 보이지 않는다(PR #72 전수 리뷰 CHG-2). 값은 문자열이면 그대로, 아니면 JSON으로 보인다.
+export function changedFields(before: unknown, after: unknown) {
+  const record = (value: unknown) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  const base = record(before)
+  const next = record(after)
+  const show = (value: unknown) =>
+    value === undefined
+      ? undefined
+      : typeof value === 'string'
+        ? value
+        : JSON.stringify(value, null, 2)
+  return [...new Set([...Object.keys(base), ...Object.keys(next)])]
+    .filter(
+      (key) =>
+        key !== 'description' &&
+        JSON.stringify(base[key]) !== JSON.stringify(next[key]),
+    )
+    .map((key) => ({ key, before: show(base[key]), after: show(next[key]) }))
+}

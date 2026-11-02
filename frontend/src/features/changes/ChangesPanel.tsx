@@ -32,7 +32,7 @@ import { formatDate } from '@/lib/formatDate'
 import { describeContent } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { foldDiff, lineDiff } from './lineDiff'
+import { changedFields, foldDiff, lineDiff } from './lineDiff'
 import { ProposalForm } from './ProposalForm'
 import {
   isStaleDocument,
@@ -1450,6 +1450,10 @@ function Diff({
     typeof comparison.proposed_content === 'string'
       ? lineDiff(baseText, comparison.proposed_content)
       : undefined
+  // 설명 밖의 구조화 필드(method·path·fields 등)도 바뀐 것만 줄로 보인다(PR #72 전수 리뷰 CHG-2).
+  const fields = changedFields(baseText, comparison.proposed_content)
+  // 설명은 그대로고 필드만 바뀐 수정이면 설명은 −/+ 대신 그대로 한 번만 보인다.
+  const sameDescription = operation === 'UPDATE' && before === after
   return (
     <li>
       <details
@@ -1521,16 +1525,39 @@ function Diff({
             </div>
           ) : (
             <div className="grid gap-0.5 leading-5 whitespace-pre-wrap">
-              {operation !== 'CREATE' && (
-                <p className="bg-[#fdecec] px-2.5 py-0.75 text-[#8f1d17]">
-                  − {before}
-                </p>
+              {sameDescription ? (
+                <p className="px-2.5 py-0.75 text-muted-foreground">{after}</p>
+              ) : (
+                <>
+                  {operation !== 'CREATE' && (
+                    <p className="bg-[#fdecec] px-2.5 py-0.75 text-[#8f1d17]">
+                      − {before}
+                    </p>
+                  )}
+                  {operation !== 'RETIRE' && (
+                    <p className="bg-[#e8f3ec] px-2.5 py-0.75 text-[#00532a]">
+                      + {after}
+                    </p>
+                  )}
+                </>
               )}
-              {operation !== 'RETIRE' && (
-                <p className="bg-[#e8f3ec] px-2.5 py-0.75 text-[#00532a]">
-                  + {after}
-                </p>
-              )}
+              {fields.map((field) => (
+                <div key={field.key} className="mt-1.5 grid gap-0.5">
+                  <p className="px-2.5 text-xs font-semibold text-muted-foreground">
+                    {field.key}
+                  </p>
+                  {operation !== 'CREATE' && field.before !== undefined && (
+                    <p className="bg-[#fdecec] px-2.5 py-0.75 font-mono text-xs text-[#8f1d17]">
+                      − {field.before}
+                    </p>
+                  )}
+                  {operation !== 'RETIRE' && field.after !== undefined && (
+                    <p className="bg-[#e8f3ec] px-2.5 py-0.75 font-mono text-xs text-[#00532a]">
+                      + {field.after}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
