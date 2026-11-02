@@ -539,95 +539,105 @@ export function TeamPanel({
       )}
       {view === 'remove' && (
         <AsyncState query={project}>
-          {(data) =>
-            isLeader && otherMembers.length > 0 ? (
-              // 서버(PRJ-A05)는 아직 팀원이 있어도 지운다. 막는 응답(409)이 생기기 전까지 화면에서 먼저 막는다.
-              <div className="space-y-5">
-                <div
-                  role="alert"
-                  className="flex gap-2.5 rounded-xl border border-primary/50 bg-primary/10 p-4 text-sm"
-                >
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-700" />
-                  <div>
-                    <strong className="font-semibold">
-                      팀원 {otherMembers.length}명이 함께 쓰고 있어서 바로
-                      제거할 수 없어요
-                    </strong>
-                    <p className="mt-0.5 text-muted-foreground">
-                      먼저 설정 › 팀에서 다른 팀원에게 팀장을 위임하세요.
-                      위임하면 나는 팀원이 되고, 그다음 프로젝트에서 나갈 수
-                      있어요. 프로젝트는 남은 팀원에게 그대로 남아요.
-                    </p>
+          {(data) => (
+            // 팀원 수를 모른 채(조회 중·실패) '혼자 쓰는 프로젝트' 삭제 폼을 보이면 팀 프로젝트가 지워질 수 있어, 팀원 조회가 성공한 뒤에만 고른다.
+            <AsyncState query={members}>
+              {() =>
+                isLeader && otherMembers.length > 0 ? (
+                  // 서버(PRJ-A05)는 아직 팀원이 있어도 지운다. 막는 응답(409)이 생기기 전까지 화면에서 먼저 막는다.
+                  <div className="space-y-5">
+                    <div
+                      role="alert"
+                      className="flex gap-2.5 rounded-xl border border-primary/50 bg-primary/10 p-4 text-sm"
+                    >
+                      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-700" />
+                      <div>
+                        <strong className="font-semibold">
+                          팀원 {otherMembers.length}명이 함께 쓰고 있어서 바로
+                          제거할 수 없어요
+                        </strong>
+                        <p className="mt-0.5 text-muted-foreground">
+                          먼저 설정 › 팀에서 다른 팀원에게 팀장을 위임하세요.
+                          위임하면 나는 팀원이 되고, 그다음 프로젝트에서 나갈 수
+                          있어요. 프로젝트는 남은 팀원에게 그대로 남아요.
+                        </p>
+                      </div>
+                    </div>
+                    <ol className="grid gap-3.5 text-sm">
+                      <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3">
+                        <span className="grid size-6 place-items-center rounded-full bg-primary text-xs font-bold">
+                          1
+                        </span>
+                        <div className="grid gap-2">
+                          <strong className="font-semibold">팀장 위임</strong>
+                          <span className="text-[12.5px] text-muted-foreground">
+                            설정 › 팀에서 넘길 팀원 줄의 ⋯ → &apos;팀장으로
+                            위임&apos;으로 넘겨요. 넘기면 나는 팀원이 되고,
+                            2단계로 이어가요.
+                          </span>
+                          <Button
+                            className="justify-self-start"
+                            onClick={() => onViewChange?.('team')}
+                          >
+                            팀에서 위임하기
+                          </Button>
+                        </div>
+                      </li>
+                      <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3 text-muted-foreground">
+                        <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
+                          2
+                        </span>
+                        <div className="grid gap-1">
+                          <strong className="font-semibold">
+                            프로젝트 나가기
+                          </strong>
+                          <span className="text-[12.5px]">
+                            위임이 끝나면 팀원 화면의 프로젝트 나가기로
+                            이어져요.
+                          </span>
+                        </div>
+                      </li>
+                    </ol>
                   </div>
-                </div>
-                <ol className="grid gap-3.5 text-sm">
-                  <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3">
-                    <span className="grid size-6 place-items-center rounded-full bg-primary text-xs font-bold">
-                      1
-                    </span>
-                    <div className="grid gap-2">
-                      <strong className="font-semibold">팀장 위임</strong>
-                      <span className="text-[12.5px] text-muted-foreground">
-                        설정 › 팀에서 넘길 팀원 줄의 ⋯ → &apos;팀장으로
-                        위임&apos;으로 넘겨요. 넘기면 나는 팀원이 되고, 2단계로
-                        이어가요.
-                      </span>
-                      <Button
-                        className="justify-self-start"
-                        onClick={() => onViewChange?.('team')}
-                      >
-                        팀에서 위임하기
-                      </Button>
-                    </div>
-                  </li>
-                  <li className="grid grid-cols-[24px_minmax(0,1fr)] gap-3 text-muted-foreground">
-                    <span className="grid size-6 place-items-center rounded-full bg-muted text-xs font-bold">
-                      2
-                    </span>
-                    <div className="grid gap-1">
-                      <strong className="font-semibold">프로젝트 나가기</strong>
-                      <span className="text-[12.5px]">
-                        위임이 끝나면 팀원 화면의 프로젝트 나가기로 이어져요.
-                      </span>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
-                  {isLeader
-                    ? '혼자 쓰는 프로젝트예요. 제거하면 문서와 작업에 다시 들어올 수 없어요.'
-                    : '나가면 문서·작업을 볼 수 없고 이 프로젝트 토큰도 바로 막혀요. 다시 들어오려면 새 초대가 필요해요.'}
-                </p>
-                <ActionForm
-                  fields={[
-                    {
-                      name: 'confirm_name',
-                      label: '프로젝트 이름 입력',
-                      required: true,
-                      placeholder: data.name,
-                      check: (value) =>
-                        value === data.name
-                          ? undefined
-                          : '프로젝트 이름이 맞지 않아요.',
-                    },
-                  ]}
-                  destructive
-                  submitLabel={isLeader ? '프로젝트 제거' : '프로젝트 나가기'}
-                  onSubmit={async (values) => {
-                    // action.run은 성공 뒤 이 프로젝트를 다시 불러 '접근 권한' 오류가 뜨므로 직접 부른다. 실패하면 폼이 이유를 보여 준다.
-                    await (isLeader
-                      ? projectsApi.remove(projectId, {
-                          confirm_name: values.confirm_name,
-                        })
-                      : membersApi.leave(projectId, {}))
-                    leaveProject()
-                  }}
-                />
-              </div>
-            )
-          }
+                ) : (
+                  <div className="space-y-4">
+                    <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                      {isLeader
+                        ? '혼자 쓰는 프로젝트예요. 제거하면 문서와 작업에 다시 들어올 수 없어요.'
+                        : '나가면 문서·작업을 볼 수 없고 이 프로젝트 토큰도 바로 막혀요. 다시 들어오려면 새 초대가 필요해요.'}
+                    </p>
+                    <ActionForm
+                      fields={[
+                        {
+                          name: 'confirm_name',
+                          label: '프로젝트 이름 입력',
+                          required: true,
+                          placeholder: data.name,
+                          check: (value) =>
+                            value === data.name
+                              ? undefined
+                              : '프로젝트 이름이 맞지 않아요.',
+                        },
+                      ]}
+                      destructive
+                      submitLabel={
+                        isLeader ? '프로젝트 제거' : '프로젝트 나가기'
+                      }
+                      onSubmit={async (values) => {
+                        // action.run은 성공 뒤 이 프로젝트를 다시 불러 '접근 권한' 오류가 뜨므로 직접 부른다. 실패하면 폼이 이유를 보여 준다.
+                        await (isLeader
+                          ? projectsApi.remove(projectId, {
+                              confirm_name: values.confirm_name,
+                            })
+                          : membersApi.leave(projectId, {}))
+                        leaveProject()
+                      }}
+                    />
+                  </div>
+                )
+              }
+            </AsyncState>
+          )}
         </AsyncState>
       )}
       {typeof dialog === 'object' && dialog?.action === 'transfer' && (

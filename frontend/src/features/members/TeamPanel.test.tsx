@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
-import { beforeEach, afterEach, expect, it } from 'vitest'
+import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -163,4 +163,24 @@ it('혼자 쓰는 프로젝트를 제거하면 바로 나의 도시로 간다', 
   await user.click(screen.getByRole('button', { name: '프로젝트 제거' }))
   expect(await screen.findByText('나의 도시')).toBeInTheDocument()
   expect(screen.queryByText(/접근 권한/)).not.toBeInTheDocument()
+})
+
+// PR #72 리뷰 6: 팀원 조회가 끝나기 전·실패하면 '혼자 쓰는 프로젝트' 삭제 폼을 보이지 않는다.
+it('팀원 목록을 못 불러오면 프로젝트 삭제 폼을 보이지 않는다', async () => {
+  vi.spyOn(membersApi, 'list').mockRejectedValue(new Error('network'))
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TeamPanel projectId="101" isLeader view="remove" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByText(/정보를 불러오지 못했어요/),
+  ).toBeInTheDocument()
+  expect(screen.queryByLabelText(/프로젝트 이름 입력/)).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('button', { name: '프로젝트 제거' }),
+  ).not.toBeInTheDocument()
+  vi.restoreAllMocks()
 })
