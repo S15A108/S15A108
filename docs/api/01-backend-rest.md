@@ -5651,6 +5651,7 @@ HTTP `200`.
 
 - 현재 승인본만 검색하고 권한·프로젝트 필터를 검색 전에 적용한다.
 - BE 키워드·벡터 저장/검색·실행/manifest는 오서현, 청킹·임베딩·검색 전략 AI는 박상은 담당이다. KEYWORD는 현재 baseline의 문서/항목을 검색해 DOCUMENT/DESIGN_ITEM을, SEMANTIC은 READY 청크의 DOCUMENT_CHUNK를 반환한다. 원문 키워드 검색은 색인과 독립적이다. 출처 없는 HUMAN 승인 항목은 source를 생략한다.
+- 새 의미 검색 색인의 `DOCUMENT_CHUNK`는 표시용 `source.location`과 함께 `chunk_key`, 정확한 `source_spans`, 보조 `context_refs`를 반환한다. 이전 색인에서 정확한 범위가 저장되지 않았다면 이 필드는 생략한다. offset은 정규화 원문의 Unicode 코드 포인트 기준이며 끝은 제외한다.
 - 검색 실패를 빈 결과로 표시하지 않는다. 유사도와 승인 근거를 구분한다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
@@ -11794,7 +11795,7 @@ HTTP `201`.
 
 관련 요구사항: MTG-04  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -11842,6 +11843,10 @@ HTTP `200`.
       "project_id": "101",
       "title": "로그인 계약 변경 협의",
       "change_proposal_id": "71",
+      "origin": "BEE_CONFLICT",
+      "task_ids": ["31", "32"],
+      "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+      "status": "OPEN",
       "participants": [
         {
           "member_id": "21",
@@ -11877,6 +11882,7 @@ HTTP `200`.
 - 조회·변경 대상의 현재 프로젝트 소속과 권한을 검사한다.
 - (수정안 요청) 회의가 없으면 화면은 '회의가 없어요'와 비비가 회의를 연다는 안내만 보인다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 회의는 최근 회의 먼저(id 내림차순)이고 `cursor`는 이전 페이지 마지막 회의 ID다. `status`가 OPEN·CLOSED가 아니면 400이다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -11892,7 +11898,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-04  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -11929,6 +11935,12 @@ HTTP `200`.
 | `project_id` | `ID` | Y | 프로젝트 |
 | `title` | `string` | Y | 제목 |
 | `change_proposal_id` | `ID` | N | 연결 제안 |
+| `origin` | `BEE_CONFLICT\|HUMAN` | Y | 연 주체 |
+| `task_ids` | `ID[]` | Y | 충돌한 작업(오름차순) |
+| `conflict_summary` | `string` | N | 비비가 정리한 충돌 한 줄 |
+| `status` | `OPEN\|CLOSED` | Y | 회의 상태 |
+| `closed_at` | `Time` | N | 끝낸 시각 |
+| `closed_by` | `ID` | N | 끝낸 팀장 계정 |
 | `participants` | [Participant[]](00-common.md#schema-participant) | Y | 참여자 |
 | `created_at` | `Time` | Y | 생성 시각 |
 
@@ -11938,6 +11950,10 @@ HTTP `200`.
   "project_id": "101",
   "title": "로그인 계약 변경 협의",
   "change_proposal_id": "71",
+  "origin": "BEE_CONFLICT",
+  "task_ids": ["31", "32"],
+  "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+  "status": "OPEN",
   "participants": [
     {
       "member_id": "21",
@@ -11984,7 +12000,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-05  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 수정안 요청
+상태: 구현됨(S15P31A108-205, 참여 알림은 TODO)
 
 #### 인증
 
@@ -12036,6 +12052,12 @@ HTTP `200`.
 | `project_id` | `ID` | Y | 프로젝트 |
 | `title` | `string` | Y | 제목 |
 | `change_proposal_id` | `ID` | N | 연결 제안 |
+| `origin` | `BEE_CONFLICT\|HUMAN` | Y | 연 주체 |
+| `task_ids` | `ID[]` | Y | 충돌한 작업(오름차순) |
+| `conflict_summary` | `string` | N | 비비가 정리한 충돌 한 줄 |
+| `status` | `OPEN\|CLOSED` | Y | 회의 상태 |
+| `closed_at` | `Time` | N | 끝낸 시각 |
+| `closed_by` | `ID` | N | 끝낸 팀장 계정 |
 | `participants` | [Participant[]](00-common.md#schema-participant) | Y | 참여자 |
 | `created_at` | `Time` | Y | 생성 시각 |
 
@@ -12045,6 +12067,10 @@ HTTP `200`.
   "project_id": "101",
   "title": "로그인 계약 변경 협의",
   "change_proposal_id": "71",
+  "origin": "BEE_CONFLICT",
+  "task_ids": ["31", "32"],
+  "conflict_summary": "로그인 응답 계약이 두 작업에서 충돌",
+  "status": "OPEN",
   "participants": [
     {
       "member_id": "21",
@@ -12068,6 +12094,7 @@ HTTP `200`.
 | 401 | `unauthenticated` | 세션 인증이 유효하지 않음 |
 | 404 | `not_found` | 리소스가 없거나 프로젝트 소속·접근 권한이 없음 |
 | 400 | `validation_failed` | 필수 필드·타입·허용 값 오류 |
+| 403 | `forbidden` | 팀장이나 회의 참여자가 아님, 사람이 아닌 호출자 |
 | 409 | `meeting_closed` | 끝난 회의 |
 | 409 | `baseline_missing` | 기준 v1 전. 회의실이 닫혀 있음 |
 
@@ -12090,6 +12117,7 @@ HTTP `200`.
 - (수정안 요청) 참여자에 `added_by_member_id`를 남겨 화면이 '이팀장이 추가'처럼 누가 불렀는지 보여 준다.
 - (수정안 요청) 참여자를 빼는 것은 [MTG-A14](#mtg-a14)이고 팀장만 한다. 팀장이 아닌 참여자는 추가만 한다. MTG-A14로 빠진 사람은 이 API로 다시 추가할 수 있다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 한 번에 1~50명이고 활성 멤버만 받으며 하나라도 아니면 전체 400이다. 이미 참여 중인 사람은 건너뛴다. `reason`은 저장하지 않고 알림 문구용이다. 알림 전달은 알림 공통 서비스 연결(S15P31A108-237) 전까지 TODO다. 에이전트 호출은 403이다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -12208,7 +12236,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-06·08  
 담당: BE: 오서현 / AI: 양지훈 / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -12279,6 +12307,8 @@ HTTP `201`.
 | 401 | `unauthenticated` | 세션 인증이 유효하지 않음 |
 | 404 | `not_found` | 리소스가 없거나 프로젝트 소속·접근 권한이 없음 |
 | 400 | `validation_failed` | 필수 필드·타입·허용 값 오류 |
+| 403 | `forbidden` | 회의 참여자가 아니거나 빠진 사람, 사람이 아닌 호출자 |
+| 409 | `idempotency_conflict` | 같은 Idempotency-Key 에 다른 입력 |
 | 409 | `meeting_closed` | 끝난 회의 |
 | 409 | `baseline_missing` | 기준 v1 전. 회의실이 닫혀 있음 |
 
@@ -12297,6 +12327,7 @@ HTTP `201`.
 - TEXT 기록과 AI 분석·회의록을 entry kind로 구분한다.
 - (수정안 요청) 끝난 회의(status=CLOSED)에는 기록을 받지 않는다. 응답 기록에는 author_kind·author_member_id·author_name을 넣어 화면이 내 말은 오른쪽, 다른 사람은 이름과 함께 왼쪽, 비비는 노란 말풍선으로 그린다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 사람 참여자만 쓴다(에이전트 403). 본문은 앞뒤 공백을 지우고 4000자 이하이며 비면 400이다. `Idempotency-Key`는 선택이고 있으면 24시간 동안 같은 키·입력은 처음 응답을 돌려주며(끝난 회의여도) 다른 입력은 409 idempotency_conflict다. 요청 본문 필드는 `text`다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -12671,7 +12702,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-04·06·08  
 담당: BE: 오서현 / AI: — / FE: 오서현  
-상태: 설계 초안 · 수정안 요청 반영
+상태: 구현됨(S15P31A108-205)
 
 #### 인증
 
@@ -12750,6 +12781,7 @@ HTTP `200`.
 - TEXT·BEE_ANALYSIS·MINUTES를 구분해 페이지로 반환한다.
 - (수정안 요청) CONFLICT_BRIEF·SUMMARY 기록도 함께 돌려준다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 기록은 작성 순서(오래된 순)이고 `cursor`는 이전 페이지 마지막 기록 ID다. `after_entry_id`가 오면 그 뒤 기록만 같은 순서로 돌려주며 `cursor`와 함께 오면 더 큰 쪽 뒤부터다. 비멤버·다른 프로젝트 회의는 404다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -13135,6 +13167,7 @@ HTTP `200`.
 - 끝난 회의는 읽기만 한다(MTG-A06 409 meeting_closed).
 - 회의 결과는 공용 문서함의 비비 검토·제출(DOC-A16·A18)을 거치지 않는다. 비비 회의 정리(MTG-A11)와 변경 제안 검토(CHG-A08)가 검토를 맡는다.
 - (수정안 요청) 기준 v1 전에는 회의실이 닫혀 있어 409 baseline_missing이다.
+- 구현(S15P31A108-205): 팀장만 호출한다(사람 세션). 잠금 뒤 팀장을 다시 확인하고, 회의 행 잠금으로 기록·참여자 추가와 직렬화한다. 제외 알림·활동은 알림 공통 서비스 연결(S15P31A108-237) 전까지 TODO다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 
@@ -13150,7 +13183,7 @@ HTTP `200`.
 
 관련 요구사항: MTG-05  
 담당: BE: 오서현 / AI: — / FE: 오서현  
-상태: 수정안 요청
+상태: 구현됨(S15P31A108-205, 제외 알림은 TODO)
 
 #### 인증
 
