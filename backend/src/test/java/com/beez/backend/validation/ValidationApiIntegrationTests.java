@@ -647,6 +647,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(api.jdbc.sql("select summary->'usage'->0->>'input_tokens' from validation where id = :v").param("v", id)
                 .query(String.class).single()).isEqualTo("10");
         assertThat(column("validation", "summary", id)).doesNotContain("partial_findings");
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
         // 그 검증으로는 A 를 시작할 수 없다
         HttpResponse<String> start = api.post(tasksPath() + "/" + a[0] + "/state-events",
                 "{\"event\":\"START\",\"plan_revision_id\":\"" + a[1] + "\",\"expected_lock_version\":" + a[2]
@@ -677,6 +678,32 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(v.get("findings").get(0).get("related_task_id").asLong()).isEqualTo(b[0]);
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("OK");
         assertThat(start(a, id, member).statusCode()).isEqualTo(409);
+    }
+
+    @Test
+    void relatedTaskStartedWhileQueued_isDecidedByRules_withoutCallingAi() throws Exception {
+        long[] b = createTask(planJson("B", api.changesRef("API-01"), false, null), member);
+        long[] a = createTask(planJson("A", api.changesRef("API-01"), false, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+        // 워커가 꺼내기 전에 B 가 시작한다 — 이제 규칙만으로 점유 충돌이 확정된다
+        long passB = api.passValidation(b[0]);
+        assertThat(start(b, passB, member).statusCode()).isEqualTo(200);
+        AtomicReference<Boolean> called = new AtomicReference<>(false);
+        doAnswer(inv -> {
+            called.set(true);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+
+        assertThat(worker.runOnce()).isTrue();
+        assertThat(called.get()).isFalse();                 // 버릴 결과를 위해 모델을 부르지 않는다
+        JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(v.get("status").asText()).isEqualTo("NEEDS_REVIEW");
+        assertThat(kinds(v.get("findings"))).containsExactly("CONFLICT");
+        assertThat(v.get("findings").get(0).get("related_task_id").asLong()).isEqualTo(b[0]);
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("DISCARDED");
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).isNull();
+        assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("DONE");
+        assertThat(worker.runOnce()).isFalse();
     }
 
     @Test
@@ -853,6 +880,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
         assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("FAILED");
         assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1");   // 모델을 부른 사용량은 남긴다
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
         assertThat(worker.recoverExpired()).isFalse();                                     // 이미 닫혀 회수할 것이 없다
     }
 

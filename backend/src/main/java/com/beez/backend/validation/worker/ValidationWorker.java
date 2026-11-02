@@ -103,6 +103,10 @@ public class ValidationWorker {
             return false;
         }
         JobLease lease = leased.get();
+        // 큐에서 기다리는 사이 규칙만으로 판정이 서게 됐으면(관련 작업 시작으로 점유 충돌, 참조 버전 낡음) 모델을 부르지 않는다
+        if (applier.closeByRulesIfDecided(lease)) {
+            return true;
+        }
         long started = System.currentTimeMillis();
         Map<String, Object> request;
         try {

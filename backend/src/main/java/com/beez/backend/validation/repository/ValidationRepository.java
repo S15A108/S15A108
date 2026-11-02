@@ -247,15 +247,28 @@ public class ValidationRepository {
                 .param("v", validationId).param("a", attempt).query().listOfRows().stream().findFirst();
     }
 
-    /** 실행 종결. 이미 종결된 실행은 덮어쓰지 않는다 (RUNNING 일 때만). 바뀐 줄 수 */
+    /** 실행 종결 (모델을 부르지 않은 경우). 이미 종결된 실행은 덮어쓰지 않는다 (RUNNING 일 때만). 바뀐 줄 수 */
     public int finishRun(long runId, String status, String error, String analyzerVersion, long durationMs) {
+        return finishRun(runId, status, error, analyzerVersion, durationMs, null);
+    }
+
+    /**
+     * 실행 종결. 모델을 불렀으면 사용량(usage 배열)을 함께 남긴다 — 판정을 버리는 DISCARDED·만료·오류도 마찬가지.
+     * 비용 집계(-168)는 validation.summary 가 아니라 여기서 시도별로 읽는다
+     */
+    public int finishRun(long runId, String status, String error, String analyzerVersion, long durationMs, Object usage) {
+        String usageJson = null;
+        if (usage != null) {
+            usageJson = toJson(usage);
+        }
         return jdbc.sql("""
                         update validation_run
-                           set status = :s, error = :e, analyzer_version = :m, finished_at = now(), duration_ms = :d, updated_at = now()
+                           set status = :s, error = :e, analyzer_version = :m, finished_at = now(), duration_ms = :d,
+                               usage = cast(:u as jsonb), updated_at = now()
                          where id = :id and status = 'RUNNING'
                         """)
                 .param("s", status).param("e", error, Types.VARCHAR).param("m", analyzerVersion, Types.VARCHAR)
-                .param("d", (int) durationMs).param("id", runId).update();
+                .param("d", (int) durationMs).param("u", usageJson, Types.VARCHAR).param("id", runId).update();
     }
 
     // ---- 작업 큐(job) ----

@@ -174,9 +174,38 @@ public class AnalysisResultApplier {
         summary.put("unassessed", List.of());
         summary.put("model", model);
         summary.put("usage", response.get("usage"));   // 비용 기록(-168)까지 응답의 사용량을 버리지 않는다
-        validations.finishRun(runId, "OK", null, model, durationMs);
+        validations.finishRun(runId, "OK", null, model, durationMs, response.get("usage"));
         validations.finish(v.id(), status, summary);
         validations.finishJob(lease.jobId(), "DONE");
+    }
+
+    /**
+     * 모델을 부르기 전 확인. 큐에서 기다리는 사이 관련 작업이 시작해 점유 충돌이 됐거나 참조 버전이 낡았으면 규칙만으로 판정이
+     * 서므로, 버릴 결과를 위해 모델을 부르지 않고 여기서 닫는다 (접수 때 규칙으로 확정되는 것과 같은 결과). 실행은 모델을 부르지
+     * 않았으니 DISCARDED, 작업은 DONE. 입력 자체가 바뀐 경우(STALE)와 늦은 결과는 {@link #current} 가 같은 방식으로 정리한다.
+     *
+     * @return 이 검증을 여기서 닫았으면(또는 이미 닫혀 있어 더 할 일이 없으면) true. false 면 아직 RUNNING 이고 모델을 불러야 한다
+     */
+    @Transactional
+    public boolean closeByRulesIfDecided(JobLease lease) {
+        Optional<Current> current = current(lease, Mode.RESULT, Map.of(), 0);
+        if (current.isEmpty()) {
+            return true;
+        }
+        ValidationRow v = current.get().validation();
+        RuleOutcome rule = reevaluateRules(v);
+        if (rule.decidedStatus() == null || "PASS".equals(rule.decidedStatus())) {
+            return false;              // PASS 는 접수 때 확정됐을 것이므로 여기 오지 않는다. 의미 분석이 필요하면 모델을 부른다
+        }
+        for (FindingRow f : rule.findings()) {
+            validations.insertFinding(v.id(), f);
+        }
+        validations.finishRun(current.get().runId(), "DISCARDED", "모델을 부르기 전에 규칙으로 판정이 확정됨 (" + rule.decidedStatus() + ")",
+                null, 0);
+        validations.finish(v.id(), rule.decidedStatus(), responses.summary(v.summary()));
+        validations.finishJob(lease.jobId(), "DONE");
+        log.info("validation {} attempt {} decided by rules before calling the model: {}", v.id(), lease.attempt(), rule.decidedStatus());
+        return true;
     }
 
     /** 호출 실패(시간 초과·연결·HTTP 오류·그 밖의 BE 오류) 반영. 모델 응답이 없으니 진단 값도 없다 */
@@ -215,7 +244,7 @@ public class AnalysisResultApplier {
      */
     private void fail(JobLease lease, ValidationRow v, long runId, String errorCode, String runStatus, String message,
                       String resolution, String nextAction, String model, long durationMs, Map<String, Object> diagnostics) {
-        validations.finishRun(runId, runStatus, errorCode + ": " + message, model, durationMs);
+        validations.finishRun(runId, runStatus, errorCode + ": " + message, model, durationMs, diagnostics.get("usage"));
         validations.insertFinding(v.id(), FindingRow.error(runId, message, resolution, nextAction));
         Map<String, Object> summary = responses.summary(v.summary());
         summary.putAll(diagnostics);
@@ -271,6 +300,7 @@ public class AnalysisResultApplier {
         if (lateDiagnostics.get("model") instanceof String m) {
             model = m;
         }
+        Object usage = lateDiagnostics.get("usage");
         Optional<Map<String, Object>> run = validations.run(v.id(), lease.attempt());
         boolean sameLease = run.isPresent() && lease.leaseToken().toString().equals(String.valueOf(run.get().get("lease_token")));
         boolean live = "RUNNING".equals(v.status()) && v.currentAttempt() == lease.attempt() && sameLease
@@ -278,7 +308,7 @@ public class AnalysisResultApplier {
         if (!live) {
             // 늦은 결과: STALE·취소·새 시도·다른 리스. 실행이 아직 열려 있으면 DISCARDED 로 닫고 상태는 그대로
             if (run.isPresent() && "RUNNING".equals(run.get().get("status"))) {
-                validations.finishRun(((Number) run.get().get("id")).longValue(), "DISCARDED", "늦은 결과", model, durationMs);
+                validations.finishRun(((Number) run.get().get("id")).longValue(), "DISCARDED", "늦은 결과", model, durationMs, usage);
             }
             validations.cancelJobIfStillLeased(lease.jobId(), lease.leaseToken());
             log.info("validation {} attempt {} result discarded (status={}, current_attempt={})", v.id(), lease.attempt(),
@@ -291,7 +321,7 @@ public class AnalysisResultApplier {
         // 판정은 버려도 모델을 부른 사용량·모델은 실행과 요약에 남긴다 (비용 집계 -168)
         Optional<String> changed = inputChange(v);
         if (changed.isPresent()) {
-            validations.finishRun(runId, "DISCARDED", "검증 입력이 바뀐 뒤 도착한 결과 (" + changed.get() + ")", model, durationMs);
+            validations.finishRun(runId, "DISCARDED", "검증 입력이 바뀐 뒤 도착한 결과 (" + changed.get() + ")", model, durationMs, usage);
             validations.markStale(v.id(), changed.get(), usageOf(lateDiagnostics));
             validations.finishJob(lease.jobId(), "CANCELLED");
             log.info("validation {} attempt {} result discarded: input changed ({})", v.id(), lease.attempt(), changed.get());
@@ -302,7 +332,7 @@ public class AnalysisResultApplier {
         boolean ownsJob = job.isPresent() && "LEASED".equals(job.get().get("status"))
                 && lease.leaseToken().toString().equals(String.valueOf(job.get().get("lease_token")));
         if (!ownsJob) {
-            validations.finishRun(runId, "DISCARDED", "리스를 잃은 뒤 도착한 결과", model, durationMs);
+            validations.finishRun(runId, "DISCARDED", "리스를 잃은 뒤 도착한 결과", model, durationMs, usage);
             log.info("validation {} attempt {} result discarded: job no longer leased by this worker", v.id(), lease.attempt());
             return Optional.empty();
         }

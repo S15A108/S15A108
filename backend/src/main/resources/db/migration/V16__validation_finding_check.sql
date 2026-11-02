@@ -6,4 +6,9 @@ ALTER TABLE validation_finding
   ADD COLUMN check_key    TEXT,
   ADD COLUMN evidence_ids JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(evidence_ids) = 'array');
 
+-- 실행(시도)마다 모델 호출 사용량을 남긴다. 판정을 버린 실행(DISCARDED)·만료·오류도 모델을 불렀으면 남겨 비용 집계(-168)에 쓴다.
+-- 모델을 안 부른 실행은 NULL. 모양은 AI-A02 응답의 usage 배열 그대로.
+ALTER TABLE validation_run
+  ADD COLUMN usage JSONB CHECK (usage IS NULL OR jsonb_typeof(usage) = 'array');
+
 -- 큐 조회 인덱스(ix_job_ready)와 작업별 이력 인덱스(ix_validation_task)는 V2 에 이미 있다.
