@@ -90,6 +90,11 @@ def assess(case, result):
         "items_by_reason": actual_by_reason,
         "fixture_expected_items_by_reason": fixture_by_reason,
         "evidence": sorted(selected_evidence),
+        "direct_match_truncation": (
+            result.direct_match_truncation.model_dump(mode="json")
+            if result.direct_match_truncation is not None
+            else None
+        ),
         "missing_items": sorted(expected_items - selected_items),
         "extra_items": sorted(selected_items - expected_items),
         "missing_evidence": sorted(expected_evidence - selected_evidence),
@@ -238,7 +243,7 @@ async def run(args):
         ):
             raise ValueError("Fixture exceeds the one-document-batch call budget")
     output = {
-        "report_version": 2,
+        "report_version": 3,
         "fixture_sha256": hashlib.sha256(raw).hexdigest(),
         "label_author": data["label_author"],
         "model": profile.model,

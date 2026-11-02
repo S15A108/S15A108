@@ -16,6 +16,7 @@ from app.services.retrieval.context_selection import (
     ApprovedItem,
     ContextSelectionError,
     SelectionInput,
+    TaskDesignRef,
     select_context,
 )
 from app.services.retrieval.context_semantic_selector import EmbeddingContextSelector
@@ -139,6 +140,46 @@ async def test_real_selection_keeps_scope_and_separate_query_document_usage():
     assert len(result.usage) == 2
     assert len({usage.request_key for usage in result.usage}) == 2
     assert result.unresolved == ()
+    assert result.direct_match_truncation.items == 0
+    assert result.direct_match_truncation.evidence == 0
+
+
+@pytest.mark.asyncio
+async def test_direct_limit_reports_threshold_passing_omissions_separately():
+    provider = Provider()
+    result = await select_context(
+        inputs(), selector(provider, min_similarity=-1.0, max_items=1, max_evidence=1)
+    )
+    assert [item.design_item_version_id for item in result.design_items] == ["v-10"]
+    assert result.evidence_ids == ("e-1",)
+    assert result.direct_match_truncation.items == 1
+    assert result.direct_match_truncation.evidence == 1
+    assert len(result.usage) == 2
+    assert result.model_dump(mode="json")["direct_match_truncation"] == {
+        "items": 1,
+        "evidence": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_truncated_direct_item_can_still_appear_via_task_reference():
+    provider = Provider()
+    request = inputs().model_copy(
+        update={
+            "task_id": "task",
+            "task_design_refs": (
+                TaskDesignRef(design_item_id="11", design_item_version_id="v-11"),
+            ),
+        }
+    )
+    result = await select_context(
+        request, selector(provider, min_similarity=-1.0, max_items=1, max_evidence=2)
+    )
+    assert [
+        (item.design_item_version_id, item.reasons) for item in result.design_items
+    ] == [("v-10", ("MATCHED",)), ("v-11", ("TASK_PLAN",))]
+    assert result.direct_match_truncation.items == 1
+    assert result.direct_match_truncation.evidence == 0
 
 
 @pytest.mark.asyncio

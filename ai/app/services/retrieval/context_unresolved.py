@@ -168,7 +168,11 @@ async def review_unresolved(
     if snapshot.search_status != "COMPLETE" or selection.search_status != "COMPLETE":
         raise ValueError("incomplete search")
     expected_binding = _selection_binding(
-        snapshot, selection.design_items, selection.evidence_ids, selection.unresolved
+        snapshot,
+        selection.design_items,
+        selection.evidence_ids,
+        selection.unresolved,
+        selection.direct_match_truncation,
     )
     binding = selection.snapshot_binding
     if (

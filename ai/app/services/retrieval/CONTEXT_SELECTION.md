@@ -59,6 +59,8 @@ async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as http:
 
 이 선택기는 요청 문장과 **전달받은 각 후보 텍스트를 매 호출 새로 임베딩**해 코사인 유사도로 고른다. BE 색인의 벡터나 검색 결과를 재사용하지 않는다. 후보 수·길이와 재시도에 비례해 유료 호출 및 지연이 발생하며, `EmbeddingPolicy`의 배치·호출/전체 시간·입력 한도는 질의와 후보 임베딩 단계에 각각 적용된다. 성공 시 `result.usage`, 오류 시 `ContextSelectionError.usage`에 호출 기록이 담긴다. 비용 기록 저장은 호출자 책임이며 알 수 없는 토큰을 0으로 기록하지 않는다. 취소나 프로세스 종료 시 진행 중 호출의 사용량을 확인하지 못할 수 있다.
 
+선택 결과의 `direct_match_truncation`은 **전달받은 후보 중** 임계값을 통과했지만 직접 선택 상한을 넘어 제외된 설계(`items`)와 원문(`evidence`)의 수다. 상한과 정렬은 바꾸지 않는다. 이 수는 전체 BE 검색 범위, 실제 관련성이나 최종 결과에서 빠진 항목 수를 뜻하지 않는다. 직접 선택에서 제외된 설계가 작업 참조 또는 의존성으로 최종 결과에 포함될 수 있기 때문이다. 선택기가 이 정보를 제공하지 않거나 호출되지 않으면 값은 `null`이며 0으로 가정하지 않는다. 직접 선택 결과가 하나도 없지만 상한 때문에 제외된 후보가 있다고 보고되면 `NO_MATCH`가 아니라 `selection_incomplete`로 실패하고 사용량을 보존한다. 일치 표식도 이 수의 변경을 감지한다. 이 필드는 내부 선택 결과에만 적용하며 외부 BE/MCP 계약을 확정하지 않는다.
+
 ```text
 cd ai
 python -m pytest tests/test_context_selection.py -q

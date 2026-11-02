@@ -14,6 +14,7 @@ from app.schemas.retrieval import EmbeddingPolicy, EmbeddingProfile, EmbeddingTe
 from app.services.retrieval.chunking import TokenCounter
 from app.services.retrieval.context_selection import (
     ContextSelectionError,
+    DirectMatchTruncation,
     SelectionInput,
     SelectionProposal,
 )
@@ -98,7 +99,11 @@ class EmbeddingContextSelector:
             for i, item in enumerate(evidence)
         )
         if not candidates:
-            return SelectionProposal(design_item_version_ids=(), evidence_ids=())
+            return SelectionProposal(
+                design_item_version_ids=(),
+                evidence_ids=(),
+                direct_match_truncation=DirectMatchTruncation(items=0, evidence=0),
+            )
 
         # UUIDs avoid reuse across concurrent requests and retain no user text.
         key = f"context-selection-{uuid4().hex}"
@@ -144,21 +149,26 @@ class EmbeddingContextSelector:
                 for left, right in zip(query_vector, vector.embedding, strict=True)
             )
 
-        def select_keys(prefix: str, count: int, limit: int) -> list[int]:
+        def select_keys(prefix: str, count: int, limit: int) -> tuple[list[int], int]:
             indices = [
                 i for i in range(count) if scores[f"{prefix}-{i}"] >= self._threshold
             ]
             # Tie-break by input order to make a deterministic selection.
-            return sorted(indices, key=lambda i: (-scores[f"{prefix}-{i}"], i))[:limit]
+            ordered = sorted(indices, key=lambda i: (-scores[f"{prefix}-{i}"], i))
+            return ordered[:limit], max(0, len(ordered) - limit)
+
+        selected_items, omitted_items = select_keys("item", len(items), self._max_items)
+        selected_evidence, omitted_evidence = select_keys(
+            "evidence", len(evidence), self._max_evidence
+        )
 
         return SelectionProposal(
             design_item_version_ids=tuple(
-                items[i].design_item_version_id
-                for i in select_keys("item", len(items), self._max_items)
+                items[i].design_item_version_id for i in selected_items
             ),
-            evidence_ids=tuple(
-                evidence[i].evidence_id
-                for i in select_keys("evidence", len(evidence), self._max_evidence)
-            ),
+            evidence_ids=tuple(evidence[i].evidence_id for i in selected_evidence),
             usage=query.usage + docs.usage,
+            direct_match_truncation=DirectMatchTruncation(
+                items=omitted_items, evidence=omitted_evidence
+            ),
         )

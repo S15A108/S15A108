@@ -10,6 +10,7 @@ from app.services.retrieval.context_selection import (
     ApprovedItem,
     ContextSelectionError,
     DesignRelation,
+    DirectMatchTruncation,
     SelectionInput,
     SelectionProposal,
     TaskDesignRef,
@@ -79,6 +80,71 @@ class FakeSelector:
     async def select(self, request):
         self.calls += 1
         return self.proposal
+
+
+@pytest.mark.asyncio
+async def test_unreported_direct_truncation_remains_unknown():
+    result = await select_context(snapshot(), FakeSelector(("A-v1",)))
+    assert result.direct_match_truncation is None
+    assert result.model_dump(mode="json")["direct_match_truncation"] is None
+
+
+@pytest.mark.asyncio
+async def test_impossible_reported_truncation_is_rejected_with_usage():
+    usage = EmbeddingUsage(
+        request_key="call",
+        model="fake",
+        latency_ms=1,
+        failed=False,
+        tokens_known=True,
+        input_tokens=1,
+        output_tokens=0,
+    )
+
+    class InvalidSelector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("A-v1",),
+                evidence_ids=(),
+                usage=(usage,),
+                direct_match_truncation=DirectMatchTruncation(items=3, evidence=0),
+            )
+
+    with pytest.raises(ContextSelectionError) as error:
+        await select_context(snapshot(), InvalidSelector())
+    assert error.value.code == "invalid_selection"
+    assert error.value.usage == (usage,)
+
+
+@pytest.mark.parametrize("category", ["items", "evidence"])
+@pytest.mark.asyncio
+async def test_all_direct_matches_truncated_does_not_report_no_match(category):
+    usage = EmbeddingUsage(
+        request_key="call",
+        model="fake",
+        latency_ms=1,
+        failed=False,
+        tokens_known=True,
+        input_tokens=1,
+        output_tokens=0,
+    )
+
+    class TruncatingSelector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=(),
+                evidence_ids=(),
+                usage=(usage,),
+                direct_match_truncation=DirectMatchTruncation(
+                    items=int(category == "items"),
+                    evidence=int(category == "evidence"),
+                ),
+            )
+
+    with pytest.raises(ContextSelectionError) as error:
+        await select_context(snapshot(), TruncatingSelector())
+    assert error.value.code == "selection_incomplete"
+    assert error.value.usage == (usage,)
 
 
 @pytest.mark.asyncio

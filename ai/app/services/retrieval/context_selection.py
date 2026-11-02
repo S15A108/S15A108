@@ -133,11 +133,20 @@ class SelectionInput(_Frozen):
         return self
 
 
+class DirectMatchTruncation(_Frozen):
+    """Threshold-passing supplied candidates omitted by the direct top-k limit."""
+
+    items: int = Field(ge=0)
+    evidence: int = Field(ge=0)
+
+
 class SelectionProposal(_Frozen):
     # The model returns only IDs from the supplied snapshot, never new objects.
     design_item_version_ids: tuple[Id, ...]
     evidence_ids: tuple[Id, ...]
     usage: tuple[EmbeddingUsage, ...] = ()
+    # None means the selector did not report truncation, not that it was zero.
+    direct_match_truncation: DirectMatchTruncation | None = None
 
 
 class SelectionProvider(Protocol):
@@ -155,17 +164,23 @@ class SelectionResult(_Frozen):
     unresolved: tuple[Literal["NO_MATCH"], ...]
     search_status: Literal["COMPLETE"] = "COMPLETE"
     usage: tuple[EmbeddingUsage, ...] = ()
+    direct_match_truncation: DirectMatchTruncation | None = None
     # In-process consistency marker only; never part of the external payload.
     snapshot_binding: str | None = Field(default=None, exclude=True, repr=False)
 
 
-def _selection_binding(snapshot, items, evidence_ids, unresolved) -> str:
+def _selection_binding(
+    snapshot, items, evidence_ids, unresolved, truncation=None
+) -> str:
     """Detect accidental mixing of inputs and selected output, not authorization."""
     payload = {
         "snapshot": snapshot.model_dump(mode="json"),
         "items": [item.model_dump(mode="json") for item in items],
         "evidence_ids": list(evidence_ids),
         "unresolved": list(unresolved),
+        "direct_match_truncation": (
+            truncation.model_dump(mode="json") if truncation is not None else None
+        ),
     }
     encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     digest = hashlib.sha256()
@@ -222,8 +237,28 @@ async def select_context(
         or len(set(evidence_ids)) != len(evidence_ids)
         or not set(matched).issubset(versions)
         or not set(evidence_ids).issubset(item.evidence_id for item in request.evidence)
+        or (
+            proposal.direct_match_truncation is not None
+            and (
+                proposal.direct_match_truncation.items
+                > len(request.items) - len(matched)
+                or proposal.direct_match_truncation.evidence
+                > len(request.evidence) - len(evidence_ids)
+            )
+        )
     ):
         raise ContextSelectionError("invalid_selection", proposal.usage)
+
+    # A selector that found threshold-passing candidates but returned no direct
+    # matches due to its own limit cannot truthfully report NO_MATCH.
+    truncation = proposal.direct_match_truncation
+    if (
+        not matched
+        and not evidence_ids
+        and truncation is not None
+        and (truncation.items or truncation.evidence)
+    ):
+        raise ContextSelectionError("selection_incomplete", proposal.usage)
 
     reasons: dict[str, set[str]] = {}
     for version in matched:
@@ -272,7 +307,12 @@ async def select_context(
         # found a relevant item or source for this particular request.
         unresolved=unresolved,
         usage=proposal.usage,
+        direct_match_truncation=proposal.direct_match_truncation,
         snapshot_binding=_selection_binding(
-            request, selected, evidence_ids, unresolved
+            request,
+            selected,
+            evidence_ids,
+            unresolved,
+            proposal.direct_match_truncation,
         ),
     )

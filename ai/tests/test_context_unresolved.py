@@ -14,6 +14,7 @@ from app.services.llm_client import (
 from app.services.retrieval.context_selection import (
     ApprovedEvidence,
     ApprovedItem,
+    DirectMatchTruncation,
     SelectedItem,
     SelectionInput,
     SelectionProposal,
@@ -79,7 +80,11 @@ def bind(data, selected):
     return selected.model_copy(
         update={
             "snapshot_binding": _selection_binding(
-                data, selected.design_items, selected.evidence_ids, selected.unresolved
+                data,
+                selected.design_items,
+                selected.evidence_ids,
+                selected.unresolved,
+                selected.direct_match_truncation,
             )
         }
     )
@@ -424,6 +429,29 @@ async def test_changed_selected_ids_cannot_reuse_old_binding():
     original = snapshot()
     selected = await select_context(original, Selector())
     changed = selected.model_copy(update={"evidence_ids": ("e2",)})
+    assessor = Assessor({"candidates": []})
+    with pytest.raises(ValueError, match="selection snapshot"):
+        await review_unresolved(original, changed, assessor)
+    assert assessor.input is None
+
+
+@pytest.mark.asyncio
+async def test_changed_direct_truncation_cannot_reuse_old_binding():
+    class Selector:
+        async def select(self, request):
+            return SelectionProposal(
+                design_item_version_ids=("v1",),
+                evidence_ids=("e1",),
+                direct_match_truncation=DirectMatchTruncation(items=0, evidence=1),
+            )
+
+    original = snapshot()
+    selected = await select_context(original, Selector())
+    valid = await review_unresolved(original, selected, Assessor({"candidates": []}))
+    assert valid.result["candidates"] == []
+    changed = selected.model_copy(
+        update={"direct_match_truncation": DirectMatchTruncation(items=0, evidence=0)}
+    )
     assessor = Assessor({"candidates": []})
     with pytest.raises(ValueError, match="selection snapshot"):
         await review_unresolved(original, changed, assessor)
