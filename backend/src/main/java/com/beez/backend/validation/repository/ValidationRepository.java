@@ -284,6 +284,19 @@ public class ValidationRepository {
     }
 
     /**
+     * 작업의 리스 상태. 행: status, lease_token, expired(리스 유효기간이 지났는가 — 지금 시각 clock_timestamp 기준.
+     * now() 는 트랜잭션 시작 시각이라 쓰지 않는다)
+     */
+    public Optional<Map<String, Object>> jobLease(long jobId) {
+        return jdbc.sql("""
+                        select status, lease_token,
+                               (lease_until is not null and lease_until <= clock_timestamp()) as expired
+                          from validation_job where id = :id
+                        """)
+                .param("id", jobId).query().listOfRows().stream().findFirst();
+    }
+
+    /**
      * 늦은 결과를 버릴 때, 이 리스로 잡은 작업이 아직 LEASED 로 남아 있으면 CANCELLED 로 닫는다.
      * 리스 토큰이 같을 때만 — 그 사이 다른 워커가 다시 잡았으면 건드리지 않는다
      */

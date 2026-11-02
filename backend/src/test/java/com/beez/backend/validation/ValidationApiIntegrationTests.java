@@ -675,6 +675,32 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     }
 
     @Test
+    void resultArrivingAfterLeaseExpiredButBeforeRecovery_isNotStoredAsPass() throws Exception {
+        long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
+        long id = body(accept(t, member), 202).get("id").asLong();
+        JobLease lease = repository.lease(120).orElseThrow();
+        // AI 응답을 기다리는 사이 리스가 만료됐지만 회수기는 아직 돌지 않았다
+        api.jdbc.sql("update validation_job set lease_until = now() - interval '1 second' where id = :j")
+                .param("j", lease.jobId()).update();
+        Map<String, Object> request = new LinkedHashMap<>();
+        Map<String, Object> planCheck = new LinkedHashMap<>();
+        planCheck.put("key", "plan-completeness");
+        request.put("checks", List.of(planCheck));
+
+        // 그 상태에서 정상 응답이 도착한다
+        applier.applySuccess(lease, request, aiResponse(request, List.of(), List.of()), 0);
+
+        JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(v.get("status").asText()).isEqualTo("ERROR");                          // PASS 로 저장하지 않는다
+        assertThat(v.get("error_code").asText()).isEqualTo("validation_lease_expired");
+        assertThat(v.get("findings").get(0).get("resolution").asText()).isEqualTo("RETRY");
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
+        assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("FAILED");
+        assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1");   // 모델을 부른 사용량은 남긴다
+        assertThat(worker.recoverExpired()).isFalse();                                     // 이미 닫혀 회수할 것이 없다
+    }
+
+    @Test
     void worker_sendsItemSourceOnlyWithLocation_andStoresRequestSource() throws Exception {
         // 원문 문서 버전 하나에 항목 두 개를 잇는다: API-01 은 위치 없이(문서 버전만), API-02 는 위치까지
         Long doc;

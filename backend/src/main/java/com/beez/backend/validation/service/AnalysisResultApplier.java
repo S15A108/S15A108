@@ -59,7 +59,12 @@ public class AnalysisResultApplier {
      */
     @Transactional
     public void applySuccess(JobLease lease, Map<String, Object> request, Map<String, Object> response, long durationMs) {
-        Optional<Current> current = current(lease);
+        // 리스가 만료된 뒤 도착한 응답이면 반영하지 않고 만료로 닫는다. 그때도 모델을 부른 사용량은 진단 값으로 남긴다
+        Map<String, Object> lateDiagnostics = Map.of();
+        if (response != null) {
+            lateDiagnostics = diagnostics(response, String.valueOf(map(response.get("result")).get("analysis_status")));
+        }
+        Optional<Current> current = current(lease, Mode.RESULT, lateDiagnostics);
         if (current.isEmpty()) {
             return;
         }
@@ -158,7 +163,7 @@ public class AnalysisResultApplier {
     /** 호출 실패(시간 초과·연결·HTTP 오류·그 밖의 BE 오류) 반영. 모델 응답이 없으니 진단 값도 없다 */
     @Transactional
     public void applyFailure(JobLease lease, String errorCode, String message, long durationMs) {
-        Optional<Current> current = current(lease);
+        Optional<Current> current = current(lease, Mode.RESULT, Map.of());
         if (current.isEmpty()) {
             return;
         }
@@ -177,7 +182,7 @@ public class AnalysisResultApplier {
      */
     @Transactional
     public void applyLeaseExpired(JobLease lease) {
-        Optional<Current> current = current(lease);
+        Optional<Current> current = current(lease, Mode.RECOVERY, Map.of());
         if (current.isEmpty()) {
             return;
         }
@@ -219,8 +224,17 @@ public class AnalysisResultApplier {
         return out;
     }
 
-    /** 잠그고 "아직 이 실행의 결과를 받을 상태인가". 아니면 늦은 결과로 처리하고 빈 값 */
-    private Optional<Current> current(JobLease lease) {
+    /** 결과 반영(워커가 받은 응답·실패)인지, 리스 만료 회수인지 */
+    private enum Mode { RESULT, RECOVERY }
+
+    /**
+     * 잠그고 "아직 이 실행의 결과를 받을 상태인가". 아니면 늦은 결과로 처리하고 빈 값.
+     * 결과 반영은 job 이 아직 이 리스로 LEASED 이고 <b>유효기간 안</b>이어야 받는다. 만료됐는데 회수가 아직 안 됐으면
+     * 받지 않고 그 자리에서 만료로 닫는다(회수와 같은 결과). 회수는 반대로 만료된 리스만 닫는다.
+     *
+     * @param lateDiagnostics 결과 반영이 만료로 닫힐 때 summary 에 남길 진단 값 (모델을 부른 사용량 등)
+     */
+    private Optional<Current> current(JobLease lease, Mode mode, Map<String, Object> lateDiagnostics) {
         Optional<ValidationRow> found = validations.lock(lease.validationId());
         if (found.isEmpty()) {
             return Optional.empty();
@@ -252,6 +266,26 @@ public class AnalysisResultApplier {
             validations.finishJob(lease.jobId(), "CANCELLED");
             log.info("validation {} attempt {} result discarded: plan changed", v.id(), lease.attempt());
             return Optional.empty();
+        }
+        // job 은 lock() 이 이미 잠갔다. 이 리스가 아직 job 을 쥐고 있는지, 유효기간이 지났는지 본다
+        Optional<Map<String, Object>> job = validations.jobLease(lease.jobId());
+        boolean ownsJob = job.isPresent() && "LEASED".equals(job.get().get("status"))
+                && lease.leaseToken().toString().equals(String.valueOf(job.get().get("lease_token")));
+        if (!ownsJob) {
+            validations.finishRun(runId, "DISCARDED", "리스를 잃은 뒤 도착한 결과", null, 0);
+            log.info("validation {} attempt {} result discarded: job no longer leased by this worker", v.id(), lease.attempt());
+            return Optional.empty();
+        }
+        boolean expired = Boolean.TRUE.equals(job.get().get("expired"));
+        if (mode == Mode.RESULT && expired) {
+            fail(lease, v, runId, "validation_lease_expired", "ERROR",
+                    "분석 결과가 리스 유효기간이 지난 뒤 도착해 반영하지 않았습니다", "RETRY",
+                    "같은 계획으로 다시 검증을 요청하세요", null, 0, lateDiagnostics);
+            log.info("validation {} attempt {} result arrived after lease expired — closed as lease expired", v.id(), lease.attempt());
+            return Optional.empty();
+        }
+        if (mode == Mode.RECOVERY && !expired) {
+            return Optional.empty();                       // 아직 살아 있는 리스는 회수하지 않는다
         }
         return Optional.of(new Current(v, runId));
     }
