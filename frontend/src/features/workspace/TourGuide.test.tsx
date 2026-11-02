@@ -54,3 +54,23 @@ it('입력 칸에서 ?를 치면 안내를 열지 않고 Esc로 닫는다', asyn
   await user.keyboard('{Escape}')
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
+
+// PR #72 전수 리뷰 UI-1: 환영 창에서 Tab을 눌러도 포커스가 창 밖(뒤 화면)으로 나가지 않는다.
+it('환영 창은 Tab 포커스를 창 안에 가둔다', async () => {
+  const user = userEvent.setup()
+  render(
+    <>
+      <button type="button">뒤 화면 버튼</button>
+      <Harness />
+    </>,
+  )
+  await user.keyboard('?')
+  await user.click(screen.getByRole('button', { name: '처음부터 둘러보기' }))
+  const welcome = screen.getByRole('dialog', {
+    name: 'BEEZ 사무실에 오신 걸 환영해요',
+  })
+  for (let press = 0; press < 4; press++) {
+    await user.tab()
+    expect(welcome).toContainElement(document.activeElement as HTMLElement)
+  }
+})

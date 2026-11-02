@@ -3,6 +3,12 @@ import type { CSSProperties } from 'react'
 import { Box, CheckCheck, LayoutGrid } from 'lucide-react'
 import { BibiFace } from '@/components/BibiFace'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 
 export type TourMode = 'welcome' | 'map' | number | null
@@ -229,27 +235,24 @@ export function TourGuide({
     onChange(null)
   }
   if (mode === null) return null
+  // 환영 창은 Radix Dialog로 연다. 포커스를 창 안에 가두고 Esc로 닫는다(PR #72 전수 리뷰 UI-1).
+  // 뒤 화면 숫자 단축키는 가이드가 열린 동안 단축 바가 끈다(WorkspaceHud가 disabled로 넘김).
   if (mode === 'welcome')
     return (
-      <div className="fixed inset-0 z-50 grid place-items-center bg-[rgba(44,41,31,0.28)] p-4 backdrop-blur-[4px]">
-        <section
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="tour-welcome-title"
-          className="w-full max-w-[580px] rounded-3xl bg-card px-10 pt-9 pb-7 text-center shadow-2xl"
+      <Dialog open onOpenChange={(open) => !open && onChange(null)}>
+        <DialogContent
+          showCloseButton={false}
+          className="block max-w-[580px] gap-0 rounded-3xl bg-card px-10 pt-9 pb-7 text-center shadow-2xl ring-0 sm:max-w-[580px]"
         >
           <BibiFace className="mx-auto size-18" />
-          <h2
-            id="tour-welcome-title"
-            className="mt-3 text-2xl leading-8 font-bold"
-          >
+          <DialogTitle className="mt-3 text-2xl leading-8 font-bold">
             BEEZ 사무실에 오신 걸 환영해요
-          </h2>
-          <p className="mt-2 text-sm leading-[22px] text-stone-600">
+          </DialogTitle>
+          <DialogDescription className="mt-2 text-sm leading-[22px] text-stone-600">
             팀이 같은 승인 설계를 기준으로 함께 일하는 곳이에요.
             <br />
             처음이라면 화면을 1분만 둘러보세요.
-          </p>
+          </DialogDescription>
           <div className="mt-4 grid gap-2 rounded-[14px] border border-[#f1d98a] bg-[#fff6d6] px-3.5 py-3 text-left">
             <strong className="text-[13px] leading-[18px] font-bold">
               문서 초안 4종이 승인되면 프로젝트가 시작돼요
@@ -310,8 +313,8 @@ export function TourGuide({
           <p className="mt-3 text-xs leading-[18px] text-muted-foreground/70">
             둘러보기는 <Kbd>?</Kbd> 키로 언제든 다시 볼 수 있어요.
           </p>
-        </section>
-      </div>
+        </DialogContent>
+      </Dialog>
     )
   if (mode === 'map')
     return (

@@ -80,3 +80,10 @@ it('단축 바는 비비를 가운데에 두고 칸마다 이름을 보인다', 
   ])
   expect(screen.getByText('작업 현황')).toBeVisible()
 })
+
+// PR #72 전수 리뷰 UI-1: 환영 창·둘러보기가 열린 동안에는 숫자 키가 뒤 화면 창을 열지 않는다.
+it('가이드가 열린 동안에는 숫자 키로 창을 열지 않는다', async () => {
+  render(<Hotbar locked={[]} badges={{}} shortcutsOff />)
+  await userEvent.keyboard('4')
+  expect(useWorkspaceStore.getState().pane).toBeNull()
+})

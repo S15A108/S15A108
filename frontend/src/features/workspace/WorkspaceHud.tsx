@@ -725,6 +725,7 @@ export function WorkspaceHud({
         </div>
       </section>
       <Hotbar
+        shortcutsOff={tour !== null}
         locked={started ? [] : ['changes', 'meetings', 'tasks', 'relations']}
         lockedReason="프로젝트를 시작하면 열려요"
         badges={{ changes: reviewCount, meetings: meetingCount }}

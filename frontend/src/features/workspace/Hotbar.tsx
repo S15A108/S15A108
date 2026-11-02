@@ -29,7 +29,10 @@ export function Hotbar({
   badges,
   highlight,
   lockedReason = '문서 4종을 올리면 열려요',
+  shortcutsOff,
 }: {
+  /** 둘러보기·환영 창이 열린 동안 숫자 단축키를 끈다(PR #72 전수 리뷰 UI-1) */
+  shortcutsOff?: boolean
   /** 프로젝트가 시작되기 전에 잠그는 칸 */
   locked: WorkspacePane[]
   /** 잠긴 칸을 눌렀을 때 알려 줄 이유 */
@@ -45,6 +48,7 @@ export function Hotbar({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (
+        shortcutsOff ||
         event.repeat ||
         event.altKey ||
         event.ctrlKey ||
@@ -61,7 +65,7 @@ export function Hotbar({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pane, locked, openPane])
+  }, [pane, locked, openPane, shortcutsOff])
   const slot = (item: (typeof hotbarSlots)[number], index: number) => {
     const isLocked = locked.includes(item.pane)
     const isOpen = pane === item.pane
