@@ -25,13 +25,25 @@ export function InboxPopover({ projectId }: { projectId: string }) {
     queryKey: ['notifications', projectId, 'popover'],
     queryFn: () => inboxApi.list({ project_id: projectId, limit: 20 }),
   })
+  // 안 읽은 알림은 서버에서 unread=true로 따로 받는다. 최신 20건만 걸러 세면 그 밖의 안 읽은 알림이 빠진다
+  // (PR #72 전수 리뷰 TC-6). 키와 조건이 HUD 배지와 같아 같은 응답을 나눠 쓴다.
+  const unreadQuery = useQuery({
+    queryKey: ['notifications', projectId, 'unread'],
+    queryFn: () =>
+      inboxApi.list({ project_id: projectId, unread: true, limit: 20 }),
+  })
   const read = useMutation({
     mutationFn: (ids: string[]) => inboxApi.markRead({ ids }),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   })
   const items = query.data?.items ?? []
-  const unread = items.filter((item) => !item.read_at)
+  const unread = unreadQuery.data?.items ?? []
+  // 다음 페이지가 더 있으면 '20+'처럼 더 있다고 보인다.
+  const unreadCount = unread.length
+    ? `${unread.length}${unreadQuery.data?.has_more ? '+' : ''}`
+    : ''
+  const active = unreadOnly ? unreadQuery : query
   const shown = unreadOnly ? unread : items
   const go = (item: Notification) => {
     if (!item.read_at) read.mutate([item.id])
@@ -46,12 +58,12 @@ export function InboxPopover({ projectId }: { projectId: string }) {
           size="icon"
           variant="secondary"
           className="relative"
-          aria-label={unread.length ? `알림 ${unread.length}건` : '알림'}
+          aria-label={unreadCount ? `알림 ${unreadCount}건` : '알림'}
         >
           <Bell />
           {unread.length > 0 && (
             <span className="absolute -top-1 -right-1 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-destructive px-1 text-[11px] font-bold text-white">
-              {unread.length}
+              {unreadCount}
             </span>
           )}
         </Button>
@@ -71,7 +83,7 @@ export function InboxPopover({ projectId }: { projectId: string }) {
         <div className="flex gap-1 px-4 pt-3 text-xs" role="group">
           {[
             [false, '전체'],
-            [true, `읽지 않음 ${unread.length || ''}`.trim()],
+            [true, `읽지 않음 ${unreadCount}`.trim()],
           ].map(([value, label]) => (
             <button
               key={String(value)}
@@ -90,13 +102,13 @@ export function InboxPopover({ projectId }: { projectId: string }) {
           ))}
         </div>
         <ul className="max-h-96 overflow-y-auto p-2">
-          {query.isPending && (
+          {active.isPending && (
             <li role="status" className="p-4 text-sm text-muted-foreground">
               불러오는 중…
             </li>
           )}
-          {query.error &&
-            (isMissingApi(query.error) ? (
+          {active.error &&
+            (isMissingApi(active.error) ? (
               <li role="status" className="p-4 text-sm text-muted-foreground">
                 알림은 서버에서 아직 준비 중이에요.
               </li>
@@ -105,7 +117,7 @@ export function InboxPopover({ projectId }: { projectId: string }) {
                 알림을 불러오지 못했어요.
               </li>
             ))}
-          {query.data && !shown.length && (
+          {active.data && !shown.length && (
             <li className="p-4 text-sm text-muted-foreground">
               새 알림이 없어요. 변경 제안 검토 요청, 회의, 작업 검증 결과가 오면
               여기에 떠요.
