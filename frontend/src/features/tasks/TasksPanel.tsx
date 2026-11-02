@@ -1667,6 +1667,8 @@ function CompleteDialog({
     },
   })
   const changed = useWatch({ control, name: 'changed' })
+  // 실패 이유는 열린 폼 안에 보인다. 부모 쪽 오류 줄은 하위 화면이 열린 동안 가려져 있다(PR #72 전수 리뷰 TC-4).
+  const [error, setError] = useState('')
   return (
     <PaneSheet
       back={back}
@@ -1678,8 +1680,9 @@ function CompleteDialog({
       <form
         noValidate
         className="grid gap-4"
-        onSubmit={handleSubmit((values) =>
-          onSubmit({
+        onSubmit={handleSubmit((values) => {
+          setError('')
+          return onSubmit({
             summary: values.summary,
             completion_checks: criteria.map((criterion) => ({
               criterion,
@@ -1690,8 +1693,8 @@ function CompleteDialog({
               values.changed === 'yes'
                 ? lines(values.delta).map((description) => ({ description }))
                 : [],
-          }).catch(() => undefined),
-        )}
+          }).catch((cause: unknown) => setError(getApiErrorMessage(cause)))
+        })}
       >
         <fieldset className="grid gap-2">
           <legend className="mb-1 text-sm font-medium">완료 기준 확인</legend>
@@ -1753,6 +1756,14 @@ function CompleteDialog({
             </>
           )}
         </fieldset>
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            {error}
+          </p>
+        )}
         <SheetSubmit disabled={isSubmitting}>
           {isSubmitting ? '처리 중…' : '완료 보고'}
         </SheetSubmit>

@@ -394,3 +394,22 @@ it('계획 수정에서 접근 방법을 비우면 저장하지 않고 칸에 �
   expect(await screen.findByText('내용을 입력해 주세요.')).toBeInTheDocument()
   expect(save).not.toHaveBeenCalled()
 })
+
+// PR #72 전수 리뷰 TC-4: 완료 보고가 실패하면 열린 폼 안에서 이유를 보인다.
+it('완료 보고가 실패하면 폼 안에 실패 이유를 보인다', async () => {
+  task = { ...task, status: 'IN_PROGRESS' }
+  vi.spyOn(tasksApi, 'state').mockRejectedValue(new Error('500'))
+  show(false)
+  fireEvent.click(await screen.findByRole('button', { name: '완료 보고' }))
+  const sheet = await screen.findByRole('dialog')
+  fireEvent.click(screen.getByLabelText('응답 필드 확인'))
+  fireEvent.change(screen.getByLabelText('완료한 내용'), {
+    target: { value: '응답 필드를 붙였어요.' },
+  })
+  fireEvent.click(screen.getAllByRole('button', { name: '완료 보고' }).at(-1)!)
+  expect(
+    await within(sheet).findByText(
+      '요청을 완료하지 못했습니다. 다시 시도해 주세요.',
+    ),
+  ).toHaveAttribute('role', 'alert')
+})
