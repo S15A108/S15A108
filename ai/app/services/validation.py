@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import replace
 from typing import Any
@@ -19,6 +20,14 @@ from app.services.llm_client import (
 
 MAX_INPUT_BYTES = 200_000
 MAX_BUDGET_MS = 60_000
+# Accept only an explicitly undecided policy line, not an inference from a
+# missing search result or text with qualifiers such as "미정이 아니다".
+UNDECIDED_POLICY_LINE = re.compile(
+    r"^[ \t]*(?:[-*][ \t]*)?[^\r\n:：]{0,80}(?:정책|policy)[ \t]*[:：][ \t]*"
+    r"(?:미정|미결정|미확정|결정되지[ \t]*않음|정해지지[ \t]*않음|"
+    r"undecided|not[ \t]+decided|to[ \t]+be[ \t]+determined|tbd)[ \t]*[.!]?[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 SUPPORTED_KINDS = {
     "REQUIREMENT",
     "API_CONTRACT",
@@ -47,7 +56,7 @@ if the fields required for this specific check are not provided in approved
 content or evidence, mark that check unassessed with EVIDENCE_INSUFFICIENT.
 Do not infer completeness or absence from search results or a truncated record.
 If unresolved policies are present, return PARTIAL with an appropriate
-unassessed check rather than COMPLETE, until their scope can be verified.
+unassessed check rather than COMPLETE, unless their scope can be verified.
 COMPLETE means all checks were assessed, not a final PASS. Output JSON with exactly
 analysis_status, checked_keys, unassessed, findings. Each unassessed entry contains
 check_key, reason, message. Each finding contains check_key, kind (MISMATCH,
@@ -71,8 +80,10 @@ detail the plan does not explicitly contradict. If no actual issue is establishe
 return no finding. Do not mark a check unassessed solely because an explicit
 contradiction exists. An undecided policy is not proof of a contract mismatch.
 Findings must refer to their check's provided items/tasks. MISSING_INPUT
-and confirmed MISSING_POLICY must be BLOCKING. Until policy scope and absence have
-a verifiable structured contract, do not emit MISSING_POLICY; use an
+and confirmed MISSING_POLICY must be BLOCKING. Only emit MISSING_POLICY when an
+original evidence excerpt explicitly states a policy is undecided in a complete
+line such as "재시도 정책: 미정" or "policy: TBD". Cite that evidence_id and its
+exact source and identify its design item version. Otherwise use an
 EVIDENCE_INSUFFICIENT unassessed check instead. If citing an evidence_id include its
 exact source. Never output a final decision or invent a responsible member.
 Write messages and actions in Korean."""
@@ -289,9 +300,15 @@ def validate_output(raw: Any, body: ValidateRequest) -> ValidateResult:
             finding.design_item_version_id or finding.related_task_id
         ):
             raise ValueError("comparison finding has no input reference")
-        # An unstructured unresolved list or a policy document alone cannot
-        # establish absence in a defined scope. Q02 has not fixed that contract.
-        if finding.kind == "MISSING_POLICY":
+        # A document that omits a policy does not prove the policy is missing.
+        # Allow only a cited excerpt explicitly stating that it is undecided.
+        if finding.kind == "MISSING_POLICY" and not any(
+            entry.design_item_version_id == finding.design_item_version_id
+            and UNDECIDED_POLICY_LINE.search(entry.text)
+            for evidence_id in finding.evidence_ids
+            if (entry := evidence.get(evidence_id)) is not None
+            and finding.design_item_version_id is not None
+        ):
             raise ValueError("policy absence is not established")
     return result
 

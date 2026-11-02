@@ -236,6 +236,32 @@ class ValidationInputAssemblerTest {
         assertTrue(selected.queries().contains("GET /members/{memberId} 구현"));
     }
 
+    @Test void fiveAndSixQueryPlansAreBothFullySearched() {
+        for (int scopes : List.of(2, 3)) {
+            var scope = java.util.stream.IntStream.range(0, scopes).mapToObj(i -> "scope-" + i).toList();
+            var plan = new TaskPlanInput("title", "goal", scope, List.of(), "approach",
+                    List.of("done"), List.of(), List.of(), List.of(), true, null);
+            var revision = new TaskPlanRevisionResponse("4", "3", 1, plan,
+                    Instant.parse("2026-01-01T00:00:00Z"), "1", null);
+            var result = ValidationInputAssembler.queries(revision);
+            assertEquals(3 + scopes, result.queries().size());
+            assertTrue(result.complete());
+            assertTrue(result.incompleteReasons().isEmpty());
+        }
+    }
+
+    @Test void overTheBoundKeepsIncompleteReasonInsteadOfClaimingComplete() {
+        var scope = java.util.stream.IntStream.range(0, 8).mapToObj(i -> "scope-" + i).toList();
+        var plan = new TaskPlanInput("title", "goal", scope, List.of(), "approach",
+                List.of("done"), List.of(), List.of(), List.of(), true, null);
+        var revision = new TaskPlanRevisionResponse("4", "3", 1, plan,
+                Instant.parse("2026-01-01T00:00:00Z"), "1", null);
+        var result = ValidationInputAssembler.queries(revision);
+        assertEquals(10, result.queries().size());
+        assertFalse(result.complete());
+        assertEquals(List.of("search_query_limit"), result.incompleteReasons());
+    }
+
     @Test void includesApprovedVersionAndRejectsStaleReference() {
         when(tasks.getTask(caller, 1L, 3L)).thenReturn(task("101"));
         var row = new LinkedHashMap<String, Object>();

@@ -49,6 +49,15 @@ public class AiClient {
         }
     }
 
+    /**
+     * AI-A02 작업 계획 의미 분석 ({@code POST /v1/validate}). 요청·응답 모양은 명세 그대로 Map 으로 주고받는다.
+     * 호출 실패·HTTP 오류는 그대로 던진다 — 분류는 부르는 쪽(validation 워커)이 한다.
+     */
+    @SuppressWarnings("unchecked")
+    public java.util.Map<String, Object> validate(java.util.Map<String, Object> input) {
+        return rest.post().uri("/v1/validate").body(input).retrieve().body(java.util.Map.class);
+    }
+
     /** 이후 lead/review/embeddings 호출이 공통으로 쓸 RestClient. */
     protected RestClient rest() {
         return rest;
@@ -65,9 +74,8 @@ public class AiClient {
     }
 
     /** 작업계획 검증은 오류를 숨기거나 템플릿으로 대체하지 않는다. */
-    @SuppressWarnings("unchecked")
     public java.util.Map<String, Object> validatePlan(java.util.Map<String, Object> input) {
-        return rest.post().uri("/v1/validate").body(input).retrieve().body(java.util.Map.class);
+        return validate(input);
     }
 
     /** Analyze a proposal; callers must retain the usage envelope and handle failures explicitly. */

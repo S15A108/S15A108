@@ -25,6 +25,8 @@ class ValidationOutcomeWriterFlowTest {
     private final ValidationInputAssembler assembler = mock(ValidationInputAssembler.class);
     private final RelatedTaskCandidateFinder related = mock(RelatedTaskCandidateFinder.class);
     private final List<Write> writes = new ArrayList<>();
+    private long currentBaseline = 5L;
+    private long currentPlanRevision = 6L;
     private final ValidationOutcomeWriter.Execution execution = new ValidationOutcomeWriter.Execution(
             1, 2, 3, 4, 1, UUID.randomUUID(), 5, 6, Map.of(), "gms", CallerContext.human(1L));
     private final ValidationOutcomeWriter writer = new ValidationOutcomeWriter(jdbc, JsonMapper.builder().build(), rules, assembler, related);
@@ -47,7 +49,10 @@ class ValidationOutcomeWriterFlowTest {
         JdbcClient.ResultQuerySpec rowQuery = mock(JdbcClient.ResultQuerySpec.class);
         JdbcClient.MappedQuerySpec<Long> countQuery = mock(JdbcClient.MappedQuerySpec.class);
         when(countQuery.single()).thenReturn(1L);
-        if (sql.startsWith("select kind,severity from validation_finding")) {
+        if (sql.startsWith("select p.current_baseline_id,t.current_plan_revision_id")) {
+            when(rowQuery.listOfRows()).thenReturn(List.of(Map.of(
+                    "current_baseline_id", currentBaseline, "current_plan_revision_id", currentPlanRevision)));
+        } else if (sql.startsWith("select kind,severity from validation_finding")) {
             when(rowQuery.listOfRows()).thenReturn(List.of());
         } else if (sql.startsWith("select id,source_document_version_id from design_item_version")) {
             when(rowQuery.listOfRows()).thenReturn(List.of(Map.of("id", 11L, "source_document_version_id", 20L)));
@@ -113,6 +118,12 @@ class ValidationOutcomeWriterFlowTest {
 
     private boolean wrote(String fragment) { return writes.stream().anyMatch(w -> w.sql().contains(fragment)); }
 
+    @Test void staleReasonDistinguishesPlanBaselineAndOtherInputChanges() {
+        assertThat(ValidationOutcomeWriter.staleReason(execution, 5L, 7L)).isEqualTo("PLAN_CHANGED");
+        assertThat(ValidationOutcomeWriter.staleReason(execution, 9L, 6L)).isEqualTo("INPUT_CHANGED");
+        assertThat(ValidationOutcomeWriter.staleReason(execution, 5L, 6L)).isEqualTo("INPUT_CHANGED");
+    }
+
     @Test void completeNormalPlanSavesPassUsageAndReference() {
         assertThat(writer.complete(execution, request(), response(complete(List.of())), true))
                 .isEqualTo(ValidationOutcomeWriter.Applied.APPLIED);
@@ -120,6 +131,14 @@ class ValidationOutcomeWriterFlowTest {
         assertThat(wrote("insert into llm_usage")).isTrue();
         assertThat(wrote("insert into validation_design_ref")).isTrue();
         assertThat(wrote("insert into validation_finding")).isFalse();
+    }
+
+    @Test void queryLimitIsExposedAndCannotProducePass() {
+        assertThat(writer.complete(execution, request(), response(complete(List.of())), false,
+                List.of("search_query_limit")))
+                .isEqualTo(ValidationOutcomeWriter.Applied.APPLIED);
+        assertThat(validationWrite().sql()).contains("status='ERROR'");
+        assertThat(validationWrite().params().get("summary").toString()).contains("search_query_limit");
     }
 
     @Test void newlyRelatedTaskDiscardsPreviouslyAnalyzedResult() {
@@ -130,7 +149,19 @@ class ValidationOutcomeWriterFlowTest {
         assertThat(writer.complete(execution, request(), response(complete(List.of())), true))
                 .isEqualTo(ValidationOutcomeWriter.Applied.DISCARDED);
         assertThat(validationWrite().sql()).contains("status='STALE'");
+        assertThat(validationWrite().params()).containsEntry("reason", "INPUT_CHANGED");
         assertThat(wrote("insert into validation_finding")).isFalse();
+    }
+
+    @Test void planChangedWhileAnalyzingRecordsPlanChangedReason() {
+        currentPlanRevision = 7L;
+        when(related.find(any(), eq(1L), eq(2L), eq(6L), anyList(), eq(20)))
+                .thenReturn(new RelatedTaskCandidateFinder.Result(5, 6,
+                        List.of(new RelatedTaskCandidateFinder.Candidate(99, 100, 1L, List.of())), false,
+                        RelatedTaskCandidateFinder.Coverage.RECORDED_RELATIONSHIPS_ONLY));
+        assertThat(writer.complete(execution, request(), response(complete(List.of())), true))
+                .isEqualTo(ValidationOutcomeWriter.Applied.DISCARDED);
+        assertThat(validationWrite().params()).containsEntry("reason", "PLAN_CHANGED");
     }
 
     @Test void truncatedRelatedTaskSearchCannotApplyOldResult() {

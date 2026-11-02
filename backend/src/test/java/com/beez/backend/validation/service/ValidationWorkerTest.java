@@ -91,7 +91,7 @@ class ValidationWorkerTest {
         when(ai.validatePlan(input.request())).thenReturn(response);
         assertThat(worker.runOnce()).isTrue();
         verify(writer).complete(argThat(e -> e.validationId() == 3L && e.runId() == 4L
-                && e.relatedPlanRevisions().equals(Map.of(8L, 9L)) && "gms".equals(e.provider())), eq(input.request()), eq(response), eq(true));
+                && e.relatedPlanRevisions().equals(Map.of(8L, 9L)) && "gms".equals(e.provider())), eq(input.request()), eq(response), eq(true), eq(List.of()));
     }
 
     @Test void configuredOpenAiProviderIsPassedToUsageWriter() {
@@ -101,7 +101,7 @@ class ValidationWorkerTest {
         when(assembler.assemble(any(CallerContext.class), eq(1L), eq(2L), eq(6L), eq(3L), eq(1), anyInt())).thenReturn(input);
         when(ai.validatePlan(input.request())).thenReturn(response);
         assertThat(worker.runOnce()).isTrue();
-        verify(writer).complete(argThat(e -> "openai".equals(e.provider())), eq(input.request()), eq(response), eq(true));
+        verify(writer).complete(argThat(e -> "openai".equals(e.provider())), eq(input.request()), eq(response), eq(true), eq(List.of()));
     }
 
     @Test void rejectsUnknownUsageProviderAtStartup() {

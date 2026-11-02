@@ -32,7 +32,8 @@ public class ValidationInputAssembler {
     // A single snapshot avoids repeated embedding calls across pages. The API permits at
     // most 100; more results still block completion until stable pagination is supported.
     private static final int MAX_SEARCH_RESULTS = 100;
-    private static final int MAX_QUERIES = 5;
+    // Keep a bounded call budget while covering ordinary plans with multiple scopes.
+    private static final int MAX_QUERIES = 10;
     private static final int MAX_UNRESOLVED = 100;
     private static final int MAX_UNRESOLVED_TEXT = 2000;
     private static final Pattern API_PATH = Pattern.compile("/(?=[\\p{L}\\p{N}_{])[\\p{L}\\p{N}_{}./-]+");
@@ -56,11 +57,19 @@ public class ValidationInputAssembler {
 
     /** searchComplete means the selected searches ran without known truncation, not exhaustive recall. */
     public record Result(Map<String, Object> request, long baselineId, Map<Long, Long> relatedPlanRevisions,
-                         boolean searchComplete, String coverage, List<String> unavailableEvidenceVersionIds) {
-        public Result { unavailableEvidenceVersionIds = List.copyOf(unavailableEvidenceVersionIds); }
+                         boolean searchComplete, String coverage, List<String> unavailableEvidenceVersionIds,
+                         List<String> searchIncompleteReasons) {
+        public Result {
+            unavailableEvidenceVersionIds = List.copyOf(unavailableEvidenceVersionIds);
+            searchIncompleteReasons = List.copyOf(searchIncompleteReasons);
+        }
         public Result(Map<String, Object> request, long baselineId, Map<Long, Long> relatedPlanRevisions,
                       boolean searchComplete, String coverage) {
-            this(request, baselineId, relatedPlanRevisions, searchComplete, coverage, List.of());
+            this(request, baselineId, relatedPlanRevisions, searchComplete, coverage, List.of(), List.of());
+        }
+        public Result(Map<String, Object> request, long baselineId, Map<Long, Long> relatedPlanRevisions,
+                      boolean searchComplete, String coverage, List<String> unavailableEvidenceVersionIds) {
+            this(request, baselineId, relatedPlanRevisions, searchComplete, coverage, unavailableEvidenceVersionIds, List.of());
         }
     }
 
@@ -73,6 +82,7 @@ public class ValidationInputAssembler {
         var target = tasks.getTask(caller, projectId, taskId).currentPlanRevision();
         requireRevision(target, planRevisionId);
         var selection = queries(target);
+        Set<String> incompleteReasons = new LinkedHashSet<>(selection.incompleteReasons());
         long baselineId = -1;
         boolean searchesComplete = selection.complete();
         Set<Long> itemIds = new LinkedHashSet<>();
@@ -84,12 +94,15 @@ public class ValidationInputAssembler {
             long foundBaseline = Long.parseLong(found.baselineId());
             if (baselineId != -1 && baselineId != foundBaseline) throw incomplete("baseline_changed");
             baselineId = foundBaseline;
-            searchesComplete &= !found.keywordHasMore() && !found.semanticHasMore();
+            if (found.keywordHasMore() || found.semanticHasMore()) {
+                searchesComplete = false;
+                incompleteReasons.add("search_results_truncated");
+            }
             for (var candidate : found.candidates()) {
                 if ("DESIGN_ITEM".equals(candidate.hit().get("type"))) {
                     long itemId = Long.parseLong(candidate.hit().get("id").toString());
                     if (itemIds.size() < 50 || itemIds.contains(itemId)) itemIds.add(itemId);
-                    else searchesComplete = false;
+                    else { searchesComplete = false; incompleteReasons.add("design_candidate_limit"); }
                 }
                 if (Set.of("DOCUMENT", "DOCUMENT_CHUNK").contains(candidate.hit().get("type"))) {
                     if (!(candidate.hit().get("source") instanceof Map<?, ?> source)
@@ -101,11 +114,13 @@ public class ValidationInputAssembler {
             }
         }
         var sourceItems = designsFromSourceDocuments(projectId, baselineId, documentVersions);
-        if (hasUnmappedDocuments(projectId, baselineId, documentVersions)) searchesComplete = false;
-        if (sourceItems.size() > 50) searchesComplete = false;
+        if (hasUnmappedDocuments(projectId, baselineId, documentVersions)) {
+            searchesComplete = false; incompleteReasons.add("unmapped_search_document");
+        }
+        if (sourceItems.size() > 50) { searchesComplete = false; incompleteReasons.add("design_candidate_limit"); }
         for (long itemId : sourceItems) {
             if (itemIds.size() < 50 || itemIds.contains(itemId)) itemIds.add(itemId);
-            else searchesComplete = false;
+            else { searchesComplete = false; incompleteReasons.add("design_candidate_limit"); }
         }
         var designs = approvedItems(projectId, baselineId, itemIds);
         Map<String, Map<String, Object>> byId = new LinkedHashMap<>();
@@ -152,8 +167,10 @@ public class ValidationInputAssembler {
         request.put("execution_budget_ms", executionBudgetMs);
         request.put("input_snapshot_hash", snapshotHash(request, baselineId));
         boolean complete = searchesComplete && !relatives.truncated() && evidence.unavailableVersionIds().isEmpty();
+        if (relatives.truncated()) incompleteReasons.add("related_task_limit");
+        if (!evidence.unavailableVersionIds().isEmpty()) incompleteReasons.add("source_evidence_unavailable");
         return new Result(request, baselineId, Map.copyOf(relatedSnapshots), complete, "UNKNOWN",
-                evidence.unavailableVersionIds());
+                evidence.unavailableVersionIds(), List.copyOf(incompleteReasons));
     }
 
     /** Revalidate exact source evidence when the final transaction applies a result. */
@@ -162,7 +179,7 @@ public class ValidationInputAssembler {
         return evidenceBuilder.build(projectId, baselineId, approvedItems);
     }
 
-    record QuerySelection(List<String> queries, boolean complete) {}
+    record QuerySelection(List<String> queries, boolean complete, List<String> incompleteReasons) {}
 
     /** Bounded phrases and API paths: text is data and search recall remains unknown. */
     static QuerySelection queries(TaskPlanRevisionResponse plan) {
@@ -172,7 +189,7 @@ public class ValidationInputAssembler {
         fields.addAll(plan.plan().includedScope());
         fields.add(plan.plan().approach());
         Set<String> queries = new LinkedHashSet<>();
-        boolean complete = true;
+        Set<String> incompleteReasons = new LinkedHashSet<>();
         String title = plan.plan().title().strip();
         if (title.isEmpty() || title.length() > 1000) throw incomplete("invalid_search_title");
         queries.add(title);
@@ -185,13 +202,14 @@ public class ValidationInputAssembler {
             if (field == null || field.isBlank()) continue;
             String phrase = field.strip();
             if (phrase.length() > 1000) {
-                complete = false;
+                incompleteReasons.add("search_query_too_long");
                 continue;
             }
             queries.add(phrase);
         }
-        if (queries.size() > MAX_QUERIES) complete = false;
-        return new QuerySelection(queries.stream().limit(MAX_QUERIES).toList(), complete);
+        if (queries.size() > MAX_QUERIES) incompleteReasons.add("search_query_limit");
+        return new QuerySelection(queries.stream().limit(MAX_QUERIES).toList(),
+                incompleteReasons.isEmpty(), List.copyOf(incompleteReasons));
     }
 
     private static void requireRevision(TaskPlanRevisionResponse plan, long expected) {

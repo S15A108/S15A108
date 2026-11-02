@@ -6,12 +6,16 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -19,16 +23,27 @@ import tools.jackson.databind.ObjectMapper;
 /** Commits one already leased validation attempt. Search hits are not proof of complete recall. */
 @Service
 public class ValidationOutcomeWriter {
+    private static final Pattern EXPLICIT_UNDECIDED_POLICY = Pattern.compile(
+            "^[ \\t]*(?:[-*][ \\t]*)?[^\\r\\n:：]{0,80}(?:정책|policy)[ \\t]*[:：][ \\t]*"
+                    + "(?:미정|미결정|미확정|결정되지[ \\t]*않음|정해지지[ \\t]*않음|undecided|not[ \\t]+decided|to[ \\t]+be[ \\t]+determined|tbd)[ \\t]*[.!]?[ \\t]*$",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE | Pattern.MULTILINE);
     private final JdbcClient jdbc;
     private final ObjectMapper json;
     private final ValidationRuleChecker rules;
     private static final int MAX_RELATED_TASKS = 20;
     private final ValidationInputAssembler assembler;
     private final RelatedTaskCandidateFinder relatedTasks;
+    private final boolean fakeAnalyzerEnabled;
+    @Autowired
     public ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
-                                   ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks) {
+                                   ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks,
+                                   @Value("${beez.validation.fake-analyzer:false}") boolean fakeAnalyzerEnabled) {
         this.jdbc = jdbc; this.json = json; this.rules = rules; this.assembler = assembler;
-        this.relatedTasks = relatedTasks;
+        this.relatedTasks = relatedTasks; this.fakeAnalyzerEnabled = fakeAnalyzerEnabled;
+    }
+    ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
+                            ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks) {
+        this(jdbc, json, rules, assembler, relatedTasks, false);
     }
 
     public record Execution(long projectId, long taskId, long validationId, long runId, int attempt,
@@ -42,7 +57,15 @@ public class ValidationOutcomeWriter {
     @Transactional
     public Applied complete(Execution execution, Map<String, Object> request,
                             Map<String, Object> response, boolean searchComplete) {
+        return complete(execution, request, response, searchComplete, List.of());
+    }
+
+    @Transactional
+    public Applied complete(Execution execution, Map<String, Object> request,
+                            Map<String, Object> response, boolean searchComplete, List<String> incompleteReasons) {
+        var reasons = new LinkedHashSet<>(incompleteReasons);
         lockContext(execution);
+        if (response == null) return failLocked(execution, "invalid_ai_output", false, List.of(), "RETRY", null);
         List<Map<String, Object>> usage;
         try { usage = maps(response.get("usage")); validateUsage(execution, usage); }
         catch (IllegalArgumentException bad) { return failLocked(execution, "invalid_ai_output", false, List.of(), "RETRY", null); }
@@ -51,8 +74,10 @@ public class ValidationOutcomeWriter {
         Map<String, Object> result;
         try {
             if (!"MODEL".equals(response.get("origin")) || !(response.get("model") instanceof String model)
-                    || model.isBlank() || usage.size() != 1 || !model.equals(usage.getFirst().get("model"))
-                    || !Boolean.FALSE.equals(usage.getFirst().get("failed"))) throw new IllegalArgumentException();
+                    || model.isBlank()) throw new IllegalArgumentException();
+            boolean fake = fakeAnalyzerEnabled && FakeValidationAnalyzer.MODEL.equals(model) && usage.isEmpty();
+            if (!fake && (usage.size() != 1 || !model.equals(usage.getFirst().get("model"))
+                    || !Boolean.FALSE.equals(usage.getFirst().get("failed")))) throw new IllegalArgumentException();
             result = map(response.get("result"));
             verify(execution, request, result);
         } catch (IllegalArgumentException invalid) {
@@ -79,10 +104,11 @@ public class ValidationOutcomeWriter {
         if (!owned(execution)) return discardIfObsolete(execution);
         if (!sourceSnapshot.evidence().equals(request.get("evidence"))) return stale(execution);
         searchComplete = searchComplete && sourceSnapshot.unavailableVersionIds().isEmpty();
+        if (!sourceSnapshot.unavailableVersionIds().isEmpty()) reasons.add("source_evidence_unavailable");
         String analysis = (String) result.get("analysis_status");
         if ("PARTIAL".equals(analysis) || !searchComplete) {
             return failLocked(execution, "evidence_insufficient", false, List.of(), "HUMAN_REVIEW",
-                    summary(request, result, execution, searchComplete));
+                    summary(request, result, execution, searchComplete, List.copyOf(reasons)));
         }
         // A different task can acquire a conflicting change or dependency while the model
         // runs. Re-evaluate under the project/task locks before applying any result.
@@ -91,13 +117,13 @@ public class ValidationOutcomeWriter {
         if (!owned(execution)) return discardIfObsolete(execution);
         if (!ruleResult.findings().isEmpty()) return stale(execution);
         String status = classify(maps(result.get("findings")), existingRuleFindings(execution.validationId()));
-        var diagnostics = summary(request, result, execution, searchComplete);
+        var diagnostics = summary(request, result, execution, searchComplete, List.copyOf(reasons));
         diagnostics.put("rule_checks", ruleResult.checkedRules());
         diagnostics.put("unsupported_rules", ruleResult.unsupportedRules());
         diagnostics.put("rules_verified", ruleResult.allRulesVerified());
         // Model COMPLETE does not prove that a shortened API specification had enough
         // information to compare request and response fields. Keep the MVP conservative.
-        if (!"NEEDS_REVIEW".equals(status) && hasInsufficientApiDetail(request)) {
+        if ("PASS".equals(status) && hasInsufficientApiDetail(request)) {
             diagnostics.put("missing_api_details", true);
             return failLocked(execution, "evidence_insufficient", false, List.of(), "HUMAN_REVIEW", diagnostics);
         }
@@ -105,15 +131,15 @@ public class ValidationOutcomeWriter {
         // its relevance can be recorded and approved, do not issue PASS or NEEDS_INPUT.
         boolean packetUnverified = map(map(request.get("plan_revision")).get("plan")).get("context_packet_id") != null;
         if (packetUnverified) diagnostics.put("context_packet_unverified", true);
-        if (!"NEEDS_REVIEW".equals(status)
+        if ("PASS".equals(status)
                 && (!ruleResult.allRulesVerified() || hasUnconfirmedCandidates(request) || packetUnverified)) {
             return failLocked(execution, "rules_unverified", false, List.of(), "HUMAN_REVIEW", diagnostics);
         }
         storeReferences(execution, request);
         for (Map<String, Object> finding : maps(result.get("findings"))) insertFinding(execution, finding);
         if (!owned(execution)) throw new IllegalStateException("validation lease expired during result write");
-        jdbc.sql("update validation_run set status='OK', finished_at=now(), updated_at=now() where id=:id")
-                .param("id", execution.runId()).update();
+        jdbc.sql("update validation_run set status='OK', analyzer_version=:model, finished_at=now(), updated_at=now() where id=:id")
+                .param("model", response.get("model")).param("id", execution.runId()).update();
         jdbc.sql("update validation set status=:status, summary=coalesce(summary,'{}'::jsonb) || cast(:summary as jsonb), finished_at=now(), updated_at=now(), lock_version=lock_version+1 where id=:id")
                 .param("status", status).param("summary", stringify(diagnostics))
                 .param("id", execution.validationId()).update();
@@ -198,12 +224,27 @@ public class ValidationOutcomeWriter {
     }
 
     private Applied stale(Execution e) {
+        var current = jdbc.sql("""
+                select p.current_baseline_id,t.current_plan_revision_id from project p
+                join task t on t.project_id=p.id where p.id=:project and t.id=:task
+                """).param("project", e.projectId()).param("task", e.taskId()).query().listOfRows();
+        String reason = current.size() == 1
+                ? staleReason(e, number(current.getFirst().get("current_baseline_id")),
+                        number(current.getFirst().get("current_plan_revision_id")))
+                : "INPUT_CHANGED";
         jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
                 .param("id", e.runId()).update();
-        jdbc.sql("update validation set status='STALE',stale_reason='INPUT_CHANGED',finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
-                .param("id", e.validationId()).update();
+        jdbc.sql("update validation set status='STALE',stale_reason=:reason,finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
+                .param("reason", reason).param("id", e.validationId()).update();
         finishJob(e, "CANCELLED");
         return Applied.DISCARDED;
+    }
+
+    /** Preserve the public invalidation reason when an analyzed snapshot is no longer current. */
+    static String staleReason(Execution e, Long currentBaselineId, Long currentPlanRevisionId) {
+        if (!Long.valueOf(e.planRevisionId()).equals(currentPlanRevisionId)) return "PLAN_CHANGED";
+        // Baseline and other snapshot changes share the existing public reason.
+        return "INPUT_CHANGED";
     }
 
     private boolean fresh(Execution e, Map<String, Object> request, boolean initialSearchComplete) {
@@ -409,22 +450,26 @@ public class ValidationOutcomeWriter {
         String resolution = kind.equals("MISSING_INPUT") ? "FIX_PLAN" : "HUMAN_REVIEW";
         jdbc.sql("""
                 insert into validation_finding(validation_id,validation_run_id,source,kind,severity,design_item_id,
-                    design_item_version_id,related_task_id,message,sources,resolution,next_action)
-                values (:validation,:run,'MODEL',:kind,:severity,:item,:version,:task,:message,cast(:sources as jsonb),:resolution,:action)
+                    design_item_version_id,related_task_id,message,sources,resolution,next_action,check_key,evidence_ids)
+                values (:validation,:run,'MODEL',:kind,:severity,:item,:version,:task,:message,cast(:sources as jsonb),
+                    :resolution,:action,:check_key,cast(:evidence_ids as jsonb))
                 """).param("validation", e.validationId()).param("run", e.runId()).param("kind", kind)
                 .param("severity", f.get("severity")).param("item", optionalId(f.get("design_item_id")))
                 .param("version", optionalId(f.get("design_item_version_id"))).param("task", optionalId(f.get("related_task_id")))
                 .param("message", f.get("message")).param("sources", stringify(f.get("sources")))
-                .param("resolution", resolution).param("action", f.get("suggested_action")).update();
+                .param("resolution", resolution).param("action", f.get("suggested_action"))
+                .param("check_key", f.get("check_key")).param("evidence_ids", stringify(f.get("evidence_ids"))).update();
     }
 
-    private static Map<String, Object> summary(Map<String, Object> request, Map<String, Object> result, Execution e, boolean searchComplete) {
+    private static Map<String, Object> summary(Map<String, Object> request, Map<String, Object> result, Execution e,
+                                                boolean searchComplete, List<String> incompleteReasons) {
         var value = new LinkedHashMap<String, Object>();
         value.put("attempt", e.attempt()); value.put("run_id", Long.toString(e.runId()));
         value.put("checks", request.get("checks")); value.put("analysis", result);
         // Preserve searched candidates as diagnostic input, not as an authoritative edge.
         value.put("candidate_designs", candidateDesigns(request));
         value.put("search_complete", searchComplete); value.put("retrieval_coverage", "UNKNOWN");
+        value.put("search_incomplete_reasons", incompleteReasons);
         return value;
     }
 
@@ -488,8 +533,6 @@ public class ValidationOutcomeWriter {
         for (var f : maps(result.get("findings"))) {
             String key = text(f.get("check_key")); if (!checked.contains(key)) throw new IllegalArgumentException();
             String kind = text(f.get("kind")), severity = text(f.get("severity"));
-            // There is currently no agreed machine-readable proof of policy absence.
-            if ("MISSING_POLICY".equals(kind)) throw new IllegalArgumentException();
             if (!Set.of("MISMATCH", "MISSING_INPUT", "MISSING_POLICY", "CONFLICT", "STALE_REF").contains(kind)
                     || !Set.of("INFO", "WARNING", "BLOCKING").contains(severity)
                     || text(f.get("message")).isBlank() || text(f.get("suggested_action")).isBlank()
@@ -506,10 +549,18 @@ public class ValidationOutcomeWriter {
             for (String id : versionIds) if (items.containsKey(id) && items.get(id).get("source") instanceof Map<?, ?> source) allowed.add(map(source));
             for (var ev : evidence.values()) if (versionIds.contains(ev.get("design_item_version_id"))) allowed.add(map(ev.get("source")));
             var sources = maps(f.get("sources")); if (!allowed.containsAll(sources)) throw new IllegalArgumentException();
-            for (String id : stringSet(f.get("evidence_ids"))) {
+            Set<String> citedEvidence = stringSet(f.get("evidence_ids"));
+            boolean explicitPolicy = false;
+            for (String id : citedEvidence) {
                 var ev = evidence.get(id);
                 if (ev == null || !versionIds.contains(ev.get("design_item_version_id")) || !sources.contains(map(ev.get("source")))) throw new IllegalArgumentException();
+                if (version != null && version.equals(ev.get("design_item_version_id"))
+                        && ev.get("text") instanceof String content
+                        && EXPLICIT_UNDECIDED_POLICY.matcher(content).find()) explicitPolicy = true;
             }
+            // A missing search hit is never proof of policy absence. Only accept a
+            // directly cited excerpt that explicitly says this item's policy is undecided.
+            if ("MISSING_POLICY".equals(kind) && !explicitPolicy) throw new IllegalArgumentException();
         }
     }
 

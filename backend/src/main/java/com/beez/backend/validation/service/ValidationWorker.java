@@ -12,8 +12,8 @@ import java.util.Set;
 import java.util.UUID;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -22,11 +22,12 @@ import org.springframework.web.client.RestClientResponseException;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Runs claimed attempts outside a database transaction; result writes are fenced by lease. */
-@Component
+@Component("validationSemanticExecutor")
 public class ValidationWorker {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private final JdbcClient jdbc;
     private final AiClient ai;
+    private final ValidationAnalyzer analyzer;
     private final ValidationInputAssembler assembler;
     private final ValidationOutcomeWriter writer;
     private final ValidationRuleOutcomeWriter ruleWriter;
@@ -35,22 +36,29 @@ public class ValidationWorker {
     private final boolean enabled;
     private final String provider;
 
+    @Autowired
     public ValidationWorker(JdbcClient jdbc, AiClient ai, ValidationInputAssembler assembler,
                             ValidationOutcomeWriter writer, ValidationRuleOutcomeWriter ruleWriter,
                             PlatformTransactionManager manager,
                             BeezProperties properties,
                             @Value("${beez.validation.worker-enabled:false}") boolean enabled,
-                            @Value("${beez.validation.provider:gms}") String provider) {
+                            @Value("${beez.validation.provider:gms}") String provider,
+                            ValidationAnalyzer analyzer) {
         if (provider == null || !Set.of("gms", "openai").contains(provider)) {
             throw new IllegalArgumentException("beez.validation.provider must be gms or openai");
         }
-        this.jdbc = jdbc; this.ai = ai; this.assembler = assembler; this.writer = writer; this.ruleWriter = ruleWriter;
+        this.jdbc = jdbc; this.ai = ai; this.analyzer = analyzer; this.assembler = assembler; this.writer = writer; this.ruleWriter = ruleWriter;
         this.tx = new TransactionTemplate(manager); this.enabled = enabled; this.provider = provider;
         long timeout = properties.ai().readTimeout().toMillis();
         this.budgetMs = (int) Math.max(1, Math.min(60000, timeout - Math.min(2000, timeout / 2)));
     }
 
-    @Scheduled(fixedDelayString = "${beez.validation.poll-millis:2000}")
+    ValidationWorker(JdbcClient jdbc, AiClient ai, ValidationInputAssembler assembler,
+                     ValidationOutcomeWriter writer, ValidationRuleOutcomeWriter ruleWriter,
+                     PlatformTransactionManager manager, BeezProperties properties, boolean enabled, String provider) {
+        this(jdbc, ai, assembler, writer, ruleWriter, manager, properties, enabled, provider, null);
+    }
+
     public void poll() {
         if (!enabled) return;
         try { runOnce(); }
@@ -60,7 +68,7 @@ public class ValidationWorker {
     }
 
     record Claim(long projectId, long taskId, long validationId, long runId, int attempt,
-                 UUID lease, long baselineId, long revisionId, CallerContext caller) {
+                 UUID lease, long baselineId, long revisionId, String acceptedHash, CallerContext caller) {
         ValidationOutcomeWriter.Execution execution(Map<Long, Long> related, String provider) {
             return new ValidationOutcomeWriter.Execution(projectId, taskId, validationId, runId, attempt,
                     lease, baselineId, revisionId, related, provider, caller);
@@ -68,14 +76,23 @@ public class ValidationWorker {
     }
 
     public boolean runOnce() {
+        if (recoverExpired()) return true;
+        Claim claim = tx.execute(status -> claim());
+        if (claim == null) return false;
+        return executeClaim(claim);
+    }
+
+    public boolean recoverExpired() {
         var expired = jdbc.sql("select validation_id from validation_job where status='LEASED' and lease_until<=now() order by lease_until,id limit 1")
                 .query(Long.class).optional();
         if (expired.isPresent()) {
             writer.expire(expired.get());
             return true;
         }
-        Claim claim = tx.execute(status -> claim());
-        if (claim == null) return false;
+        return false;
+    }
+
+    private boolean executeClaim(Claim claim) {
         var execution = claim.execution(Map.of(), provider);
         try {
             if (ruleWriter.apply(execution, claim.caller()) != ValidationRuleOutcomeWriter.Applied.CONTINUE) return true;
@@ -106,8 +123,19 @@ public class ValidationWorker {
                 writer.staleIfOwned(execution);
                 return true;
             }
-            Map<String, Object> response = ai.validatePlan(input.request());
-            writer.complete(execution, input.request(), response, input.searchComplete());
+            Map<String, Object> response = analyzer == null ? ai.validatePlan(input.request()) : analyzer.analyze(input.request());
+            writer.complete(execution, input.request(), response, input.searchComplete(), input.searchIncompleteReasons());
+        } catch (ValidationAnalyzer.AnalyzerException e) {
+            Throwable cause = e.getCause();
+            List<Map<String, Object>> returnedUsage = cause instanceof RestClientResponseException http
+                    ? usage(http.getResponseBodyAsString()) : List.of();
+            String code = switch (e.errorCode()) {
+                case "ai_timeout" -> "model_timeout";
+                case "ai_unavailable" -> "model_unavailable";
+                case "ai_invalid_output" -> "invalid_ai_output";
+                default -> "worker_failure";
+            };
+            safeFail(execution, code, "model_timeout".equals(code), returnedUsage);
         } catch (RestClientResponseException e) {
             safeFail(execution, e.getStatusCode().value() == 504 ? "model_timeout" : "model_unavailable",
                     e.getStatusCode().value() == 504, usage(e.getResponseBodyAsString()));
@@ -123,7 +151,7 @@ public class ValidationWorker {
     private Claim claim() {
         var jobs = jdbc.sql("""
                 select j.id as job_id, v.id as validation_id,v.task_id,v.plan_revision_id,v.baseline_id,
-                       v.current_attempt,t.project_id,v.summary->'request_actor'->>'account_id' as actor_id,
+                       v.current_attempt,v.input_snapshot_hash,t.project_id,v.summary->'request_actor'->>'account_id' as actor_id,
                        v.summary->'request_actor'->>'kind' as actor_kind,
                        v.summary->'request_actor'->>'agent_token_id' as actor_token
                 from validation_job j join validation v on v.id=j.validation_id
@@ -138,11 +166,18 @@ public class ValidationWorker {
         UUID lease = UUID.randomUUID();
         jdbc.sql("update validation_job set status='LEASED',attempts=:attempt,lease_token=:token,lease_until=now()+interval '3 minutes',updated_at=now() where id=:id")
                 .param("attempt", attempt).param("token", lease).param("id", job).update();
-        long run = jdbc.sql("insert into validation_run(validation_id,attempt,lease_token,kind,status,analyzer_version) values(:id,:attempt,:token,'MODEL','RUNNING','task-validation-v1') returning id")
+        long run = jdbc.sql("""
+                insert into validation_run(validation_id,attempt,lease_token,kind,status,analyzer_version)
+                values(:id,:attempt,:token,'MODEL','RUNNING','task-validation-v1')
+                on conflict(validation_id,attempt) do update set lease_token=excluded.lease_token,updated_at=now()
+                where validation_run.status='RUNNING' and validation_run.lease_token is null
+                returning id
+                """)
                 .param("id", id).param("attempt", attempt).param("token", lease).query(Long.class).single();
         CallerContext caller = parseCaller(row);
         return new Claim(number(row, "project_id"), number(row, "task_id"), id, run, attempt, lease,
-                number(row, "baseline_id"), number(row, "plan_revision_id"), caller);
+                number(row, "baseline_id"), number(row, "plan_revision_id"),
+                row.get("input_snapshot_hash") instanceof String hash ? hash : "", caller);
     }
 
     private static CallerContext parseCaller(Map<String, Object> row) {
@@ -159,11 +194,13 @@ public class ValidationWorker {
                 update validation v set input_snapshot_hash=:hash,updated_at=now()
                  where v.id=:id and v.status='RUNNING' and v.current_attempt=:attempt
                    and v.baseline_id=:baseline and v.plan_revision_id=:revision
-                   and (v.input_snapshot_hash like 'pending:%' or v.input_snapshot_hash=:hash)
+                   and (v.input_snapshot_hash like 'pending:%' or v.input_snapshot_hash=:hash
+                        or (:attempt=1 and v.input_snapshot_hash=:accepted_hash))
                    and exists (select 1 from validation_job j where j.validation_id=v.id and j.status='LEASED'
                        and j.lease_token=:lease and j.lease_until>now())
                 """).param("hash", input.request().get("input_snapshot_hash")).param("id", claim.validationId())
                 .param("attempt", claim.attempt()).param("baseline", claim.baselineId()).param("revision", claim.revisionId())
+                .param("accepted_hash", claim.acceptedHash())
                 .param("lease", claim.lease()).update() == 1));
     }
 

@@ -58,10 +58,13 @@ public class ValidationRuleOutcomeWriter {
         if (!Long.valueOf(e.baselineId()).equals(nullableNumber(projects.getFirst().get("current_baseline_id")))
                 || number(row.get("baseline_id")) != e.baselineId() || number(row.get("plan_revision_id")) != e.planRevisionId()
                 || !Long.valueOf(e.planRevisionId()).equals(nullableNumber(task.get("current_plan_revision_id")))) {
+            String reason = ValidationOutcomeWriter.staleReason(e,
+                    nullableNumber(projects.getFirst().get("current_baseline_id")),
+                    nullableNumber(task.get("current_plan_revision_id")));
             jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
                     .param("id", e.runId()).update();
-            jdbc.sql("update validation set status='STALE',stale_reason='INPUT_CHANGED',finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
-                    .param("id", e.validationId()).update();
+            jdbc.sql("update validation set status='STALE',stale_reason=:reason,finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
+                    .param("reason", reason).param("id", e.validationId()).update();
             finish(e.validationId(), "CANCELLED");
             return Applied.DISCARDED;
         }

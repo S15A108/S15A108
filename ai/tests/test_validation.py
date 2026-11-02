@@ -11,7 +11,12 @@ from app.main import app
 from app.routers import validation as validation_router
 from app.schemas.validation import ValidateRequest
 from app.services.llm_client import LLMClient, LLMError, ProviderError, ProviderResponse
-from app.services.validation import InvalidInput, analyze, validate_input
+from app.services.validation import (
+    InvalidInput,
+    analyze,
+    validate_input,
+    validate_output,
+)
 
 REQUEST_FILE = (
     Path(__file__).resolve().parents[2] / "docs/api/examples/validation/request.json"
@@ -29,6 +34,91 @@ def result_for(request):
         "unassessed": [],
         "findings": [],
     }
+
+
+@pytest.mark.parametrize(
+    "text", ["- 재시도 정책: 미정", "Policy: TBD", "권한 정책: 결정되지 않음"]
+)
+def test_missing_policy_requires_explicit_cited_original_text(text):
+    body = fixture_request()
+    body["evidence"][0]["text"] = "# 정책\n" + text + "\n"
+    result = result_for(body)
+    result["findings"] = [
+        {
+            "check_key": "design-api-login",
+            "kind": "MISSING_POLICY",
+            "severity": "BLOCKING",
+            "message": "정책 결정이 필요합니다",
+            "design_item_id": "301",
+            "design_item_version_id": "311",
+            "sources": [body["evidence"][0]["source"]],
+            "evidence_ids": ["evidence-login-response"],
+            "suggested_action": "정책을 확정하세요",
+        }
+    ]
+    assert (
+        validate_output(result, ValidateRequest.model_validate(body)).findings[0].kind
+        == "MISSING_POLICY"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "정책은 관리자만 변경할 수 있다.",
+        "재시도 정책: 미정이 아니다",
+        "재시도 정책: 미정이었으나 확정됨",
+        "설계 문서에 정책 내용이 없다",
+    ],
+)
+def test_missing_policy_does_not_infer_absence_from_document(text):
+    body = fixture_request()
+    body["evidence"][0]["text"] = text
+    result = result_for(body)
+    result["findings"] = [
+        {
+            "check_key": "design-api-login",
+            "kind": "MISSING_POLICY",
+            "severity": "BLOCKING",
+            "message": "정책 결정이 필요합니다",
+            "design_item_id": "301",
+            "design_item_version_id": "311",
+            "sources": [body["evidence"][0]["source"]],
+            "evidence_ids": ["evidence-login-response"],
+            "suggested_action": "정책을 확정하세요",
+        }
+    ]
+    with pytest.raises(ValueError, match="policy absence is not established"):
+        validate_output(result, ValidateRequest.model_validate(body))
+
+
+def test_missing_policy_rejects_uncited_evidence_and_unmatched_design():
+    body = fixture_request()
+    body["evidence"][0]["text"] = "재시도 정책: 미정"
+    result = result_for(body)
+    finding = {
+        "check_key": "design-api-login",
+        "kind": "MISSING_POLICY",
+        "severity": "BLOCKING",
+        "message": "정책 결정이 필요합니다",
+        "design_item_id": "301",
+        "design_item_version_id": "311",
+        "sources": [body["evidence"][0]["source"]],
+        "evidence_ids": [],
+        "suggested_action": "정책을 확정하세요",
+    }
+    result["findings"] = [finding]
+    with pytest.raises(ValueError, match="policy absence is not established"):
+        validate_output(result, ValidateRequest.model_validate(body))
+    finding["evidence_ids"] = ["evidence-login-response"]
+    finding["sources"] = []
+    with pytest.raises(ValueError, match="unknown evidence"):
+        validate_output(result, ValidateRequest.model_validate(body))
+    finding["sources"] = [body["evidence"][0]["source"]]
+    finding["design_item_id"] = None
+    finding["design_item_version_id"] = None
+    with pytest.raises(ValueError, match="policy absence is not established"):
+        validate_output(result, ValidateRequest.model_validate(body))
 
 
 class Provider:

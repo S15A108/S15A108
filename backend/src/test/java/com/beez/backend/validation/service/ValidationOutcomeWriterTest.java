@@ -76,6 +76,23 @@ class ValidationOutcomeWriterTest {
         assertThatThrownBy(() -> ValidationOutcomeWriter.verify(execution, request(), result)).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test void missingPolicyRequiresMatchingExplicitlyUndecidedSource() {
+        var request = request();
+        var evidence = new HashMap<String, Object>();
+        evidence.put("evidence_id", "ev1"); evidence.put("design_item_version_id", "11");
+        evidence.put("source", source("19")); evidence.put("text", "# API\n- 재시도 정책: 미정\n");
+        request.put("evidence", List.of(evidence));
+        var f = finding(); f.put("kind", "MISSING_POLICY"); f.put("evidence_ids", List.of("ev1"));
+        var result = result(); result.put("findings", List.of(f));
+        assertThatCode(() -> ValidationOutcomeWriter.verify(execution, request, result)).doesNotThrowAnyException();
+        evidence.put("text", "재시도 정책은 현재 문서에 없습니다.");
+        assertThatThrownBy(() -> ValidationOutcomeWriter.verify(execution, request, result)).isInstanceOf(IllegalArgumentException.class);
+        evidence.put("text", "재시도 정책: 미정이 아니다");
+        assertThatThrownBy(() -> ValidationOutcomeWriter.verify(execution, request, result)).isInstanceOf(IllegalArgumentException.class);
+        evidence.put("text", "정책: 미정"); evidence.put("design_item_version_id", "13");
+        assertThatThrownBy(() -> ValidationOutcomeWriter.verify(execution, request, result)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void reviewTakesPriorityOverMissingInput() {
         var missing = Map.<String, Object>of("severity", "BLOCKING", "kind", "MISSING_INPUT");
         var conflict = Map.<String, Object>of("severity", "BLOCKING", "kind", "CONFLICT");

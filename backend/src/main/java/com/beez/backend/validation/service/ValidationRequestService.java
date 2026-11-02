@@ -139,7 +139,7 @@ public class ValidationRequestService {
                 diagnostics.put("analysis", analysis);
                 diagnostics.put("retrieval_coverage", summary.getOrDefault("retrieval_coverage", "UNKNOWN"));
                 diagnostics.put("search_complete", Boolean.TRUE.equals(summary.get("search_complete")));
-                for (String field : List.of("error_code", "unsupported_rules", "candidate_designs", "missing_api_details", "context_packet_unverified")) {
+                for (String field : List.of("error_code", "unsupported_rules", "candidate_designs", "missing_api_details", "context_packet_unverified", "search_incomplete_reasons")) {
                     if (summary.containsKey(field)) diagnostics.put(field, summary.get(field));
                 }
                 result.put("diagnostics", diagnostics);
