@@ -1,5 +1,9 @@
 package com.beez.backend.validation.service;
 
+import com.beez.backend.task.entity.TaskPlanDesignRef;
+import com.beez.backend.task.entity.TaskPlanRevision;
+import com.beez.backend.task.repository.TaskPlanDesignRefRepository;
+import com.beez.backend.task.repository.TaskPlanRevisionRepository;
 import com.beez.backend.task.service.ProjectDesignLookup;
 import com.beez.backend.validation.repository.FindingRow;
 import com.beez.backend.validation.repository.JobLease;
@@ -21,10 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 워커가 받은 AI 응답(또는 실패)을 한 트랜잭션으로 반영한다 (공통 "검증 실행 오류 규약").
  * <ul>
- *   <li>먼저 검증을 잠그고 아직 RUNNING·같은 시도·같은 리스인지 본다. 아니면 늦은 결과: 실행이 아직 RUNNING 이면 DISCARDED 로
- *       닫고 검증 상태는 바꾸지 않는다</li>
- *   <li>응답 검사(필수 배열·원소 타입, 검사 키 분할, ID·출처·근거)를 통과한 COMPLETE 만 후보를 저장하고 6절 판정표로
- *       PASS·NEEDS_INPUT·NEEDS_REVIEW</li>
+ *   <li>먼저 프로젝트 행을 잠그고(계획 변경·상태 보고와 같은 순서) 검증을 잠가 아직 RUNNING·같은 시도·같은 리스인지 본다.
+ *       아니면 늦은 결과: 실행이 아직 RUNNING 이면 DISCARDED 로 닫고 검증 상태는 바꾸지 않는다. 프로젝트 행을 쥔 동안은
+ *       같은 프로젝트의 계획 변경·상태 전이가 기다리므로, 입력 확인부터 결과 저장까지 관련 작업이 바뀔 수 없다</li>
+ *   <li>응답 검사(필수 배열·원소 타입, 검사 키 분할, ID·출처·근거)를 통과한 COMPLETE 만 후보를 저장하고, 규칙 판정을 지금
+ *       상태로 다시 내려(관련 작업의 상태만 바뀐 경우를 잡는다) 6절 판정표로 PASS·NEEDS_INPUT·NEEDS_REVIEW</li>
  *   <li>PARTIAL·계약 위반·호출 실패는 실행 종결 + ERROR 발견 항목(MODEL·ERROR·BLOCKING) + 검증 ERROR + 작업 FAILED 를 함께.
  *       모델을 실제로 부른 경우(PARTIAL·계약 위반)는 사용량·검사 키·부분 후보를 summary 에 진단용으로 남긴다</li>
  * </ul>
@@ -43,12 +48,19 @@ public class AnalysisResultApplier {
     private final ValidationRepository validations;
     private final ValidationResponses responses;
     private final ProjectDesignLookup designLookup;
+    private final ValidationRules rules;
+    private final TaskPlanRevisionRepository revisions;
+    private final TaskPlanDesignRefRepository designRefs;
 
     public AnalysisResultApplier(ValidationRepository validations, ValidationResponses responses,
-                                 ProjectDesignLookup designLookup) {
+                                 ProjectDesignLookup designLookup, ValidationRules rules,
+                                 TaskPlanRevisionRepository revisions, TaskPlanDesignRefRepository designRefs) {
         this.validations = validations;
         this.responses = responses;
         this.designLookup = designLookup;
+        this.rules = rules;
+        this.revisions = revisions;
+        this.designRefs = designRefs;
     }
 
     /**
@@ -64,7 +76,7 @@ public class AnalysisResultApplier {
         if (response != null) {
             lateDiagnostics = diagnostics(response, String.valueOf(map(response.get("result")).get("analysis_status")));
         }
-        Optional<Current> current = current(lease, Mode.RESULT, lateDiagnostics);
+        Optional<Current> current = current(lease, Mode.RESULT, lateDiagnostics, durationMs);
         if (current.isEmpty()) {
             return;
         }
@@ -103,11 +115,20 @@ public class AnalysisResultApplier {
             return;
         }
 
-        // COMPLETE: 후보 저장 + 규칙 판정. 출처는 AI 가 보낸 값 대신 요청에 넣은 출처 객체로 바꿔 저장한다
+        // COMPLETE: 규칙 판정을 지금 상태로 다시 내린다. 접수 뒤 결과를 기다리는 사이 관련 작업의 상태만 바뀐 경우
+        // (같은 항목을 CHANGES 하는 작업이 READY → IN_PROGRESS 로 점유)는 입력 비교(작업·계획 리비전)로는 잡히지 않고
+        // 충돌 규칙으로만 잡힌다. 설계 발행으로 참조 버전이 낡은 경우도 같이 잡힌다. 프로젝트 행을 쥐고 있으므로 지금 읽는
+        // 상태가 저장 시점의 상태다. RUNNING 으로 접수된 검증은 접수 때 규칙 발견 항목이 없어(있었으면 그때 확정됐다) 겹치지 않는다
+        RuleOutcome rule = reevaluateRules(v);
+        boolean needsInput = "NEEDS_INPUT".equals(rule.decidedStatus());
+        boolean needsReview = "NEEDS_REVIEW".equals(rule.decidedStatus());
+        for (FindingRow f : rule.findings()) {
+            validations.insertFinding(v.id(), f);
+        }
+
+        // 후보 저장. 출처는 AI 가 보낸 값 대신 요청에 넣은 출처 객체로 바꿔 저장한다
         // (계약 검사는 네 칸을 문자열로 비교하므로, 숫자 ID·명세에 없는 칸이 섞인 값을 그대로 내보내지 않게)
         Map<String, Map<String, Object>> requestSources = requestSources(request);
-        boolean needsInput = false;
-        boolean needsReview = false;
         for (Map<String, Object> f : objects(result.get("findings"))) {
             String kind = (String) f.get("kind");
             String severity = (String) f.get("severity");
@@ -119,11 +140,9 @@ public class AnalysisResultApplier {
 
             if ("STALE_REF".equals(kind)) {
                 // AI 의 STALE_REF 는 "최신성을 다시 확인하라"는 신호다. 추론만으로 확정하지 않는다 (AI-A02 처리 규칙).
-                // BE 가 현재 기준과 다시 대조해 정말 낡았으면 규칙 판정과 같이 NEEDS_INPUT, 아니면 사람 검토로 넘긴다
+                // BE 가 현재 기준과 다시 대조해 정말 낡았으면 규칙 판정과 같이 NEEDS_INPUT (규칙 재판정이 그 항목의 규칙
+                // 발견 항목을 이미 더했다), 아니면 사람 검토로 넘긴다
                 if (isStale(v.projectId(), item, version)) {
-                    validations.insertFinding(v.id(), FindingRow.rule("STALE_REF", "BLOCKING", item, version, null,
-                            "참조한 항목 버전이 현재 기준의 버전과 다릅니다 (의미 분석 뒤 다시 확인)", "FIX_PLAN",
-                            "현재 기준 버전으로 계획을 다시 올리세요"));
                     needsInput = true;
                 } else {
                     resolution = "HUMAN_REVIEW";
@@ -163,7 +182,7 @@ public class AnalysisResultApplier {
     /** 호출 실패(시간 초과·연결·HTTP 오류·그 밖의 BE 오류) 반영. 모델 응답이 없으니 진단 값도 없다 */
     @Transactional
     public void applyFailure(JobLease lease, String errorCode, String message, long durationMs) {
-        Optional<Current> current = current(lease, Mode.RESULT, Map.of());
+        Optional<Current> current = current(lease, Mode.RESULT, Map.of(), durationMs);
         if (current.isEmpty()) {
             return;
         }
@@ -182,7 +201,7 @@ public class AnalysisResultApplier {
      */
     @Transactional
     public void applyLeaseExpired(JobLease lease) {
-        Optional<Current> current = current(lease, Mode.RECOVERY, Map.of());
+        Optional<Current> current = current(lease, Mode.RECOVERY, Map.of(), 0);
         if (current.isEmpty()) {
             return;
         }
@@ -232,14 +251,26 @@ public class AnalysisResultApplier {
      * 결과 반영은 job 이 아직 이 리스로 LEASED 이고 <b>유효기간 안</b>이어야 받는다. 만료됐는데 회수가 아직 안 됐으면
      * 받지 않고 그 자리에서 만료로 닫는다(회수와 같은 결과). 회수는 반대로 만료된 리스만 닫는다.
      *
-     * @param lateDiagnostics 결과 반영이 만료로 닫힐 때 summary 에 남길 진단 값 (모델을 부른 사용량 등)
+     * @param lateDiagnostics 결과를 받지 않고 닫을 때 summary 에 남길 진단 값 (모델을 부른 사용량 등). 모델을 안 불렀으면 빈 Map
+     * @param durationMs      모델 호출에 걸린 시간. 버리는 실행에도 남긴다
      */
-    private Optional<Current> current(JobLease lease, Mode mode, Map<String, Object> lateDiagnostics) {
+    private Optional<Current> current(JobLease lease, Mode mode, Map<String, Object> lateDiagnostics, long durationMs) {
+        // 프로젝트 행을 먼저 잠근다 — 계획 변경(TSK-A04)·상태 보고·접수와 같은 project → task 순서. 이 트랜잭션이 끝날 때까지
+        // 같은 프로젝트의 계획 변경·상태 전이·새 작업이 기다리므로, 아래 입력 확인과 결과 저장 사이에 관련 작업이 끼어들 수 없다
+        Optional<Long> projectId = validations.projectIdOf(lease.validationId());
+        if (projectId.isEmpty()) {
+            return Optional.empty();
+        }
+        designLookup.lockProject(projectId.get());
         Optional<ValidationRow> found = validations.lock(lease.validationId());
         if (found.isEmpty()) {
             return Optional.empty();
         }
         ValidationRow v = found.get();
+        String model = null;
+        if (lateDiagnostics.get("model") instanceof String m) {
+            model = m;
+        }
         Optional<Map<String, Object>> run = validations.run(v.id(), lease.attempt());
         boolean sameLease = run.isPresent() && lease.leaseToken().toString().equals(String.valueOf(run.get().get("lease_token")));
         boolean live = "RUNNING".equals(v.status()) && v.currentAttempt() == lease.attempt() && sameLease
@@ -247,7 +278,7 @@ public class AnalysisResultApplier {
         if (!live) {
             // 늦은 결과: STALE·취소·새 시도·다른 리스. 실행이 아직 열려 있으면 DISCARDED 로 닫고 상태는 그대로
             if (run.isPresent() && "RUNNING".equals(run.get().get("status"))) {
-                validations.finishRun(((Number) run.get().get("id")).longValue(), "DISCARDED", "늦은 결과", null, 0);
+                validations.finishRun(((Number) run.get().get("id")).longValue(), "DISCARDED", "늦은 결과", model, durationMs);
             }
             validations.cancelJobIfStillLeased(lease.jobId(), lease.leaseToken());
             log.info("validation {} attempt {} result discarded (status={}, current_attempt={})", v.id(), lease.attempt(),
@@ -257,11 +288,11 @@ public class AnalysisResultApplier {
         long runId = ((Number) run.get().get("id")).longValue();
         // 결과를 기다리는 사이 분석 입력(이 작업의 계획, 같은 항목을 보는 관련 작업과 그 계획)이 바뀌었으면 이 결과는 지난 입력의
         // 것이다. 진행 중 계획 변경(S2)은 끝난 검증만 STALE 로 바꾸고 도는 검증은 워커에 맡기므로, 여기서 버리고 STALE 로 닫는다.
-        // project 행은 잠그지 않는다 — 계획 변경이 project → validation 순서로 잠가, 여기서 잡으면 순서가 거꾸로 된다
+        // 판정은 버려도 모델을 부른 사용량·모델은 실행과 요약에 남긴다 (비용 집계 -168)
         Optional<String> changed = inputChange(v);
         if (changed.isPresent()) {
-            validations.finishRun(runId, "DISCARDED", "검증 입력이 바뀐 뒤 도착한 결과 (" + changed.get() + ")", null, 0);
-            validations.markStale(v.id(), changed.get());
+            validations.finishRun(runId, "DISCARDED", "검증 입력이 바뀐 뒤 도착한 결과 (" + changed.get() + ")", model, durationMs);
+            validations.markStale(v.id(), changed.get(), usageOf(lateDiagnostics));
             validations.finishJob(lease.jobId(), "CANCELLED");
             log.info("validation {} attempt {} result discarded: input changed ({})", v.id(), lease.attempt(), changed.get());
             return Optional.empty();
@@ -271,7 +302,7 @@ public class AnalysisResultApplier {
         boolean ownsJob = job.isPresent() && "LEASED".equals(job.get().get("status"))
                 && lease.leaseToken().toString().equals(String.valueOf(job.get().get("lease_token")));
         if (!ownsJob) {
-            validations.finishRun(runId, "DISCARDED", "리스를 잃은 뒤 도착한 결과", null, 0);
+            validations.finishRun(runId, "DISCARDED", "리스를 잃은 뒤 도착한 결과", model, durationMs);
             log.info("validation {} attempt {} result discarded: job no longer leased by this worker", v.id(), lease.attempt());
             return Optional.empty();
         }
@@ -292,6 +323,30 @@ public class AnalysisResultApplier {
     private record Current(ValidationRow validation, long runId) {
     }
 
+    /** 진단 값 중 비용 집계에 필요한 것만 (모델·사용량). 버리는 결과의 후보는 남기지 않는다 */
+    private static Map<String, Object> usageOf(Map<String, Object> diagnostics) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (diagnostics.containsKey("model")) {
+            out.put("model", diagnostics.get("model"));
+        }
+        if (diagnostics.containsKey("usage")) {
+            out.put("usage", diagnostics.get("usage"));
+        }
+        return out;
+    }
+
+    /**
+     * 접수 때와 같은 규칙({@link ValidationRules})을 지금의 계획·참조·관련 열린 작업(상태 포함)으로 다시 돌린다.
+     * 입력 비교({@link #inputChange})를 통과한 뒤이므로 계획·관련 작업 집합은 접수 때와 같고, 달라질 수 있는 것은 관련 작업의
+     * 상태(CHANGES 점유 충돌)와 참조 버전의 최신성이다.
+     */
+    private RuleOutcome reevaluateRules(ValidationRow v) {
+        TaskPlanRevision plan = revisions.findByIdAndTaskId(v.planRevisionId(), v.taskId()).orElseThrow();
+        List<TaskPlanDesignRef> refs = designRefs.findByPlanRevisionId(v.planRevisionId());
+        List<Map<String, Object>> relatedOpen = validations.openTasksSharingItems(v.projectId(), v.taskId(), v.planRevisionId());
+        return rules.evaluate(v.projectId(), plan, refs, relatedOpen);
+    }
+
     /**
      * 접수 때 고정한 분석 입력이 지금도 그대로인가. 바뀌었으면 무효화 사유:
      * <ul>
@@ -299,7 +354,8 @@ public class AnalysisResultApplier {
      *   <li>RELATED_PLAN_CHANGED — 같은 설계 항목을 보는 열린 다른 작업과 그 현재 계획(작업 → 계획 리비전)이 접수 때 고정한
      *       관련 작업(validation_task_ref)과 다름. 관련 작업의 계획이 바뀐 경우, 새 관련 작업이 생긴 경우, 관련 작업이 닫힌 경우 모두</li>
      * </ul>
-     * 설계 발행으로 참조 버전이 바뀐 경우는 설계 발행 수신(-163)이 검증을 STALE 로 바꾸고, 그 전까지는 시작 관문(G2)이 막는다.
+     * 관련 작업의 상태만 바뀐 경우(점유 충돌)와 설계 발행으로 참조 버전이 낡은 경우는 여기가 아니라 결과 반영의 규칙 재판정
+     * ({@link #reevaluateRules})이 잡는다. 설계 발행 수신(-163)은 끝난 검증을 STALE 로 바꾸고, 그 전까지는 시작 관문(G2)이 막는다.
      * 워커가 AI 를 부르기 전에도 같은 확인을 해 버릴 결과로 모델을 부르지 않는다.
      */
     public Optional<String> inputChange(ValidationRow v) {

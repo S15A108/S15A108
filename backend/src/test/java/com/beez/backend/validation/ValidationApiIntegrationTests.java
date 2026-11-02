@@ -3,6 +3,7 @@ package com.beez.backend.validation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +28,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import javax.sql.DataSource;
@@ -36,6 +41,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -57,7 +63,8 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     @Autowired
     ValidationMcpService mcp;
 
-    @Autowired
+    /** 실제 저장소를 그대로 쓰되, 경합 순서를 고정하는 시험에서 관련 작업 조회 직후 멈출 수 있게 감싼다 */
+    @MockitoSpyBean
     ValidationRepository repository;
 
     @Autowired
@@ -633,11 +640,96 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("DISCARDED");
         assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("CANCELLED");
         assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isZero();
+        // 판정은 버려도 실제로 모델을 부른 사용량·모델은 남긴다 (비용 집계)
+        assertThat(column("validation_run", "analyzer_version", id(id, "validation_run"))).isEqualTo("test-model");
+        assertThat(api.jdbc.sql("select summary->>'model' from validation where id = :v").param("v", id).query(String.class).single())
+                .isEqualTo("test-model");
+        assertThat(api.jdbc.sql("select summary->'usage'->0->>'input_tokens' from validation where id = :v").param("v", id)
+                .query(String.class).single()).isEqualTo("10");
+        assertThat(column("validation", "summary", id)).doesNotContain("partial_findings");
         // 그 검증으로는 A 를 시작할 수 없다
         HttpResponse<String> start = api.post(tasksPath() + "/" + a[0] + "/state-events",
                 "{\"event\":\"START\",\"plan_revision_id\":\"" + a[1] + "\",\"expected_lock_version\":" + a[2]
                         + ",\"validation_id\":\"" + id + "\"}", member);
         assertThat(start.statusCode()).as(start.body()).isEqualTo(409);
+    }
+
+    @Test
+    void relatedTaskStartedDuringAnalysis_isNeedsReview_byRulesReevaluatedAtApply() throws Exception {
+        // B 는 같은 항목을 CHANGES 하지만 아직 READY 라 접수 때는 점유 충돌이 아니다 → 의미 분석으로 넘어간다
+        long[] b = createTask(planJson("B", api.changesRef("API-01"), false, null), member);
+        long[] a = createTask(planJson("A", api.changesRef("API-01"), false, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+        doAnswer(inv -> {
+            // AI 가 도는 동안 B 가 시작한다 — 계획 리비전은 그대로고 상태만 READY → IN_PROGRESS
+            long passB = api.passValidation(b[0]);
+            assertThat(start(b, passB, member).statusCode()).isEqualTo(200);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+        worker.runOnce();
+
+        // 관련 작업의 계획은 같아도 지금 상태로 규칙을 다시 판정해 점유 충돌(NEEDS_REVIEW)로 끝낸다. PASS 로 남기지 않는다
+        JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(v.get("status").asText()).isEqualTo("NEEDS_REVIEW");
+        assertThat(v.get("findings")).hasSize(1);
+        assertThat(v.get("findings").get(0).get("source").asText()).isEqualTo("RULE");
+        assertThat(v.get("findings").get(0).get("kind").asText()).isEqualTo("CONFLICT");
+        assertThat(v.get("findings").get(0).get("related_task_id").asLong()).isEqualTo(b[0]);
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("OK");
+        assertThat(start(a, id, member).statusCode()).isEqualTo(409);
+    }
+
+    @Test
+    void resultApply_holdsProjectLock_soRelatedPlanChangeCannotSlipInBetweenRecheckAndSave() throws Exception {
+        // A 의 검증에 B 의 지금 계획이 관련 계획으로 들어간다
+        long[] b = createTask(planJson("B", api.implementsRef("API-01"), true, null), member);
+        long[] a = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+
+        // 결과 반영 트랜잭션 안에서 관련 작업을 다시 조회한 직후 멈춘다 (AI 호출 뒤 첫 조회만)
+        AtomicBoolean pauseNext = new AtomicBoolean(false);
+        CountDownLatch paused = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        doAnswer(inv -> {
+            Object rows = inv.callRealMethod();
+            if (pauseNext.compareAndSet(true, false)) {
+                paused.countDown();
+                resume.await(10, TimeUnit.SECONDS);
+            }
+            return rows;
+        }).when(repository).openTasksSharingItems(anyLong(), anyLong(), anyLong());
+        doAnswer(inv -> {
+            pauseNext.set(true);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+
+        CompletableFuture<Boolean> applying = CompletableFuture.supplyAsync(() -> worker.runOnce());
+        assertThat(paused.await(10, TimeUnit.SECONDS)).isTrue();
+
+        // 그 사이 B 의 계획을 바꾸려는 요청은 프로젝트 잠금에 막혀 A 의 반영이 끝날 때까지 들어오지 못한다
+        String plan = api.planJson("B2", api.implementsRef("API-01"), "[]").trim();
+        String revision = plan.substring(0, plan.lastIndexOf('}'))
+                + ",\n  \"expected_revision_no\": 1,\n  \"expected_lock_version\": " + b[2] + "\n}";
+        CompletableFuture<HttpResponse<String>> changingB = CompletableFuture.supplyAsync(() -> {
+            try {
+                return api.post(tasksPath() + "/" + b[0] + "/plan-revisions", revision, member);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        Thread.sleep(1500);
+        assertThat(changingB.isDone()).as("관련 작업의 계획 변경이 결과 반영 중간에 끼어들면 안 된다").isFalse();
+        assertThat(column("validation", "status", id)).isEqualTo("RUNNING");
+
+        resume.countDown();
+        assertThat(applying.get(10, TimeUnit.SECONDS)).isTrue();
+        HttpResponse<String> changed = changingB.get(10, TimeUnit.SECONDS);
+        assertThat(changed.statusCode()).as(changed.body()).isEqualTo(201);
+
+        // 반영이 먼저 끝났으므로 A 는 접수 때 고정한 B 의 계획 그대로 PASS 고, B 의 변경은 그 뒤에 들어갔다
+        // (반대로 B 가 먼저 들어가면 반영이 입력 변경을 보고 STALE 로 닫는다 — relatedTaskPlanChangedDuringAnalysis_*)
+        assertThat(column("validation", "status", id)).isEqualTo("PASS");
+        assertThat(count("select count(*) from task_plan_revision where task_id = " + b[0])).isEqualTo(2);
     }
 
     @Test

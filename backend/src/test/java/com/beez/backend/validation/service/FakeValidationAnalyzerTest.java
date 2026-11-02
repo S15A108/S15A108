@@ -3,6 +3,8 @@ package com.beez.backend.validation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import com.beez.backend.task.repository.TaskPlanDesignRefRepository;
+import com.beez.backend.task.repository.TaskPlanRevisionRepository;
 import com.beez.backend.task.service.ProjectDesignLookup;
 import com.beez.backend.validation.repository.ValidationRepository;
 import java.util.LinkedHashMap;
@@ -42,7 +44,8 @@ class FakeValidationAnalyzerTest {
         assertThat(response.get("usage")).isEqualTo(List.of());     // 실제 모델 호출이 없으니 사용량도 없다
 
         AnalysisResultApplier applier = new AnalysisResultApplier(mock(ValidationRepository.class),
-                mock(ValidationResponses.class), mock(ProjectDesignLookup.class));
+                mock(ValidationResponses.class), mock(ProjectDesignLookup.class), mock(ValidationRules.class),
+                mock(TaskPlanRevisionRepository.class), mock(TaskPlanDesignRefRepository.class));
         assertThat(applier.contractViolation(request, response)).isNull();
     }
 }

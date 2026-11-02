@@ -62,8 +62,14 @@ public class ValidationRepository {
                 .param("v", validationId).param("p", projectId).query(ValidationRepository::validation).optional();
     }
 
+    /** 검증이 속한 프로젝트. 잠그지 않는 읽기 — 워커가 프로젝트 행을 잠그기 전에 어느 프로젝트인지 알아내는 데 쓴다 */
+    public Optional<Long> projectIdOf(long validationId) {
+        return jdbc.sql("select t.project_id from validation v join task t on t.id = v.task_id where v.id = :v")
+                .param("v", validationId).query(Long.class).optional();
+    }
+
     /**
-     * 워커가 반영 직전에 잠그고 읽는다. 작업 취소(ValidationStatusLookup.invalidate)가 job → validation 순서로 갱신하므로
+     * 워커가 반영 직전에 잠그고 읽는다. 프로젝트 행은 호출자가 먼저 잠근다 (계획 변경·상태 보고와 같은 project → task 순서). 작업 취소(ValidationStatusLookup.invalidate)가 job → validation 순서로 갱신하므로
      * 여기서도 job 행을 먼저 잠가 순서를 맞춘다 (교착 방지).
      */
     public Optional<ValidationRow> lock(long validationId) {
@@ -96,11 +102,20 @@ public class ValidationRepository {
      * RUNNING 일 때만 바꾼다 — 이미 다른 경로가 STALE·ERROR 로 바꿨으면 덮어쓰지 않는다
      */
     public void markStale(long validationId, String reason) {
+        markStale(validationId, reason, Map.of());
+    }
+
+    /**
+     * 무효화 + 요약에 남길 값(모델을 이미 부른 뒤 버리는 결과의 모델·사용량 등). 판정은 버려도 실제 호출의 사용량은
+     * 비용 집계(-168)에 쓰도록 summary 에 더한다. 비어 있으면 요약은 그대로
+     */
+    public void markStale(long validationId, String reason, Map<String, Object> summaryAdditions) {
         jdbc.sql("""
-                        update validation set status = 'STALE', stale_reason = :reason, updated_at = now()
+                        update validation set status = 'STALE', stale_reason = :reason,
+                               summary = coalesce(summary, '{}'::jsonb) || cast(:add as jsonb), updated_at = now()
                          where id = :v and status = 'RUNNING'
                         """)
-                .param("reason", reason).param("v", validationId).update();
+                .param("reason", reason).param("add", toJson(summaryAdditions)).param("v", validationId).update();
     }
 
     /** 작업의 현재 계획 리비전 */
