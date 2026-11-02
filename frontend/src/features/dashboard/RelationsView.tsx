@@ -62,7 +62,8 @@ export function RelationsView({ projectId }: { projectId: string }) {
       ? openPane('changes', id)
       : type === 'DESIGN_ITEM'
         ? openPane('planning')
-        : openPane('tasks', selected)
+        : // 선행 작업 같은 작업 대상은 누른 작업을, 검증은 지금 고른 작업을 연다.
+          openPane('tasks', type === 'TASK' ? id : selected)
   return (
     <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
       <div className="grid content-start gap-2">
