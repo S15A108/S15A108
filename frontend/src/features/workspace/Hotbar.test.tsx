@@ -61,3 +61,22 @@ it('업무 창이 열려 있으면 그 창의 번호 키로 닫고, 다른 번�
   await userEvent.keyboard('4')
   expect(useWorkspaceStore.getState().pane).toBeNull()
 })
+
+// D안(캔버스 v437~438): 칸을 하나씩 떼어 두고 비비를 가운데(3번과 4번 사이)에 둔다.
+it('단축 바는 비비를 가운데에 두고 칸마다 이름을 보인다', () => {
+  render(<Hotbar locked={[]} badges={{}} />)
+  expect(
+    screen
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label')),
+  ).toEqual([
+    '공용 문서함',
+    '변경 제안',
+    '회의실',
+    '비비와 대화',
+    '작업 현황',
+    '설계 관계',
+    '대시보드',
+  ])
+  expect(screen.getByText('작업 현황')).toBeVisible()
+})

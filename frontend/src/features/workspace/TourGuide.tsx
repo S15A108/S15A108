@@ -24,7 +24,7 @@ const steps: { target: Target; title: string; body: string }[] = [
   {
     target: 'hotbar',
     title: '단축 바',
-    body: '일할 때 여는 메뉴예요. 공용 문서함부터 대시보드까지 6개가 있고 숫자 키 1~6으로도 열 수 있어요. 바 오른쪽 둥근 버튼은 비비예요. 처리할 일이 생기면 칸에 빨간 숫자가 붙어요. 팀 관리와 에이전트 연결은 설정에 있어요.',
+    body: '일할 때 여는 메뉴예요. 공용 문서함부터 대시보드까지 6개가 있고 숫자 키 1~6으로도 열 수 있어요. 가운데 둥근 버튼은 비비예요. 처리할 일이 생기면 칸에 빨간 숫자가 붙어요. 팀 관리와 에이전트 연결은 설정에 있어요.',
   },
   {
     target: 'todo',
@@ -165,13 +165,14 @@ function bubbleOf(target: Target, area: Area | undefined) {
         arrow: { right: 46, top: -7 },
       }
     case 'bibi':
-      // 비비: 바 오른쪽 둥근 버튼 위. 말풍선 오른쪽 끝을 버튼에 맞추고 꼬리는 버튼 가운데.
+      // 비비: 단축 바 가운데 둥근 버튼(D안) 바로 위. 말풍선과 꼬리를 버튼 가운데에 맞춘다.
       return {
         box: {
-          right: width - area.left - area.width,
+          left: area.left + area.width / 2,
           bottom: height - area.top + 12,
+          transform: 'translateX(-50%)',
         },
-        arrow: { right: area.width / 2 - 7, bottom: -7 },
+        arrow: { left: '50%', bottom: -7, marginLeft: -7 },
       }
     default:
       // 단축 바: 가운데 위.

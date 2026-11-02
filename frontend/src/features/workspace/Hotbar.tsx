@@ -22,7 +22,8 @@ const hotbarSlots = [
   { pane: 'dashboard', label: '대시보드', icon: ChartNoAxesCombined },
 ] satisfies { pane: WorkspacePane; label: string; icon: typeof FileText }[]
 
-// 단축 바 B안(캔버스 v433 알약 바): 한 줄 알약에 키캡·아이콘·이름, 비비는 바 오른쪽 둥근 버튼(Enter).
+// 단축 바 D안(캔버스 v437~438 이름 보이는 얇은 핫바): 높이 44 바에 칸을 하나씩 떼어 숫자 키캡·아이콘·이름을 늘 보이고,
+// 비비는 가운데 46px 둥근 버튼(Enter). 배지는 칸 오른쪽 위.
 export function Hotbar({
   locked,
   badges,
@@ -76,9 +77,11 @@ export function Hotbar({
         title={isLocked ? lockedReason : undefined}
         onClick={() => !isLocked && openPane(isOpen ? null : item.pane)}
         className={cn(
-          'relative inline-flex h-[34px] items-center gap-1.5 rounded-full pr-[11px] pl-[7px] text-[13px] font-semibold whitespace-nowrap text-[#3f3a2e] transition-colors hover:bg-muted',
-          isOpen && 'bg-foreground font-bold text-white hover:bg-foreground',
-          isLocked && 'cursor-not-allowed text-[#bdb8ac] hover:bg-transparent',
+          'relative inline-flex h-[34px] items-center gap-1.5 rounded-[10px] bg-[#f5f2ea] pr-2.5 pl-1.5 text-[12.5px] font-semibold whitespace-nowrap text-[#3f3a2e] shadow-[inset_0_0_0_1px_rgba(44,41,31,0.07)] transition-colors hover:bg-[#ece7da]',
+          isOpen &&
+            'bg-foreground font-bold text-white shadow-[inset_0_0_0_1px_var(--foreground)] hover:bg-foreground',
+          isLocked &&
+            'cursor-not-allowed bg-[#f8f6f1] text-[#bdb8ac] shadow-[inset_0_0_0_1px_rgba(44,41,31,0.05)] hover:bg-[#f8f6f1]',
           highlight === item.pane &&
             'bg-[#fff3c4] shadow-[0_0_0_2px_var(--primary)] hover:bg-[#fff3c4]',
         )}
@@ -86,8 +89,8 @@ export function Hotbar({
         <span
           aria-hidden="true"
           className={cn(
-            'inline-grid h-4 min-w-4 place-items-center rounded-[5px] border border-[#e2ddcf] text-[9.5px] leading-none font-bold text-[#8a8478]',
-            isOpen && 'border-white/35 text-white/85',
+            'inline-grid h-4 min-w-4 place-items-center rounded-[5px] border border-[#e2ddcf] bg-white text-[9.5px] leading-none font-bold text-[#8a8478]',
+            isOpen && 'border-white/35 bg-transparent text-white/85',
             isLocked && 'border-[#e7e3d6] text-[#cfcabd]',
           )}
         >
@@ -114,7 +117,7 @@ export function Hotbar({
         {badge ? (
           <span
             aria-label={`새 항목 ${badge}개`}
-            className="absolute -top-[9px] -right-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#e7000b] px-[5px] text-[11px] font-bold text-white shadow-[0_0_0_2px_#fff]"
+            className="absolute -top-2 -right-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#e7000b] px-[5px] text-[11px] font-bold text-white shadow-[0_0_0_2px_#fff]"
           >
             {badge}
           </span>
@@ -125,18 +128,15 @@ export function Hotbar({
   return (
     <nav
       aria-label="프로젝트 메뉴 단축 바"
+      data-tour="hotbar"
       className={cn(
-        'pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-4',
+        'pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex h-11 -translate-x-1/2 items-center gap-1 rounded-[14px] border border-[rgba(44,41,31,0.08)] bg-white/92 px-[5px] shadow-[0_18px_32px_-16px_rgba(44,41,31,0.35),0_2px_6px_rgba(44,41,31,0.06)] backdrop-blur-[8px]',
         // 업무 창이 열려도 단축 바는 어두운 막 위에 밝게 남는다.
         pane && pane !== 'settings' && 'z-[60]',
       )}
     >
-      <div
-        data-tour="hotbar"
-        className="flex h-11 items-center gap-0.5 rounded-full border border-[rgba(44,41,31,0.08)] bg-white/94 px-[5px] shadow-[0_18px_32px_-16px_rgba(44,41,31,0.35),0_2px_6px_rgba(44,41,31,0.06)] backdrop-blur-[8px]"
-      >
-        {hotbarSlots.map(slot)}
-      </div>
+      {hotbarSlots.slice(0, 3).map((item, index) => slot(item, index))}
+      {/* 비비는 가운데 46px 둥근 버튼. 칸 높이(34px) 자리만 차지하고 위아래로 넘친다. */}
       <button
         type="button"
         aria-label="비비와 대화"
@@ -144,18 +144,26 @@ export function Hotbar({
         data-tour="bibi"
         aria-pressed={pane === 'chat'}
         onClick={() => openPane(pane === 'chat' ? null : 'chat')}
-        className="relative block rounded-full"
+        className="relative mx-[3px] block h-[34px] w-[58px] rounded-full"
       >
-        <span className="block size-14 rounded-full shadow-[0_0_0_3px_#fff,0_0_0_5px_var(--primary),0_14px_22px_-10px_rgba(44,41,31,0.55)]">
+        <span
+          className={cn(
+            'absolute top-1/2 left-1/2 block size-[46px] -translate-1/2 overflow-hidden rounded-full shadow-[0_0_0_3px_#fff,0_0_0_5px_var(--primary),0_14px_22px_-10px_rgba(44,41,31,0.55)]',
+            // 비비 대화가 열려 있으면 열린 칸처럼 테두리를 검정으로(PNL-12-v2-bibi-hotbar).
+            pane === 'chat' &&
+              'shadow-[0_0_0_3px_#fff,0_0_0_5px_var(--foreground),0_14px_22px_-10px_rgba(44,41,31,0.55)]',
+          )}
+        >
           <BibiFace className="size-full" />
         </span>
         <span
           aria-hidden="true"
-          className="absolute -bottom-2.5 left-1/2 inline-grid h-[15px] -translate-x-1/2 place-items-center rounded-[4px] border border-[#e2ddcf] bg-white px-1 text-[8.5px] leading-none font-bold text-[#8a8478]"
+          className="absolute -bottom-[13px] left-1/2 inline-grid h-[15px] -translate-x-1/2 place-items-center rounded-[4px] border border-[#e2ddcf] bg-white px-1 text-[8.5px] leading-none font-bold text-[#8a8478]"
         >
           Enter
         </span>
       </button>
+      {hotbarSlots.slice(3).map((item, index) => slot(item, index + 3))}
     </nav>
   )
 }
