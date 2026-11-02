@@ -314,3 +314,83 @@ it('검증이 포함 범위를 더 달라고 하면 계획 수정에서 그 칸�
     screen.getAllByText('검증에서 이 칸이 더 필요하다고 했어요.'),
   ).toHaveLength(2)
 })
+
+// PR #72 리뷰 1: 계획 수정은 기존 design_refs·unlinked 객체에서 시작해, 제목만 고쳐도 제안한 method·path와 다른 필드를 지킨다.
+it('계획을 고쳐도 기존 변경 제안 참조와 연결하지 않은 항목의 다른 필드를 그대로 보낸다', async () => {
+  const proposed = {
+    description: '주문을 만든다.',
+    method: 'POST',
+    path: '/v2/orders',
+  }
+  const unlinked = { description: '외부 결제 연동', reason: '다음 단계' }
+  task = {
+    ...task,
+    current_plan_revision: {
+      ...task.current_plan_revision,
+      plan: {
+        ...task.current_plan_revision.plan,
+        no_contract_change: false,
+        design_refs: [
+          {
+            design_item_id: '301',
+            design_item_version_id: '311',
+            relation: 'CHANGES',
+            proposed_content: proposed,
+          },
+        ],
+        unlinked: [unlinked],
+      },
+    },
+  }
+  vi.spyOn(planningApi, 'items').mockResolvedValue({
+    items: [
+      {
+        id: '311',
+        design_item_id: '301',
+        key: 'API-001',
+        kind: 'API_CONTRACT',
+        version_no: 1,
+        status: 'APPROVED',
+        schema_version: 1,
+        content: {
+          description: '주문을 만든다.',
+          method: 'POST',
+          path: '/v1/orders',
+        },
+      },
+    ],
+    has_more: false,
+  } as never)
+  const save = vi
+    .spyOn(tasksApi, 'savePlan')
+    .mockImplementation(async () => task)
+  show(false)
+  await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
+  await userEvent.click(
+    await screen.findByRole('menuitem', { name: '계획 수정' }),
+  )
+  const title = await screen.findByLabelText('작업 제목')
+  await userEvent.type(title, ' (수정)')
+  fireEvent.click(screen.getByRole('button', { name: '계획 저장' }))
+  await waitFor(() => expect(save).toHaveBeenCalled())
+  expect(save.mock.calls[0][2]).toMatchObject({
+    title: '사용자 프로필 구현 (수정)',
+    design_refs: [{ relation: 'CHANGES', proposed_content: proposed }],
+    unlinked: [unlinked],
+  })
+})
+
+// PR #72 리뷰 5: 접근 방법은 서버 필수값(@NotBlank)이라 기본 칸에 두고 비우면 막는다.
+it('계획 수정에서 접근 방법을 비우면 저장하지 않고 칸에 알린다', async () => {
+  const save = vi.spyOn(tasksApi, 'savePlan')
+  show(false)
+  await userEvent.click(await screen.findByRole('button', { name: '더 보기' }))
+  await userEvent.click(
+    await screen.findByRole('menuitem', { name: '계획 수정' }),
+  )
+  const approach = await screen.findByLabelText('어떻게 진행하나요?')
+  await userEvent.clear(approach)
+  fireEvent.click(screen.getByRole('button', { name: '계획 저장' }))
+  expect(await screen.findByText('내용을 입력해 주세요.')).toBeInTheDocument()
+  expect(save).not.toHaveBeenCalled()
+})

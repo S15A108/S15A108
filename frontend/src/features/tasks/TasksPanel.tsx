@@ -1139,13 +1139,14 @@ export function TasksPanel({ projectId, isLeader }: Props) {
   )
 }
 
-// 필수는 제목·목표·완료 기준. 접은 칸은 비워 두면 기본값([], '', false)으로 보낸다(명세 TaskPlanInput은 그대로).
+// 필수는 제목·목표·접근 방법·완료 기준(백엔드 TaskPlanInput·AddPlanRevisionRequest의 approach는 @NotBlank).
+// 접은 칸은 비워 두면 기본값([], false)으로 보낸다.
 const editorSchema = z.object({
   title: z.string().trim().min(1),
   goal: z.string().trim().min(1),
   included_scope: z.string(),
   excluded_scope: z.string(),
-  approach: z.string(),
+  approach: z.string().trim().min(1),
   completion_criteria: z.string().trim().min(1),
   dependency_task_ids: idSchema.array(),
   context_packet_id: z.string(),
@@ -1217,7 +1218,6 @@ function PlanDialog({
       (!!plan &&
         (plan.included_scope.length > 0 ||
           plan.excluded_scope.length > 0 ||
-          !!plan.approach.trim() ||
           plan.dependency_task_ids.length > 0 ||
           plan.unlinked.length > 0 ||
           plan.no_contract_change)),
@@ -1277,7 +1277,9 @@ function PlanDialog({
       {/* 필수 표시는 라벨 밖에 둔다(L4). 라벨 이름은 그대로 남아 화면 읽기 프로그램에 같은 이름으로 읽힌다. */}
       <span className="flex gap-1">
         <Label htmlFor={`plan-${name}`}>{label}</Label>
-        {['title', 'goal', 'completion_criteria'].includes(name) && (
+        {['title', 'goal', 'approach', 'completion_criteria'].includes(
+          name,
+        ) && (
           <span aria-hidden="true" className="text-sm text-destructive">
             *
           </span>
@@ -1316,7 +1318,7 @@ function PlanDialog({
       description={
         task
           ? `r${task.current_plan_revision.revision_no}은 그대로 남고, 등록하면 r${task.current_plan_revision.revision_no + 1}로 계획 검증을 다시 해요.`
-          : '제목, 목표, 관련 설계, 완료 기준만 적으면 등록돼요. 등록하면 바로 계획 검증을 할 수 있어요.'
+          : '제목, 목표, 관련 설계, 완료 기준, 접근 방법만 적으면 등록돼요. 등록하면 바로 계획 검증을 할 수 있어요.'
       }
       busy={isSubmitting}
       onClose={onClose}
@@ -1335,26 +1337,41 @@ function PlanDialog({
               excluded_scope: lines(values.excluded_scope),
               completion_criteria: lines(values.completion_criteria),
               context_packet_id: values.context_packet_id || undefined,
-              // API 미정(H2): 줄마다 쓴 내용을 description 하나짜리 구조로 보낸다.
-              unlinked: lines(values.unlinked).map((description) => ({
-                description,
-              })),
-              design_refs: values.refs.map((reference) => ({
-                design_item_id: reference.design_item_id,
-                design_item_version_id: reference.design_item_version_id,
-                relation: reference.relation,
-                ...(reference.relation === 'CHANGES'
-                  ? {
-                      proposed_content: {
-                        ...items.find(
-                          (item) =>
-                            item.design_item_id === reference.design_item_id,
-                        )?.content,
+              // 계획 수정은 기존 계획의 객체에서 시작해 고친 것만 바꾼다(PR #72 리뷰). 줄이 그대로면 원래 unlinked
+              // 객체를 두고, 새 줄만 description 하나짜리 구조로 보낸다(API 미정 H2).
+              unlinked: lines(values.unlinked).map(
+                (description) =>
+                  plan?.unlinked.find(
+                    (item) => describeContent(item) === description,
+                  ) ?? { description },
+              ),
+              design_refs: values.refs.map((reference) => {
+                const before = plan?.design_refs.find(
+                  (item) => item.design_item_id === reference.design_item_id,
+                )?.proposed_content
+                // CHANGES의 제안 내용: 원래 제안이 있으면 그 객체에서 시작해(제안한 method·path 등 유지) 문장을 고쳤을
+                // 때만 description을 바꾸고, 새로 CHANGES가 된 참조만 승인본 content에서 시작한다.
+                const proposed =
+                  before &&
+                  describeContent(before) === reference.proposed_content
+                    ? before
+                    : {
+                        ...(before ??
+                          items.find(
+                            (item) =>
+                              item.design_item_id === reference.design_item_id,
+                          )?.content),
                         description: reference.proposed_content,
-                      },
-                    }
-                  : {}),
-              })),
+                      }
+                return {
+                  design_item_id: reference.design_item_id,
+                  design_item_version_id: reference.design_item_version_id,
+                  relation: reference.relation,
+                  ...(reference.relation === 'CHANGES'
+                    ? { proposed_content: proposed }
+                    : {}),
+                }
+              }),
             })
             await onSubmit(input)
           } catch (cause) {
@@ -1496,6 +1513,8 @@ function PlanDialog({
           )}
         </fieldset>
         {field('completion_criteria', '완료 기준 · 한 줄에 하나씩')}
+        {/* 접근 방법은 서버 필수값이라 기본 칸에 둔다(PR #72 리뷰, 사용자가 줄인 4칸 구성에서 1칸 늘어남). */}
+        {field('approach', '어떻게 진행하나요?')}
         <details
           className="rounded-lg border p-4 md:col-span-2"
           open={detailsOpen}
@@ -1507,7 +1526,6 @@ function PlanDialog({
           <div className="mt-4 space-y-5">
             {field('included_scope', '포함 범위 · 한 줄에 하나씩')}
             {field('excluded_scope', '제외 범위 · 한 줄에 하나씩')}
-            {field('approach', '어떻게 진행하나요?')}
             <div className={cn('space-y-2', flagged('dependency_task_ids'))}>
               <fieldset className="space-y-2">
                 <legend className="mb-2 text-sm font-medium">
