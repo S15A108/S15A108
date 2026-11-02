@@ -23,10 +23,11 @@ public class AiClient {
 
     public AiClient(BeezProperties props) {
         BeezProperties.Ai ai = props.ai();
-        // Uvicorn's HTTP/1.1 server does not support the JDK client's cleartext
-        // HTTP/2 upgrade (h2c). Keep internal BE→AI traffic on HTTP/1.1.
-        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
-                .connectTimeout(ai.connectTimeout()).build();
+        // Uvicorn uses HTTP/1.1; avoid h2c upgrades on streamed request bodies.
+        HttpClient http = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(ai.connectTimeout())
+                .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(ai.readTimeout());
         this.rest = RestClient.builder()
@@ -67,6 +68,12 @@ public class AiClient {
     @SuppressWarnings("unchecked")
     public java.util.Map<String, Object> validatePlan(java.util.Map<String, Object> input) {
         return rest.post().uri("/v1/validate").body(input).retrieve().body(java.util.Map.class);
+    }
+
+    /** Analyze a proposal; callers must retain the usage envelope and handle failures explicitly. */
+    @SuppressWarnings("unchecked")
+    public java.util.Map<String, Object> changeImpact(java.util.Map<String, Object> input) {
+        return rest.post().uri("/v1/impact").body(input).retrieve().body(java.util.Map.class);
     }
 
     /** BE adapter contract; AI feature implementation belongs to the AI owner. */

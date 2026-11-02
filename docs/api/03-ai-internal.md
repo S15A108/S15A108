@@ -601,6 +601,10 @@ ERROR를 만드는 모든 행의 finding은 `source=MODEL`, `severity=BLOCKING`�
 담당: BE: 오서현 / 작업 조회: 변준성 / AI: 양지훈 / FE: —  
 상태: 내부 계약 초안
 
+**#188 구현 제안 — BE 계약 협의 필요:** 기존 필드를 유지하면서 요청의 변경 사유 `reason`, 결과의 근거 상태 `result.evidence_status`, 후보의 `validation_id`를 추가한다. `validation_id`는 전달된 작업의 검증 ID만 사용할 수 있다. 근거 상태는 제공된 입력에 대한 평가이며 관련 작업이나 관계 전체가 검색됐다는 보장은 아니다. AI 결과와 BE의 규칙 후보·관계 경로는 별도로 보존한다. #197 저장 및 외부 API 형식은 이 제안만으로 확정하지 않는다.
+
+#195는 변경 제안의 불변 리비전 스냅샷과 현재 항목 projection에 `schema_version`을 보존한다. #188 내부 구현 초안은 현재 제출 리비전의 스냅샷·리비전 번호·해시를 확인하고 실제 CREATE·UPDATE 입력에 그 값을 전달한다. 스키마 버전이나 변경 내용이 없는 제안은 값을 추측하지 않고 AI 호출 없이 미평가로 남긴다. 현재 AI-A03에는 문서 변경 본문을 전달하는 확정 계약이 없으므로 문서만 변경하거나 설계와 문서를 함께 변경한 제안도 미평가이며 영향 0건이 아니다. #188 초안의 AI 요청에 추가하는 `proposal_revision`·`proposal_snapshot_hash`는 내부 추적 정보로서 #197 저장·공개 계약의 확정을 뜻하지 않는다. 구조화 출력 `json_schema`는 공급자가 지원할 때 선택하며 기본값은 `json_object`다.
+
 #### 인증
 
 `INTERNAL_SERVICE`. 내부 Bearer 토큰으로 인증한다. 외부 사용자 세션이나 에이전트 토큰은 허용하지 않는다.
@@ -628,6 +632,7 @@ ERROR를 만드는 모든 행의 finding은 `source=MODEL`, `severity=BLOCKING`�
 | `project_id` | `ID` | Y | 권한 검사를 완료한 프로젝트 |
 | `request_key` | `string` | Y | backend가 부여한 분석 요청 식별값. LLM별 실제 호출 key의 기준 |
 | `proposal_id` | `ID` | Y | 분석 제안 |
+| `reason` | `string` | N | 변경 제안 사유. #188 제안 필드 |
 | `changes` | [ChangeItem[]](00-common.md#schema-changeitem) | Y | 대상 항목 변경 |
 | `approved_items` | [DesignItemVersion[]](00-common.md#schema-designitemversion) | Y | 관련 승인 설계 |
 | `explicit_dependencies` | [DesignDependency[]](00-common.md#schema-designdependency) | Y | 확정 관계 |
@@ -764,6 +769,8 @@ HTTP `200`.
 | `model` | `string` | N | 실제 모델 호출 시 필수 |
 | `usage` | [Usage[]](00-common.md#schema-usage) | N | 실제 모델 호출 시 필수 |
 
+#188 제안 결과의 `result.evidence_status`는 `SUFFICIENT` 또는 `INSUFFICIENT`다. 승인된 기존 내용·변경안·작업 계획·문서 근거가 부족하면 `INSUFFICIENT`로 표현한다. `candidates`가 비어 있어도 프로젝트 전체에 영향이 없음을 의미하지 않는다. 후보에는 입력된 작업의 검증을 식별하기 위한 `validation_id`가 선택적으로 포함될 수 있다. 기존 `ImpactResult`·`ImpactCandidate` 공통 DTO 반영 및 #197 저장 방법은 담당자 합의가 필요하다.
+
 ```json
 {
   "result": {
@@ -809,6 +816,7 @@ HTTP `200`.
 | --- | --- | --- |
 | 400 | `validation_failed` | 입력 타입·필수 값 오류 |
 | 401 | `invalid_internal_token` | 내부 인증 실패 |
+| 413 | `invalid_ai_input` | #188 제안: 설정된 요청 본문 크기 초과 |
 | 422 | `invalid_ai_input` | 본문 업무 구조 부적합 |
 | 502 | `model_unavailable` | 외부 모델 호출 실패 또는 잘못된 출력 |
 | 504 | `model_timeout` | 모델 시간 초과 |
@@ -1796,21 +1804,23 @@ HTTP `200`.
 | `project_id`, `document_version_id` | 양의 십진 문자열, 최대 19자리 |
 | `request_key` | 1~128자 상관관계 키. 저장 또는 멱등성 보장은 BE 책임 |
 | `kind` | `PLAN`, `REQUIREMENTS`, `API_SPEC`, `ERD` |
-| `media_type` | `text/markdown`만 허용 |
+| `media_type` | `text/markdown` 또는 `text/plain`. 파서 프로필을 정한다 |
 | `content` | 엄격히 UTF-8 디코딩한 원문 문자열. BOM/CRLF 허용 |
 | `content_hash` | 원본 바이트 SHA-256 소문자 hex 64자리. `sha256:` 접두사 허용. BE가 원본과 대조 |
 | `text_hash` | 정규화 텍스트 UTF-8의 SHA-256 소문자 hex 64자리. `sha256:` 접두사 허용. AI가 대조 |
 | `normalization_profile` | `utf8-lf-v1`: 맨 앞 BOM 제거, CRLF/CR을 LF로 변환 |
-| `parser_profile` | 선택. 생략 시 `markdown-v1` |
+| `parser_profile` | 선택. 생략 시 media_type의 프로필(`text/markdown`은 `markdown-v1`, `text/plain`은 `plain-v1`). 명시하면 그 프로필과 같아야 한다 |
 | `chunking_profile_id` | `md-structure-v1` |
 
 추가 필드는 거부한다. 고정 청킹 프로필은 로컬 tiktoken, 청크당 600토큰, 최대 1,024청크이며 heading/table 문맥 보강은 꺼져 있다. 같은 입력·문서 버전·실제 프로필과 파서/청커 버전은 같은 chunk key를 만든다.
+
+파서 프로필은 media_type마다 하나다. `markdown-v1`은 CommonMark + pipe table 구조(제목·목록·표·코드·참조 정의)를 블록으로 나누며 HTML·이미지는 `unsupported_construct`로 전체 실패한다. `plain-v1`은 `.txt` 업로드용 일반 텍스트 프로필이다. 빈 줄로 구분한 문단만 `paragraph` 블록으로 삼고 HTML·이미지·Markdown 문법을 전혀 해석하지 않으므로 `<user>` 같은 태그 문자열도 원문 그대로 색인한다. `excluded_ranges`의 reason은 `blank`뿐이고 `heading_path`·`context_refs`·`diagnostics`는 비어 있으며 문단은 4,000개까지다. `source_spans`·`locator`·`text_hash`·manifest 구조와 청킹 프로필은 두 프로필이 같고 manifest의 `parser_profile`/`parser_version`(`beez-plain/1.0.0`)으로 구분한다. 같은 원문이라도 프로필이 다르면 block/chunk key가 다르다. BE는 `.md`를 `text/markdown`, `.txt`를 `text/plain`으로 보내고 manifest의 `parser_profile`이 보낸 media_type의 프로필과 같은지 검증한다.
 
 성공 응답은 `result`, `origin: "PARSER"`, `usage: []`다. result는 `contract_version: "document-chunks-v1"`, 요청 식별자·text_hash·프로필, `parser_version`, `manifest`, `excluded_ranges`, `diagnostics`, `chunks`를 포함한다. `result.text_hash`는 접두사를 포함해 요청값 그대로 반환하고, 내부 `manifest`의 해시는 접두사 없는 64자리다. manifest에는 실제 전체 청킹 프로필 및 예상 청크 key 목록이 있다. 각 청크에는 `chunk_key`, `chunk_no`, `document_version_id`, `text`, `embedding_text`, `token_count`, `source_spans`, `context_refs`, 표시용 `locator`가 있다.
 
 `source_spans`의 시작·끝은 정규화 문자열의 Unicode code point 0-based, 끝 제외다. span별 `locator`는 1-based 행 양끝 포함이다. Java에서는 UTF-16 인덱스로 변환한 뒤 원문을 자른다. `text`는 span별 원문 조각을 순서대로 결합한 값이다. 청크의 `locator`는 첫 span부터 마지막 span까지의 **표시 범위**이며 전체 행을 결합해 text를 복원하면 안 된다. 한 행 안에서 분할한 청크들은 이 표시 범위가 겹칠 수 있다. `excluded_ranges`는 빈 행, 구분선, 컨테이너 표시 등 청크에 속하지 않는 원문을 명시한다.
 
-`context_refs`는 heading/table header의 위치·해시와 문맥 적용 여부를 제공한다. 인용 근거는 원문 span이며 임베딩에는 `embedding_text`를 사용한다. 요청·응답의 실행 가능한 예시는 [청킹 계약 fixture](examples/document-chunks/)에 있다.
+`context_refs`는 heading/table header의 위치·해시와 문맥 적용 여부를 제공한다. 인용 근거는 원문 span이며 임베딩에는 `embedding_text`를 사용한다. 요청·응답의 실행 가능한 예시는 [청킹 계약 fixture](examples/document-chunks/)에 있다. Markdown은 `request.json`/`response.json`, `<user>` 태그가 든 일반 텍스트는 `plain-request.json`/`plain-response.json`이다.
 
 | HTTP | code | 상황 |
 | --- | --- | --- |
