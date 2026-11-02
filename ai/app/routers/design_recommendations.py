@@ -24,15 +24,20 @@ class RecommendationRoute(APIRoute):
         async def wrapped(request: Request):
             try:
                 return await handler(request)
-            except RequestValidationError:
+            except RequestValidationError as exc:
+                # Structural type/required-field errors are 400; cross-field
+                # business constraints raised by model validators are 422.
+                semantic = any(error["type"] == "value_error" for error in exc.errors())
                 return JSONResponse(
                     {
                         "error": {
-                            "code": "validation_failed",
+                            "code": "invalid_ai_input"
+                            if semantic
+                            else "validation_failed",
                             "message": "Invalid request fields.",
                         }
                     },
-                    status_code=400,
+                    status_code=422 if semantic else 400,
                 )
             except HTTPException as exc:
                 return JSONResponse(
@@ -82,10 +87,9 @@ async def recommend_designs(
     body: RecommendationRequest,
     settings: Annotated[Settings, Depends(get_settings)],
 ):
-    if body.search_status == "NOT_READY":
-        raise HTTPException(503, detail="search_not_ready")
-    if body.search_status == "FAILED":
-        raise HTTPException(502, detail="search_failed")
+    if body.search_status != "READY":
+        # BE knows search readiness and must not send a failed search to AI.
+        raise HTTPException(422, detail="invalid_ai_input")
     prepared = template_result(body)
     if prepared is not None:
         return prepared

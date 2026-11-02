@@ -138,7 +138,7 @@ def test_unmapped_document_is_not_treated_as_zero_result_success(api):
 
 @pytest.mark.parametrize(
     "status, http_status, error",
-    [("NOT_READY", 503, "search_not_ready"), ("FAILED", 502, "search_failed")],
+    [("NOT_READY", 422, "invalid_ai_input"), ("FAILED", 422, "invalid_ai_input")],
 )
 def test_search_errors_are_not_empty_success(api, status, http_status, error):
     client, state = api
@@ -199,7 +199,8 @@ def test_timeout_reports_failure_and_usage(api):
 def test_input_and_auth_rejected_before_provider(api):
     client, state = api
     duplicate = post(client, request_body(candidates=[candidate(), candidate()]))
-    assert duplicate.status_code == 400
+    assert duplicate.status_code == 422
+    assert duplicate.json()["error"]["code"] == "invalid_ai_input"
     unapproved = candidate()
     unapproved["design_item_version"]["status"] = "DRAFT"
     assert post(client, request_body(candidates=[unapproved])).status_code == 400
@@ -418,7 +419,7 @@ def test_be_omissions_are_preserved_and_false_verified_location_rejected(api):
     assert response.json()["result"]["status"] == "INSUFFICIENT"
     invalid = candidate()
     invalid["design_item_version"]["source"]["location"] = "  "
-    assert post(client, request_body(candidates=[invalid])).status_code == 400
+    assert post(client, request_body(candidates=[invalid])).status_code == 422
     assert len(state["calls"]) == 1
 
 
@@ -460,7 +461,7 @@ def test_same_document_version_association_must_match_saved_source(api):
             "association": "SAME_DOCUMENT_VERSION",
         }
     ]
-    assert post(client, request_body(candidates=[item])).status_code == 400
+    assert post(client, request_body(candidates=[item])).status_code == 422
     assert not state["calls"]
 
 
@@ -479,6 +480,79 @@ def test_model_rejecting_supplied_candidates_is_not_empty_search(api):
     assert response.status_code == 200
     assert response.json()["result"]["status"] == "INSUFFICIENT"
     assert "NO_RECOMMENDATIONS" in response.json()["result"]["incomplete_reasons"]
+    assert (
+        response.json()["result"]["follow_up"]
+        == "요청 조건을 보완하거나 변경해 다시 시도해 주세요."
+    )
+
+
+def test_documents_found_without_candidates_or_explanation_is_invalid(api):
+    client, state = api
+    response = post(client, request_body(candidates=[]))
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_ai_input"
+    assert not state["calls"]
+
+
+def test_unexamined_count_is_unknown_when_truncated_and_reasons_match(api):
+    client, _ = api
+    request = request_body(
+        search_truncated=True,
+        omissions={
+            "unexamined_scope": True,
+            "unexamined_count": 4,
+        },
+    )
+    result = post(client, request).json()["result"]
+    assert result["omissions"]["unexamined_count"] is None
+    assert result["omissions"]["unexamined_scope"] is True
+    assert "SEARCH_TRUNCATED" in result["incomplete_reasons"]
+    assert "UNEXAMINED_SCOPE" in result["incomplete_reasons"]
+
+    # The AI also marks an unseen scope when only search_truncated was set.
+    result = post(client, request_body(search_truncated=True)).json()["result"]
+    assert result["omissions"]["unexamined_scope"] is True
+    assert "UNEXAMINED_SCOPE" in result["incomplete_reasons"]
+
+
+def test_known_total_unexamined_count_survives_only_without_truncation(api):
+    client, _ = api
+    response = post(
+        client,
+        request_body(
+            omissions={
+                "unexamined_scope": True,
+                "unexamined_count": 4,
+            }
+        ),
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["omissions"]["unexamined_count"] == 4
+    assert "UNEXAMINED_SCOPE" in response.json()["result"]["incomplete_reasons"]
+    invalid = post(
+        client,
+        request_body(
+            omissions={
+                "unexamined_scope": False,
+                "unexamined_count": 4,
+            }
+        ),
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_ai_input"
+
+
+def test_document_kind_contract_and_semantic_vs_format_error(api):
+    client, state = api
+    bad_kind = candidate()
+    bad_kind["design_item_version"]["kind"] = "UNKNOWN_KIND"
+    response = post(client, request_body(candidates=[bad_kind]))
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_failed"
+    search_failed_with_candidates = post(client, request_body(search_status="FAILED"))
+    assert search_failed_with_candidates.status_code == 422
+    assert search_failed_with_candidates.json()["error"]["code"] == "invalid_ai_input"
+    assert not state["calls"]
 
 
 def test_documented_request_and_response_match_implemented_contract(api):

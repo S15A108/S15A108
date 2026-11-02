@@ -60,7 +60,7 @@ def _prepare(body: RecommendationRequest) -> tuple[dict, list, dict]:
         reasons.append("SEARCH_OBSERVATION_UNKNOWN")
     if omitted:
         reasons.append("CANDIDATES_OMITTED")
-    if body.omissions.unexamined_scope:
+    if body.omissions.unexamined_scope or body.search_truncated:
         reasons.append("UNEXAMINED_SCOPE")
     for candidate in body.candidates:
         item = candidate.design_item_version
@@ -92,7 +92,11 @@ def _prepare(body: RecommendationRequest) -> tuple[dict, list, dict]:
     omissions = {
         "identified_candidates": omitted,
         "unexamined_scope": body.omissions.unexamined_scope or body.search_truncated,
-        "unexamined_count": body.omissions.unexamined_count,
+        # A truncated search may hide more candidates than the BE's known
+        # remainder. Never present a partial count as the total unseen count.
+        "unexamined_count": None
+        if body.search_truncated
+        else body.omissions.unexamined_count,
     }
     return eligible, reasons, omissions
 
@@ -114,9 +118,13 @@ def _result(
     return {
         "status": status,
         "candidates": candidates,
-        "follow_up": "검색 범위와 분석하지 못한 항목을 확인해 주세요."
-        if reasons
-        else None,
+        "follow_up": (
+            "요청 조건을 보완하거나 변경해 다시 시도해 주세요."
+            if reasons == ["NO_RECOMMENDATIONS"]
+            else "검색 범위와 분석하지 못한 항목을 확인해 주세요."
+            if reasons
+            else None
+        ),
         "incomplete_reasons": reasons,
         "omissions": omissions,
         "search_observation": body.search_observation,

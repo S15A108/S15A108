@@ -49,6 +49,7 @@ HTTP 오류는 `{error: {code, message}}`를 기본으로 한다. 모델 호출�
 - [/v1/bee/meeting-analysis](#ai-a08)
 - [/v1/document-chunks](#ai-a09)
 - [/v1/document-reviews](#ai-a10)
+- [/v1/design-reference-recommendations](#ai-a11)
 
 ---
 
@@ -188,6 +189,41 @@ HTTP `200`.
 - 문서 위치를 보존한 구조화 후보·질문을 반환한다. 최종 ID·표시 키·승인 상태를 발급하지 않는다.
 - 파싱 실패는 오류다. 임의로 빈 성공 결과를 반환하지 않는다.
 - PDF/이미지 변환·추출 책임과 최대 원문 크기는 Q07이다.
+
+<a id="ai-a11"></a>
+
+## AI-A11. 작업 시작 설계 근거 추천 (#185 제안)
+
+### POST `/v1/design-reference-recommendations`
+
+**상태: AI 내부 계약 구현·BE 연동 전.** 승인된 설계 후보를 선택하고 추천 이유를 반환한다. 공개 CTX-A05의 변경이나 #131·#223·프론트 연동이 완료됐다는 뜻은 아니다. 상세 필드·요청/응답 예시는 [#185 내부 계약](../design/design-reference-recommendation-185.md)을 따른다.
+
+BE는 권한과 현재 baseline을 확인한 뒤 검색 결과와 명시적 관계를 기반으로 허용된 승인 설계 후보를 전달하고, 응답을 공개하기 전에 권한·기준 버전을 재확인한다. 검색 준비 중 또는 검색 실패를 BE가 알면 **AI를 호출하지 않는다.** 공개 `search_not_ready`·`search_failed`는 BE가 발생시키는 오류이며 공개 API의 상태 코드는 BE·FE와 협의한다.
+
+요청에는 프로젝트·요청·호출 ID, 자연어 요청, 검색 관찰·잘림·매핑 상태, 알려진 생략 후보와 미조회 범위, 승인 설계 후보를 포함한다. 항목의 저장 출처와 검색 원문은 별도로 전달한다. `VERIFIED`는 BE가 실제 위치를 검증했다는 표시이며 AI의 원문 확인을 뜻하지 않는다. 문서 출처 없는 승인 설계도 추천할 수 있고 위치를 추측하지 않는다.
+
+응답 `result.status`는 `RECOMMENDED`·`EMPTY`·`INSUFFICIENT`다. 부분 결과에는 이유와 확인된 생략 ID·선택적 설계 키를 보존한다. `unexamined_count`는 식별된 생략 후보와 별개의 **전체 미조회 설계 후보 총수**를 확실히 알 때만 기록하며, 검색이 잘린 현재 경로에서는 `null`이다. AI는 미조회 후보의 ID·키를 추측하지 않는다. 모델 호출이 없는 경우 `origin=TEMPLATE`, `usage=[]`다.
+
+| HTTP | code | 상황 |
+| --- | --- | --- |
+| 400 | `validation_failed` | 필수 필드·타입·허용 값 형식 오류 |
+| 401 | `invalid_internal_token` | 내부 인증 실패 |
+| 422 | `invalid_ai_input` | 후보·출처·검색 상태의 업무 구조 모순 또는 호출 전 AI 입력 오류. `NOT_READY`·`FAILED`를 AI에 전달한 경우 포함 |
+| 502 | `model_unavailable` | 모델 호출 실패 또는 출력 계약 위반 |
+| 503 | `recommendation_not_enabled` | 모델 호출이 필요한데 추천 기능 비활성화 |
+| 503 | `recommendation_not_configured` | 모델 호출 설정·키 미구성 |
+| 504 | `model_timeout` | 모델 시간 초과 |
+
+`recommendation_not_enabled`·`recommendation_not_configured`는 모델 호출 전 오류다. 이미 호출한 모델의 실패는 확인 가능한 usage를 포함한다. 알려진 분석 대상은 본문을 조용히 잘라 원문으로 취급하지 않으며 16,000바이트·20개 분석 한도를 넘는 후보는 사유와 함께 생략한다. 입력 자체의 안전 한도와 최종 공개 오류 매핑은 BE·FE와 정한다.
+
+**BE 공개 오류 매핑 제안 — AI 응답 코드가 아님:**
+
+| HTTP | code | 상황 |
+| --- | --- | --- |
+| 503 | `search_not_ready` | BE가 검색 색인이 준비되지 않았다고 판단. AI 미호출 |
+| 502 | `search_failed` | BE 검색 호출 실패. AI 미호출 |
+
+공개 CTX-A05와 화면에서 위 코드·상태를 사용하는지는 BE·FE 확인이 필요하다.
 
 [공통 규약·권한·담당자 목록](00-common.md)
 

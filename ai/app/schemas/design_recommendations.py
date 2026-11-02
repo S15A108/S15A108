@@ -29,7 +29,9 @@ class DesignItemVersion(ContractModel):
     id: TextId
     design_item_id: TextId
     key: TextId
-    kind: TextId
+    kind: Literal[
+        "REQUIREMENT", "API_CONTRACT", "DATA_CONTRACT", "POLICY", "CONSTRAINT"
+    ]
     version_no: int = Field(ge=1)
     status: Literal["APPROVED"]
     schema_version: int = Field(ge=1)
@@ -96,7 +98,7 @@ class OmissionInfo(ContractModel):
         default_factory=list, max_length=100
     )
     unexamined_scope: bool = False
-    # None means unknown; do not infer a count from a truncated page.
+    # Total unique unexamined candidates across all unseen scopes; None if unknown.
     unexamined_count: int | None = Field(default=None, ge=1)
 
 
@@ -145,6 +147,19 @@ class RecommendationRequest(ContractModel):
             and not self.omissions.unexamined_scope
         ):
             raise ValueError("unexamined count requires unexamined scope")
+        if (
+            self.search_status == "READY"
+            and self.search_observation == "DOCUMENTS_FOUND"
+            and self.mapping_complete
+            and not self.unlinked_documents
+            and not self.candidates
+            and not self.omissions.identified_candidates
+            and not self.omissions.unexamined_scope
+            and not self.search_truncated
+        ):
+            raise ValueError(
+                "documents found without candidates or accounted omissions"
+            )
         return self
 
 

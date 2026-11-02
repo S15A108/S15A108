@@ -68,10 +68,10 @@
 
 - `design_source_verification`과 각 `search_evidence.verification`은 BE가 전달하는 `VERIFIED` 또는 `UNVERIFIED`이며 생략 시 `UNVERIFIED`다. `VERIFIED`는 위치 문자열이 비어 있으면 거부한다. 그 외 원문 일치 여부·현재 baseline 소속은 BE가 확인해야 한다. AI가 검증했다는 뜻이 아니다.
 - `association`은 `SAME_DOCUMENT_VERSION` 또는 `EXPLICIT_LINK`다. `SAME_DOCUMENT_VERSION`은 저장 출처의 문서 ID·버전 ID가 검색 출처와 일치할 때만 허용한다. `EXPLICIT_LINK`도 BE가 보고한 연결이며, 둘 다 **검색 청크가 설계의 직접 근거라는 AI 판정이 아니다.** 검색 원문의 실제 위치·다중 span 복원과 검증은 #223 및 BE와 연동해 확인한다.
-- `search_observation`은 `NO_DOCUMENTS`, `DOCUMENTS_FOUND`, `UNKNOWN`이다. 이전 호출자는 생략 가능하지만 이 경우 `UNKNOWN`으로 처리해 검색 0건을 확정하지 않는다. `unlinked_documents=true`는 검색 문서 중 설계에 연결된 항목이 없는 문서가 있음을 뜻한다. 검색 실패와 준비 중은 각각 `search_status=FAILED`, `NOT_READY`다.
-- `omissions.identified_candidates`에는 **알고 있는** 생략 후보의 버전 ID와 `CONTENT_TOO_LARGE`, `CANDIDATE_LIMIT`, `OTHER` 사유를 넣는다. `key`는 BE가 알면 전달하는 선택 필드다. AI가 전달받은 후보를 크기·개수 한도로 생략하면 입력의 `design_item_version.key`를 사용한다. BE가 먼저 생략하면서 키를 전달하지 않았으면 AI는 키를 만들지 않고 생략한다. `unexamined_scope=true`는 확인하지 못한 범위가 있다는 뜻이며, 개수를 모르면 `unexamined_count=null`이다. 검색이 잘렸으면 AI도 미조회 범위로 표시한다. 아직 조회하지 못한 후보의 ID·키나 총개수를 추측하지 않는다.
+- `search_observation`은 `NO_DOCUMENTS`, `DOCUMENTS_FOUND`, `UNKNOWN`이다. 이전 호출자는 생략 가능하지만 이 경우 `UNKNOWN`으로 처리해 검색 0건을 확정하지 않는다. `unlinked_documents=true`는 검색 문서 중 설계에 연결된 항목이 없는 문서가 있음을 뜻한다. `DOCUMENTS_FOUND`인데 매핑 완료·무연결 없음·후보 없음·알려진 생략과 미조회 범위가 모두 없다면 구성 모순이므로 `422 invalid_ai_input`이다.
+- `omissions.identified_candidates`에는 **알고 있는** 생략 후보의 버전 ID와 `CONTENT_TOO_LARGE`, `CANDIDATE_LIMIT`, `OTHER` 사유를 넣는다. `key`는 BE가 알면 전달하는 선택 필드다. AI가 전달받은 후보를 크기·개수 한도로 생략하면 입력의 `design_item_version.key`를 사용한다. BE가 먼저 생략하면서 키를 전달하지 않았으면 AI는 키를 만들지 않고 생략한다. `unexamined_scope=true`는 확인하지 못한 범위가 있다는 뜻이다. `unexamined_count`는 식별된 생략 후보와 별개로 **모든 미조회 범위에 걸친 중복 없는 미조회 설계 후보의 총수**를 BE가 확실히 아는 경우에만 전달한다. 검색이 잘려 전체 범위를 보장할 수 없는 현재 계약에서는 BE가 일부 범위의 수를 보내더라도 응답은 `null`이다. 검색 잘림이 없어도 총수를 모르면 `null`로 보낸다. 미조회 후보 ID·키나 총개수를 추측하지 않는다.
 - 각 입력 후보는 현재 baseline에 속한 승인 설계여야 한다. `source`가 없거나 위치가 미확인이어도 **설계 항목 내용 자체로 추천할 수 있다.** 위치는 추측하지 않는다.
-- `request`, ID, `execution_budget_ms` 등 나머지 필드와 오류·사용량 봉투는 기존 내부 API 공통 규칙을 따른다. 예산은 1~60,000ms이며 BE HTTP 제한보다 짧게 설정한다.
+- `kind`는 `REQUIREMENT`, `API_CONTRACT`, `DATA_CONTRACT`, `POLICY`, `CONSTRAINT` 중 하나다. `request`, ID, `execution_budget_ms` 등 나머지 필드와 오류·사용량 봉투는 기존 내부 API 공통 규칙을 따른다. 예산은 1~60,000ms이며 BE HTTP 제한보다 짧게 설정한다.
 
 ### 응답 예시
 
@@ -125,13 +125,13 @@
 | 검색 원문은 있으나 연결 설계가 없거나, 매핑을 확인하지 못함 | `INSUFFICIENT`. `unlinked_documents` 또는 `MAPPING_INCOMPLETE`로 구분 |
 | 검색 잘림·미조회·식별된 생략 후보 | 분석 가능한 후보를 반환하되 `INSUFFICIENT`와 사유·누락 정보 포함 |
 | 문서 출처 없는 현재 baseline 승인 설계 | 설계 내용으로 추천 가능. 문서 출처 없음 표시 |
-| 모델이 추천할 후보를 찾지 못함 | `INSUFFICIENT`. 다른 불완전 사유가 없으면 `NO_RECOMMENDATIONS`를 표시하며 검색 원문 0건으로 바꾸지 않음 |
-| 검색 준비 중·검색 오류 | 각각 503 `search_not_ready`·502 `search_failed`; 정상 0건 아님 |
+| 모델이 추천할 후보를 찾지 못함 | `INSUFFICIENT`. 다른 불완전 사유가 없으면 `NO_RECOMMENDATIONS` 및 요청 조건을 변경하라는 `follow_up`을 표시하며 검색 원문 0건으로 바꾸지 않음 |
+| 검색 준비 중·검색 오류 | BE가 AI를 호출하지 않고 검색 상태에 맞게 처리한다. 이 상태를 AI에 전달하면 `422 invalid_ai_input`; 공개 `search_not_ready`·`search_failed` 응답은 BE 계약에서 정한다 |
 | 권한 실패·baseline 변경 | BE가 오류 또는 재검토로 처리. AI 응답만으로 성공을 확정하지 않음 |
 
 한 요청에서 AI는 설계 본문이 UTF-8 JSON 기준 16,000바이트 이하인 후보를 **최대 20개** 분석한다. 이를 넘는 알려진 후보는 원문을 자르지 않고 각각 `CONTENT_TOO_LARGE` 또는 `CANDIDATE_LIMIT`으로 기록한다. 입력 자체는 최대 100개 후보, 후보 본문당 1MiB, 후보당 검색 근거 20개와 위치 최대 10,000자를 넘으면 계약 오류다. 이는 AI의 별도 안전 한도이며 BE가 허용하는 모든 입력과 일치한다는 보장은 없다. BE는 전송 전 초과 여부를 확인해 누락된 ID·사유나 개수 미상의 범위를 전달해야 한다. **전송 자체를 거절한 요청은 부분 결과가 아니다.** 최종 한도와 전송 초과 오류는 BE·FE와 확정한다.
 
-현재 구현의 `incomplete_reasons`는 `SEARCH_TRUNCATED`, `MAPPING_INCOMPLETE`, `UNLINKED_DOCUMENTS`, `SEARCH_OBSERVATION_UNKNOWN`, `CANDIDATES_OMITTED`, `UNEXAMINED_SCOPE`, `NO_RECOMMENDATIONS`를 사용한다. 사유는 실제 전달·처리된 사실만 기록하며 미조회 항목의 ID를 만들지 않는다.
+현재 구현의 `incomplete_reasons`는 `SEARCH_TRUNCATED`, `MAPPING_INCOMPLETE`, `UNLINKED_DOCUMENTS`, `SEARCH_OBSERVATION_UNKNOWN`, `CANDIDATES_OMITTED`, `UNEXAMINED_SCOPE`, `NO_RECOMMENDATIONS`를 사용한다. `search_truncated=true`면 미조회 범위가 있으므로 `UNEXAMINED_SCOPE`도 포함한다. 사유는 실제 전달·처리된 사실만 기록하며 미조회 항목의 ID를 만들지 않는다. 요청 JSON의 타입·필수 값 오류는 400 `validation_failed`, 유효한 형식이지만 업무 구조가 모순되는 입력은 422 `invalid_ai_input`이다.
 
 ## 남은 합의·연결
 
