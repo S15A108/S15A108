@@ -1,6 +1,16 @@
+import json
+
 import pytest
 
-from app.services.llm_client import LLMError, LLMResult, LLMUsage
+from app.services.llm_client import (
+    LLMClient,
+    LLMContext,
+    LLMError,
+    LLMResult,
+    LLMUsage,
+    ProviderError,
+    ProviderResponse,
+)
 from app.services.retrieval.context_selection import (
     ApprovedEvidence,
     ApprovedItem,
@@ -8,7 +18,10 @@ from app.services.retrieval.context_selection import (
     SelectionInput,
     SelectionResult,
 )
-from app.services.retrieval.context_unresolved import review_unresolved
+from app.services.retrieval.context_unresolved import (
+    LLMUnresolvedAssessor,
+    review_unresolved,
+)
 
 
 def snapshot():
@@ -196,3 +209,138 @@ async def test_duplicate_selected_ids_are_rejected_before_assessment():
     with pytest.raises(ValueError):
         await review_unresolved(snapshot(), selected, assessor)
     assert assessor.input is None
+
+
+class FakeModel:
+    def __init__(self, value):
+        self.value = value
+        self.calls = []
+
+    async def complete(self, request, *, timeout_seconds):
+        self.calls.append(request)
+        return ProviderResponse(
+            content=json.dumps(self.value, ensure_ascii=False),
+            model=request.model,
+            input_tokens=12,
+            output_tokens=4,
+        )
+
+
+@pytest.mark.asyncio
+async def test_real_client_adapter_passes_only_selected_context_and_preserves_usage():
+    provider = FakeModel({"candidates": [conflict()]})
+    # BEE_CHAT is a test-only value; the #131 production feature is not agreed.
+    context = LLMContext(
+        project_id="p", task_id=None, feature="BEE_CHAT", request_key="req"
+    )
+    assessor = LLMUnresolvedAssessor(
+        LLMClient(provider),
+        context=context,
+        model="fake",
+        call_key="call",
+        timeout_seconds=3,
+    )
+    result = await review_unresolved(snapshot(), selection(), assessor)
+    assert result.result["candidates"][0]["kind"] == "POSSIBLE_CONFLICT"
+    assert result.usage[0].input_tokens == 12 and not result.usage[0].failed
+    assert len(provider.calls) == 1
+    prompt = provider.calls[0].messages
+    assert prompt[0].role == "system" and "untrusted" in prompt[0].content.lower()
+    data = json.loads(prompt[1].content)
+    assert [source["id"] for source in data["evidence"]] == ["e1"]
+    assert "내부 전용 원문" not in prompt[1].content
+    assert provider.calls[0].context == context
+    assert provider.calls[0].response_format == {"type": "json_object"}
+    assert provider.calls[0].model_options == {"max_completion_tokens": 1024}
+
+
+@pytest.mark.parametrize("scope", ["project", "task"])
+@pytest.mark.asyncio
+async def test_model_adapter_refuses_wrong_context_before_provider_call(scope):
+    provider = FakeModel({"candidates": []})
+    context = LLMContext(
+        project_id="other" if scope == "project" else "p",
+        task_id="other" if scope == "task" else None,
+        feature="BEE_CHAT",
+        request_key="req",
+    )
+    assessor = LLMUnresolvedAssessor(
+        LLMClient(provider),
+        context=context,
+        model="fake",
+        call_key="call",
+        timeout_seconds=3,
+    )
+    with pytest.raises(LLMError) as error:
+        await review_unresolved(snapshot(), selection(), assessor)
+    assert error.value.code == "invalid_input"
+    assert not provider.calls
+
+
+@pytest.mark.asyncio
+async def test_real_client_adapter_rejects_forged_model_output_and_keeps_usage():
+    candidate = conflict()
+    candidate["references"][1]["id"] = "e2"
+    provider = FakeModel({"candidates": [candidate]})
+    context = LLMContext(
+        project_id="p", task_id=None, feature="BEE_CHAT", request_key="req"
+    )
+    assessor = LLMUnresolvedAssessor(
+        LLMClient(provider),
+        context=context,
+        model="fake",
+        call_key="call",
+        timeout_seconds=3,
+    )
+    with pytest.raises(LLMError) as error:
+        await review_unresolved(snapshot(), selection(), assessor)
+    assert error.value.code == "invalid_output"
+    assert error.value.usage[0].failed and error.value.usage[0].input_tokens == 12
+
+
+@pytest.mark.asyncio
+async def test_real_client_adapter_preserves_failed_call_usage():
+    class FailedModel:
+        async def complete(self, request, *, timeout_seconds):
+            raise ProviderError(
+                "model_unavailable",
+                model=request.model,
+                input_tokens=7,
+                output_tokens=0,
+            )
+
+    context = LLMContext(
+        project_id="p", task_id=None, feature="BEE_CHAT", request_key="req"
+    )
+    assessor = LLMUnresolvedAssessor(
+        LLMClient(FailedModel()),
+        context=context,
+        model="fake",
+        call_key="call",
+        timeout_seconds=3,
+    )
+    with pytest.raises(LLMError) as error:
+        await review_unresolved(snapshot(), selection(), assessor)
+    assert error.value.code == "model_unavailable"
+    assert len(error.value.usage) == 1 and error.value.usage[0].failed
+    assert error.value.usage[0].input_tokens == 7
+
+
+@pytest.mark.parametrize("parameter", ["model", "stream", "unknown"])
+@pytest.mark.asyncio
+async def test_invalid_output_parameter_is_rejected_without_model_call(parameter):
+    provider = FakeModel({"candidates": []})
+    context = LLMContext(
+        project_id="p", task_id=None, feature="BEE_CHAT", request_key="req"
+    )
+    assessor = LLMUnresolvedAssessor(
+        LLMClient(provider),
+        context=context,
+        model="fake",
+        call_key="call",
+        timeout_seconds=3,
+        output_token_parameter=parameter,
+    )
+    with pytest.raises(LLMError) as error:
+        await review_unresolved(snapshot(), selection(), assessor)
+    assert error.value.code == "invalid_input" and not provider.calls
