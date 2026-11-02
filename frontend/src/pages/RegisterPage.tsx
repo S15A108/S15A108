@@ -3,8 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router'
 import { authApi } from '@/api/services'
 import { ActionForm, type FormField } from '@/components/ActionForm'
 import { EmailVerification } from '@/features/auth/EmailVerification'
-import { emailVerificationEnabled } from '@/features/auth/emailCode'
 import { PASSWORD_HINT, passwordRule } from '@/features/auth/passwordRule'
+
+// 가입 이메일 인증은 mock 전용이다(emailCode.ts). env를 그 자리에서 비교해 live 빌드에서는 인증 칸과 흉내 코드가 빠진다.
+const emailVerification = import.meta.env.VITE_API_MODE !== 'live'
 
 const passwordFields: FormField[] = [
   {
@@ -51,7 +53,7 @@ export default function RegisterPage() {
             auth
             fields={[
               { name: 'name', label: '이름', required: true, max: 40 },
-              ...(emailVerificationEnabled
+              ...(emailVerification
                 ? [
                     {
                       name: 'verification',
@@ -77,9 +79,7 @@ export default function RegisterPage() {
             ]}
             submitLabel="가입하기"
             onSubmit={async (values) => {
-              const email = emailVerificationEnabled
-                ? verifiedEmail
-                : values.email
+              const email = emailVerification ? verifiedEmail : values.email
               if (!email) {
                 setNeedVerify(true)
                 return

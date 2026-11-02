@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { useIsMutating, useQuery } from '@tanstack/react-query'
 import { Footprints } from 'lucide-react'
-import { membersApi, projectsApi, tasksApi } from '@/api/services'
+import { unlessMissing } from '@/api/error'
+import { documentsApi, membersApi, projectsApi, tasksApi } from '@/api/services'
+import { onboardingFrom } from '@/features/projects/onboardingFrom'
 import type { SceneAgent, SceneTask } from '@/three/types'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
@@ -80,9 +82,22 @@ function Workspace({ projectId }: { projectId: string }) {
         projectsApi.get(projectId),
         membersApi.list(projectId),
         tasksApi.list(projectId, { limit: 100 }),
-        projectsApi.onboarding(projectId),
+        unlessMissing(projectsApi.onboarding(projectId)),
       ])
-      return { project, members, tasks, onboarding }
+      return {
+        project,
+        members,
+        tasks,
+        // PRJ-A06이 서버에 아직 없으면 프로젝트·팀원·문서 목록으로 같은 모양을 만든다.
+        onboarding:
+          onboarding ??
+          onboardingFrom(
+            project,
+            members.items,
+            (await documentsApi.list(projectId, { limit: 100 })).items,
+            session.data?.id,
+          ),
+      }
     },
   })
   const sceneAgents = useMemo<SceneAgent[]>(

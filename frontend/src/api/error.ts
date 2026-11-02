@@ -13,11 +13,23 @@ export function getApiErrorStatus(error: unknown): number | undefined {
   return isAxiosError(error) ? error.response?.status : undefined
 }
 
-// 서버에 아직 없는 계약(404·501)이면 undefined로 바꿔, 그 부분만 '준비 중'으로 두고 화면 전체가 실패하지 않게 한다.
+// 서버에 아직 없는 API인지. 백엔드는 없는 경로를 404 not_found + '없는 API 경로입니다'로, 없는 메서드를 405로 돌려준다
+// (GlobalExceptionHandler). 있는 API의 '항목 없음' 404와 섞이지 않게 404는 그 문구이거나 오류 본문이 없을 때만 본다.
+export const MISSING_API_MESSAGE = '없는 API 경로입니다'
+export function isMissingApi(error: unknown): boolean {
+  const status = getApiErrorStatus(error)
+  if (status === 405 || status === 501) return true
+  if (status !== 404 || !isAxiosError(error)) return false
+  const parsed = apiErrorSchema.safeParse(error.response?.data)
+  return !parsed.success || parsed.data.error.message === MISSING_API_MESSAGE
+}
+
+// 아직 없다고 알고 부르는 API(호출하는 쪽이 고른다)는 404·405·501이면 undefined로 바꿔,
+// 그 부분만 '준비 중'으로 두고 화면 전체가 실패하지 않게 한다.
 export const unlessMissing = <T>(request: Promise<T>) =>
   request.catch((error: unknown) => {
     const status = getApiErrorStatus(error)
-    if (status === 404 || status === 501) return undefined
+    if (status === 404 || status === 405 || status === 501) return undefined
     throw error
   })
 const messages: Record<string, string> = {
@@ -72,6 +84,7 @@ const messages: Record<string, string> = {
 export function getApiErrorMessage(error: unknown): string {
   if (error instanceof z.ZodError)
     return '서버 응답 형식이 API 계약과 다릅니다.'
+  if (isMissingApi(error)) return '이 기능은 서버에서 아직 준비 중이에요.'
   const code = getApiErrorCode(error)
   if (code && messages[code]) return messages[code]
   if (isAxiosError(error) && !error.response)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell } from 'lucide-react'
+import { isMissingApi } from '@/api/error'
 import { inboxApi } from '@/api/services'
 import type { Notification } from '@/api/contracts/common'
 import { Button } from '@/components/ui/button'
@@ -94,11 +95,16 @@ export function InboxPopover({ projectId }: { projectId: string }) {
               불러오는 중…
             </li>
           )}
-          {query.error && (
-            <li role="alert" className="p-4 text-sm text-destructive">
-              알림을 불러오지 못했어요.
-            </li>
-          )}
+          {query.error &&
+            (isMissingApi(query.error) ? (
+              <li role="status" className="p-4 text-sm text-muted-foreground">
+                알림은 서버에서 아직 준비 중이에요.
+              </li>
+            ) : (
+              <li role="alert" className="p-4 text-sm text-destructive">
+                알림을 불러오지 못했어요.
+              </li>
+            ))}
           {query.data && !shown.length && (
             <li className="p-4 text-sm text-muted-foreground">
               새 알림이 없어요. 변경 제안 검토 요청, 회의, 작업 검증 결과가 오면

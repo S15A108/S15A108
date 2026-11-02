@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, TriangleAlert } from 'lucide-react'
-import { authApi, projectsApi } from '@/api/services'
+import { authApi, membersApi, projectsApi } from '@/api/services'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { ActionForm } from '@/components/ActionForm'
 import { AsyncState } from '@/components/AsyncState'
@@ -19,13 +19,14 @@ function AccountWithdraw() {
     queryFn: async () => {
       const projects = await projectsApi.list({ limit: 100 })
       const led = projects.items.filter((item) => item.my_role === 'LEADER')
-      const onboarding = await Promise.all(
-        led.map((item) => projectsApi.onboarding(item.id)),
+      // 팀원 수는 서버에 있는 팀원 목록(MEM-A02)으로 센다.
+      const members = await Promise.all(
+        led.map((item) => membersApi.list(item.id, { limit: 100 })),
       )
       return led
         .map((item, index) => ({
           ...item,
-          member_count: onboarding[index].member_count,
+          member_count: members[index].items.length,
         }))
         .filter((item) => item.member_count > 1)
     },

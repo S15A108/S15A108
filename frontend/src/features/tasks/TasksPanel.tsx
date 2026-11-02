@@ -19,7 +19,7 @@ import {
   type TaskPlanInput,
   type TaskStateInput,
 } from '@/api/contracts/common'
-import { getApiErrorMessage } from '@/api/error'
+import { getApiErrorMessage, isMissingApi } from '@/api/error'
 import { AsyncState } from '@/components/AsyncState'
 import { EmptyState } from '@/components/EmptyState'
 import { FormDialog } from '@/components/FormDialog'
@@ -661,11 +661,19 @@ export function TasksPanel({ projectId, isLeader }: Props) {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {validation.error && (
-                      <p role="alert" className="text-sm text-destructive">
-                        검증 결과를 불러오지 못했어요.
-                      </p>
-                    )}
+                    {validation.error &&
+                      (isMissingApi(validation.error) ? (
+                        <p
+                          role="status"
+                          className="text-sm text-muted-foreground"
+                        >
+                          검증 결과는 서버에서 아직 준비 중이에요.
+                        </p>
+                      ) : (
+                        <p role="alert" className="text-sm text-destructive">
+                          검증 결과를 불러오지 못했어요.
+                        </p>
+                      ))}
                     {current.waiting_reason && (
                       <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
                         대기 이유: <StatusPill value={current.waiting_reason} />

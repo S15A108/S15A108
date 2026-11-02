@@ -7,7 +7,6 @@ import { getApiErrorMessage } from '@/api/error'
 import { ActionForm } from '@/components/ActionForm'
 import cityPreview from '@/assets/city-preview.png'
 import { getApiErrorCode } from '@/api/error'
-import { apiMode } from '@/lib/apiMode'
 
 const savedEmailKey = 'beez.login.email'
 const readSavedEmail = () => {
@@ -34,7 +33,9 @@ export default function AuthPage() {
   const [email, setEmail] = useState(state?.registered ?? readSavedEmail())
   const [remember, setRemember] = useState(Boolean(readSavedEmail()))
   const invite = params.get('invite')
-  const mockDemo = apiMode === 'mock' && !email && attempt === 0
+  // 예시 계정은 live 빌드에서 빠지도록 env를 그 자리에서 비교한다.
+  const mockDemo =
+    import.meta.env.VITE_API_MODE !== 'live' && !email && attempt === 0
   if (mode === 'forgot')
     return (
       <main className="px-4 pt-24 pb-10">

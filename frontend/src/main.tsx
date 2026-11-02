@@ -4,15 +4,23 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router/dom'
 import './index.css'
 import { router } from './router'
-import { apiMode } from '@/lib/apiMode'
+import { isMissingApi } from '@/api/error'
 import { reloadOnStaleChunk } from '@/lib/reloadOnStaleChunk'
 
 reloadOnStaleChunk()
 
-const queryClient = new QueryClient()
+// 서버에 아직 없는 API(isMissingApi)는 다시 불러도 같으니 재시도하지 않고 바로 '준비 중'을 보인다. 나머지는 기본 3번.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (count, error) => !isMissingApi(error) && count < 3,
+    },
+  },
+})
 
 async function bootstrap() {
-  if (apiMode === 'mock') {
+  // Vite가 이 비교를 빌드 때 상수로 바꿔 live 빌드에는 mock 어댑터·예시 데이터 청크가 생기지 않는다.
+  if (import.meta.env.VITE_API_MODE !== 'live') {
     const { setupMockApi } = await import('@/mocks/setup')
     setupMockApi()
   }

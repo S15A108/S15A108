@@ -1,11 +1,13 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
-import { beforeEach, afterEach, expect, it } from 'vitest'
+import { AxiosError, AxiosHeaders } from 'axios'
+import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import { authApi } from '@/api/services'
+import { MISSING_API_MESSAGE } from '@/api/error'
+import { authApi, meetingsApi } from '@/api/services'
 import {
   DEMO_EMAIL,
   DEMO_PASSWORD,
@@ -142,4 +144,23 @@ it('진행 중과 끝난 회의를 나누고, 안건과 단계를 보이며, 끝
   expect(
     screen.queryByRole('button', { name: '비비에게 정리 요청' }),
   ).not.toBeInTheDocument()
+})
+
+// live 모드: dev 백엔드에 회의 API가 아직 없으면 회의 칸만 '준비 중'으로 두고 창은 그대로 연다.
+it('회의 API가 서버에 없으면 오류 대신 준비 중으로 보인다', async () => {
+  vi.spyOn(meetingsApi, 'list').mockRejectedValue(
+    new AxiosError('Not Found', 'ERR_BAD_REQUEST', undefined, undefined, {
+      status: 404,
+      statusText: 'Not Found',
+      headers: {},
+      config: { headers: new AxiosHeaders() },
+      data: { error: { code: 'not_found', message: MISSING_API_MESSAGE } },
+    }),
+  )
+  renderPanel(true)
+  expect(
+    await screen.findByText('이 기능은 서버에서 아직 준비 중이에요.'),
+  ).toBeInTheDocument()
+  expect(screen.queryByText(/정보를 불러오지 못했어요/)).not.toBeInTheDocument()
+  vi.restoreAllMocks()
 })
