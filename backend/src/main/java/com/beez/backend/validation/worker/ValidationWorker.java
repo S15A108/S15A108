@@ -178,10 +178,7 @@ public class ValidationWorker {
         if (!relatedRevisionIds.isEmpty()) {
             Map<Long, List<TaskPlanDesignRef>> refsByRevision = new LinkedHashMap<>();
             for (TaskPlanDesignRef ref : designRefs.findByPlanRevisionIdIn(relatedRevisionIds)) {
-                if (!refsByRevision.containsKey(ref.getPlanRevisionId())) {
-                    refsByRevision.put(ref.getPlanRevisionId(), new ArrayList<>());
-                }
-                refsByRevision.get(ref.getPlanRevisionId()).add(ref);
+                refsByRevision.computeIfAbsent(ref.getPlanRevisionId(), k -> new ArrayList<>()).add(ref);
             }
             for (TaskPlanRevision related : revisions.findByIdIn(relatedRevisionIds)) {
                 List<TaskPlanDesignRef> relatedRefs = new ArrayList<>();
