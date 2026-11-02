@@ -78,7 +78,7 @@ export function Hotbar({
         aria-keyshortcuts={String(index + 1)}
         aria-current={isOpen ? 'page' : undefined}
         aria-disabled={isLocked || undefined}
-        title={isLocked ? lockedReason : undefined}
+        title={isLocked ? lockedReason : item.label}
         onClick={() => !isLocked && openPane(isOpen ? null : item.pane)}
         className={cn(
           'relative inline-flex h-[34px] items-center gap-1.5 rounded-[10px] bg-[#f5f2ea] pr-2.5 pl-1.5 text-[12.5px] font-semibold whitespace-nowrap text-[#3f3a2e] shadow-[inset_0_0_0_1px_rgba(44,41,31,0.07)] transition-colors hover:bg-[#ece7da]',
@@ -101,7 +101,8 @@ export function Hotbar({
           {index + 1}
         </span>
         <item.icon aria-hidden="true" className="size-[17px]" />
-        <span>{item.label}</span>
+        {/* 좁은 화면(xl 미만)에서는 이름을 숨겨 바를 줄인다. 이름은 aria-label과 title로 남는다. */}
+        <span className="max-xl:hidden">{item.label}</span>
         {isLocked && (
           <Lock
             aria-hidden="true"
@@ -134,7 +135,8 @@ export function Hotbar({
       aria-label="프로젝트 메뉴 단축 바"
       data-tour="hotbar"
       className={cn(
-        'pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex h-11 -translate-x-1/2 items-center gap-1 rounded-[14px] border border-[rgba(44,41,31,0.08)] bg-white/92 px-[5px] shadow-[0_18px_32px_-16px_rgba(44,41,31,0.35),0_2px_6px_rgba(44,41,31,0.06)] backdrop-blur-[8px]',
+        // 좁은 화면에서는 왼쪽 아래 시점·산책 버튼과 겹치지 않게 오른쪽 아래로 옮긴다(PR #72 전수 리뷰 UI-2).
+        'pointer-events-auto absolute bottom-[18px] left-1/2 z-20 flex h-11 -translate-x-1/2 items-center gap-1 rounded-[14px] border border-[rgba(44,41,31,0.08)] bg-white/92 px-[5px] shadow-[0_18px_32px_-16px_rgba(44,41,31,0.35),0_2px_6px_rgba(44,41,31,0.06)] backdrop-blur-[8px] max-xl:right-4 max-xl:left-auto max-xl:translate-x-0',
         // 업무 창이 열려도 단축 바는 어두운 막 위에 밝게 남는다.
         pane && pane !== 'settings' && 'z-[60]',
       )}
