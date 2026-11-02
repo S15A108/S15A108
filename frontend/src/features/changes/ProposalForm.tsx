@@ -19,10 +19,12 @@ interface Props {
   heading: string
   submitLabel: string
   tasks: TaskDetail[]
-  /** 고칠 수 있는 현재 문서. 목록 응답에는 본문이 없어 원문은 fetchDocumentContent로 따로 받는다. */
-  documents?: { id: string; label: string }[]
-  /** 고른 문서의 기준 원문(DOC-A03 문서 원문 조회) */
-  fetchDocumentContent?: (documentId: string) => Promise<string>
+  /** 고칠 수 있는 현재 문서와 목록이 알려 준 승인 버전. 본문은 fetchDocumentContent로 따로 받는다. */
+  documents?: { id: string; label: string; versionId?: string }[]
+  /** 고른 문서의 기준 원문과 그 버전(DOC-A03 문서 원문 조회) */
+  fetchDocumentContent?: (
+    documentId: string,
+  ) => Promise<{ content: string; versionId: string }>
   /** 다시 내는 제안에서 폼 밖에 그대로 함께 올라가는 문서 이름 */
   keptDocuments?: string[]
   /** 에이전트·회의가 만든 제안의 설계 항목 변경. 보기만 하고 다시 낼 때 받은 그대로 보낸다. */
@@ -88,27 +90,63 @@ export function ProposalForm({
     !!defaultValues?.document_id || !fixedItems.length,
   )
   const documentId = useWatch({ control, name: 'document_id' })
+  const listedVersion = documents.find(
+    (item) => item.id === documentId,
+  )?.versionId
+  // 캐시 키에 목록이 알려 준 승인 버전을 넣어, 새 승인본이 나오면 옛 원문 캐시를 쓰지 않는다(PR #72 리뷰).
   const content = useQuery({
-    queryKey: ['documents', documentId, 'approved-content'],
+    queryKey: ['documents', documentId, 'approved-content', listedVersion],
     queryFn: () => fetchDocumentContent!(documentId!),
     enabled: !!documentId && !!fetchDocumentContent,
   })
-  // 고른 문서의 기준 원문을 받으면 '고친 글'이 비어 있을 때만 채운다. 다시 내는 제안처럼 글이 이미 있으면 두고,
-  // 문서를 바꾸면 비운 뒤(아래 onChange) 새 원문으로 채운다.
+  // 기준 원문을 받을 때마다: '고친 글'이 비었거나 마지막으로 채운 원문 그대로면(손대지 않음) 새 원문으로 바꿔 채운다.
+  // 손댄 글은 두고 버전만 기억해 '기준 문서가 새 버전으로 바뀌었어요'를 띄운다. 다시 내는 제안처럼 처음부터 글이
+  // 있으면 덮어쓰지 않고, 지금 받은 버전을 그 글의 기준으로 삼는다.
   useEffect(() => {
-    if (documentId && content.data !== undefined && !getValues('after_content'))
-      setValue('after_content', content.data)
+    const loaded = content.data
+    if (!documentId || !loaded) return
+    const text = getValues('after_content') ?? ''
+    setValue('latest_version_id', loaded.versionId)
+    if (!text || text === getValues('base_content')) {
+      setValue('after_content', loaded.content)
+      setValue('base_content', loaded.content)
+      setValue('base_version_id', loaded.versionId)
+    } else if (!getValues('base_version_id')) {
+      setValue('base_content', loaded.content)
+      setValue('base_version_id', loaded.versionId)
+    }
   }, [documentId, content.data, getValues, setValue])
+  const shownVersion = useWatch({ control, name: 'base_version_id' })
+  const latestVersion = useWatch({ control, name: 'latest_version_id' })
+  const outdated =
+    !!shownVersion && !!latestVersion && shownVersion !== latestVersion
+  const rewriteFromLatest = () => {
+    if (!content.data) return
+    setValue('after_content', content.data.content)
+    setValue('base_content', content.data.content)
+    setValue('base_version_id', content.data.versionId)
+  }
   return (
     <form
       noValidate
       onSubmit={handleSubmit((form) => {
+        // 기준 원문을 아직 못 받았거나 보여 준 원문이 옛 버전이면, 어떤 기준에 대한 글인지 알 수 없어 막는다.
+        if (form.document_id && !form.base_version_id) {
+          setError('after_content', {
+            message: '기준 원문을 받은 뒤에 올릴 수 있어요.',
+          })
+          return
+        }
+        if (form.document_id && outdated) {
+          setError('after_content', {
+            message:
+              '기준 문서가 새 버전으로 바뀌었어요. 새 원문을 확인한 뒤 올려 주세요.',
+          })
+          return
+        }
         // 서버는 본문을 정규화(BOM 제거, CRLF→LF)해 기준과 같은 문서를 거절한다(PR #46).
         // 같은 규칙으로 비교해 바뀌지 않은 문서는 빼고, 남는 변경이 없으면 막는다.
-        const base =
-          form.document_id && form.document_id === documentId
-            ? content.data
-            : undefined
+        const base = form.document_id ? form.base_content : undefined
         const unchanged =
           base !== undefined &&
           normalizeDocument(form.after_content ?? '') ===
@@ -227,7 +265,12 @@ export function ProposalForm({
                 id="proposal-document"
                 aria-invalid={!!errors.document_id}
                 {...register('document_id', {
-                  onChange: () => setValue('after_content', ''),
+                  onChange: () => {
+                    setValue('after_content', '')
+                    setValue('base_content', undefined)
+                    setValue('base_version_id', undefined)
+                    setValue('latest_version_id', undefined)
+                  },
                 })}
               >
                 <NativeSelectOption value="">
@@ -263,6 +306,23 @@ export function ProposalForm({
                         onClick={() => void content.refetch()}
                       >
                         다시 불러오기
+                      </Button>
+                    </div>
+                  )}
+                  {outdated && (
+                    <div
+                      role="alert"
+                      className="flex flex-wrap items-center gap-2 rounded-lg bg-[#fdf8e6] p-2.5 text-xs text-[#6e5200]"
+                    >
+                      기준 문서가 새 버전으로 바뀌었어요. 고친 글은 그대로
+                      두었어요.
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={rewriteFromLatest}
+                      >
+                        새 원문으로 다시 쓰기
                       </Button>
                     </div>
                   )}

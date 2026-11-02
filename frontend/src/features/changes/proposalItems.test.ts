@@ -80,3 +80,10 @@ it('고칠 문서도 함께 올라갈 변경도 없으면 문서를 고르라고
     }).success,
   ).toBe(true)
 })
+
+// 추가 점검 2: 고친 문서의 기준 버전을 모르면 그 문서를 조용히 빼지 않는다.
+it('고친 문서의 기준 버전을 모르면 문서 변경을 만들지 않고 알린다', () => {
+  expect(() =>
+    toDocumentChanges({ document_id: '203', after_content: '글' }, undefined),
+  ).toThrow('고친 문서의 기준 버전을 알 수 없어요.')
+})

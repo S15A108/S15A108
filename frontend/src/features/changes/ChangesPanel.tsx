@@ -251,10 +251,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
       // 설계 항목 변경은 에이전트·회의가 만든 것만 있고, 다시 낼 때 받은 그대로 보낸다.
       items: source?.items ?? [],
       // 폼은 첫 문서만 고치고, 나머지 문서 변경은 원래 제안 값 그대로 함께 보낸다.
+      // 고친 문서의 기준 버전은 화면이 보여 준 원문의 버전이다.
       documents: toDocumentChanges(
         values,
-        documentOptions.find((item) => item.id === values.document_id)
-          ?.versionId,
+        values.base_version_id,
         source?.documents.slice(1),
       ),
     }
@@ -426,9 +426,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
               documents={documentOptions}
               // 문서 목록 응답에는 본문이 없어(백엔드 DOC-A02) 고른 문서의 기준 원문을 따로 받는다.
               fetchDocumentContent={(documentId) =>
-                documentsApi
-                  .get(projectId, documentId)
-                  .then((result) => result.version.content ?? '')
+                documentsApi.get(projectId, documentId).then((result) => ({
+                  content: result.version.content ?? '',
+                  versionId: result.version.id,
+                }))
               }
               keptDocuments={mode.source?.documents
                 .slice(1)

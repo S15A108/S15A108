@@ -38,6 +38,10 @@ export const proposalFormSchema = z
     // 다시 내는 제안에서 폼 밖에 그대로 남는 문서 변경 수(toDocumentChanges의 kept)와 설계 항목 변경 수
     kept_documents: z.number().int().optional(),
     kept_items: z.number().int().optional(),
+    // 화면이 보여 준 기준 원문과 그 버전, 그리고 가장 최근에 받은 기준 버전(ProposalForm이 채운다)
+    base_content: z.string().optional(),
+    base_version_id: z.string().optional(),
+    latest_version_id: z.string().optional(),
   })
   .superRefine((form, context) => {
     if (!form.document_id && !form.kept_documents && !form.kept_items)
@@ -62,6 +66,9 @@ export function toDocumentChanges(
   editedVersionId: string | undefined,
   kept: ResolvedDocumentChange[] = [],
 ): DocumentChange[] {
+  // 기준 버전을 모르는 채 고친 문서를 빼고 보내지 않는다(폼이 먼저 막는다).
+  if (form.document_id && !editedVersionId)
+    throw new Error('고친 문서의 기준 버전을 알 수 없어요.')
   return [
     ...(form.document_id && editedVersionId
       ? [
