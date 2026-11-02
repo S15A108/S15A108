@@ -15,10 +15,57 @@ from app.schemas.retrieval import (
 from app.services.retrieval.context_selection import (
     ApprovedItem,
     ContextSelectionError,
+    SelectedItem,
     SelectionInput,
     SelectionResult,
 )
 from evaluations import context_selection_131 as evaluation
+
+
+def test_report_distinguishes_direct_match_from_task_and_dependency():
+    case = {
+        "id": "test",
+        "expected_design_items": [
+            {"design_item_version_id": "v1", "reasons": ["MATCHED"]},
+            {"design_item_version_id": "v2", "reasons": ["DEPENDENCY"]},
+            {"design_item_version_id": "v3", "reasons": ["TASK_PLAN"]},
+        ],
+        "expected_evidence_ids": [],
+    }
+    result = SelectionResult(
+        design_items=(
+            SelectedItem(design_item_version_id="v1", reasons=("TASK_PLAN",)),
+            SelectedItem(design_item_version_id="v2", reasons=("DEPENDENCY",)),
+            SelectedItem(design_item_version_id="v3", reasons=("MATCHED", "TASK_PLAN")),
+        ),
+        evidence_ids=(),
+        unresolved=(),
+    )
+    report = evaluation.assess(case, result)
+    # The final set is correct, but v1 was not directly matched.
+    assert report["missing_items"] == report["extra_items"] == []
+    assert report["items_by_reason"] == {
+        "MATCHED": ["v3"],
+        "TASK_PLAN": ["v1", "v3"],
+        "DEPENDENCY": ["v2"],
+    }
+    assert report["fixture_expected_items_by_reason"]["MATCHED"] == ["v1"]
+    assert "unresolved_matches_fixture" not in report
+
+
+@pytest.mark.parametrize(
+    ("unresolved", "matches"), [((), False), (("NO_MATCH",), True)]
+)
+def test_report_checks_no_match_only_when_fixture_specifies_it(unresolved, matches):
+    case = {
+        "id": "no-match",
+        "expected_design_items": [],
+        "expected_evidence_ids": [],
+        "expected_unresolved": ["NO_MATCH"],
+    }
+    result = SelectionResult(design_items=(), evidence_ids=(), unresolved=unresolved)
+    report = evaluation.assess(case, result)
+    assert report["unresolved_matches_fixture"] is matches
 
 
 @pytest.mark.asyncio
@@ -201,9 +248,15 @@ async def test_comparison_run_reports_each_case_without_more_provider_calls(
     saved = evaluation.json.loads(output.read_text(encoding="utf-8"))
     assert provider.calls == ["query", "document"] * 5
     assert saved["compare_thresholds"] == [0.0, 0.5]
+    assert saved["report_version"] == 2
     assert len(saved["cases"]) == 5
     assert all(len(case["usage"]) == 2 for case in saved["cases"])
     assert all(len(case["threshold_comparisons"]) == 2 for case in saved["cases"])
+    assert all(
+        "items_by_reason" in comparison
+        for case in saved["cases"]
+        for comparison in case["threshold_comparisons"]
+    )
     assert all(
         "usage" not in comparison
         for case in saved["cases"]

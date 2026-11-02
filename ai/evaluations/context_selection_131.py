@@ -37,10 +37,14 @@ SCENARIOS = (
     "source-only-index-retry",
     "unknown-retention",
 )
+REASONS = ("MATCHED", "TASK_PLAN", "DEPENDENCY")
 
 
 def prepare_cases(data):
-    """Use independent expected IDs, never the fixture's fake proposal."""
+    """Use separately recorded expected IDs, never the fake proposal as output.
+
+    The expectations are agent-authored and still need independent review.
+    """
     by_id = {case["id"]: case for case in data["scenarios"]}
     for case_id in SCENARIOS:
         case = by_id[case_id]
@@ -64,9 +68,27 @@ def assess(case, result):
     }
     selected_evidence = set(result.evidence_ids)
     expected_evidence = set(case["expected_evidence_ids"])
-    return {
+    actual_by_reason = {
+        reason: sorted(
+            item.design_item_version_id
+            for item in result.design_items
+            if reason in item.reasons
+        )
+        for reason in REASONS
+    }
+    fixture_by_reason = {
+        reason: sorted(
+            item["design_item_version_id"]
+            for item in case["expected_design_items"]
+            if reason in item["reasons"]
+        )
+        for reason in REASONS
+    }
+    report = {
         "id": case["id"],
         "items": sorted(selected_items),
+        "items_by_reason": actual_by_reason,
+        "fixture_expected_items_by_reason": fixture_by_reason,
         "evidence": sorted(selected_evidence),
         "missing_items": sorted(expected_items - selected_items),
         "extra_items": sorted(selected_items - expected_items),
@@ -77,6 +99,13 @@ def assess(case, result):
             usage.model_dump(mode="json", exclude_none=True) for usage in result.usage
         ],
     }
+    if "expected_unresolved" in case:
+        expected_unresolved = case["expected_unresolved"]
+        report["expected_unresolved"] = expected_unresolved
+        report["unresolved_matches_fixture"] = set(result.unresolved) == set(
+            expected_unresolved
+        )
+    return report
 
 
 class _RecordingProvider:
@@ -209,6 +238,7 @@ async def run(args):
         ):
             raise ValueError("Fixture exceeds the one-document-batch call budget")
     output = {
+        "report_version": 2,
         "fixture_sha256": hashlib.sha256(raw).hexdigest(),
         "label_author": data["label_author"],
         "model": profile.model,
