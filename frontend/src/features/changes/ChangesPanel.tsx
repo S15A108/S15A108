@@ -178,7 +178,6 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
               label: `${document.title} · 기준 v${document.approved_version.version_no}`,
               title: document.title,
               versionNo: document.approved_version.version_no,
-              content: document.approved_version.content ?? '',
               versionId: document.approved_version.id,
             },
           ]
@@ -430,6 +429,12 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
             <ProposalForm
               key={documents.isSuccess ? 'documents' : 'loading'}
               documents={documentOptions}
+              // 문서 목록 응답에는 본문이 없어(백엔드 DOC-A02) 고른 문서의 기준 원문을 따로 받는다.
+              fetchDocumentContent={(documentId) =>
+                documentsApi
+                  .get(projectId, documentId)
+                  .then((result) => result.version.content ?? '')
+              }
               keptDocuments={mode.source?.documents
                 .slice(1)
                 .map(
@@ -498,10 +503,8 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                         task_id: '',
                         items: [],
                         document_id: mode.documentId,
-                        after_content:
-                          documentOptions.find(
-                            (item) => item.id === mode.documentId,
-                          )?.content ?? '',
+                        // 기준 원문은 폼이 받아서 채운다.
+                        after_content: '',
                       }
                     : undefined
               }

@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { Plus, X } from 'lucide-react'
 import type { DesignItemVersion, TaskDetail } from '@/api/contracts/common'
+import { getApiErrorMessage } from '@/api/error'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,8 +27,10 @@ interface Props {
   submitLabel: string
   items: DesignItemVersion[]
   tasks: TaskDetail[]
-  /** 고칠 수 있는 현재 문서(기준 원문 포함) */
-  documents?: { id: string; label: string; content: string }[]
+  /** 고칠 수 있는 현재 문서. 목록 응답에는 본문이 없어 원문은 fetchDocumentContent로 따로 받는다. */
+  documents?: { id: string; label: string }[]
+  /** 고른 문서의 기준 원문(DOC-A03 문서 원문 조회) */
+  fetchDocumentContent?: (documentId: string) => Promise<string>
   /** 다시 내는 제안에서 폼 밖에 그대로 함께 올라가는 문서 이름 */
   keptDocuments?: string[]
   defaultValues?: ProposalFormValues
@@ -59,6 +63,7 @@ export function ProposalForm({
   tasks,
   documents = [],
   keptDocuments = [],
+  fetchDocumentContent,
   defaultValues,
   status,
   description,
@@ -75,6 +80,7 @@ export function ProposalForm({
     control,
     handleSubmit,
     setValue,
+    getValues,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<ProposalFormValues>({
@@ -105,17 +111,31 @@ export function ProposalForm({
   const [documentOpen, setDocumentOpen] = useState(!!defaultValues?.document_id)
   const values = useWatch({ control, name: 'items' })
   const documentId = useWatch({ control, name: 'document_id' })
+  const content = useQuery({
+    queryKey: ['documents', documentId, 'approved-content'],
+    queryFn: () => fetchDocumentContent!(documentId!),
+    enabled: !!documentId && !!fetchDocumentContent,
+  })
+  // 고른 문서의 기준 원문을 받으면 '고친 글'이 비어 있을 때만 채운다. 다시 내는 제안처럼 글이 이미 있으면 두고,
+  // 문서를 바꾸면 비운 뒤(아래 onChange) 새 원문으로 채운다.
+  useEffect(() => {
+    if (documentId && content.data !== undefined && !getValues('after_content'))
+      setValue('after_content', content.data)
+  }, [documentId, content.data, getValues, setValue])
   return (
     <form
       noValidate
       onSubmit={handleSubmit((form) => {
         // 서버는 본문을 정규화(BOM 제거, CRLF→LF)해 기준과 같은 문서를 거절한다(PR #46).
         // 같은 규칙으로 비교해 바뀌지 않은 문서는 빼고, 남는 변경이 없으면 막는다.
-        const base = documents.find((item) => item.id === form.document_id)
+        const base =
+          form.document_id && form.document_id === documentId
+            ? content.data
+            : undefined
         const unchanged =
-          !!base &&
+          base !== undefined &&
           normalizeDocument(form.after_content ?? '') ===
-            normalizeDocument(base.content)
+            normalizeDocument(base)
         if (unchanged && !form.items.length && !keptDocuments.length) {
           setError('after_content', {
             message: '기준 문서와 달라진 내용이 없어요.',
@@ -214,12 +234,7 @@ export function ProposalForm({
               <NativeSelect
                 id="proposal-document"
                 {...register('document_id', {
-                  onChange: (event) =>
-                    setValue(
-                      'after_content',
-                      documents.find((item) => item.id === event.target.value)
-                        ?.content ?? '',
-                    ),
+                  onChange: () => setValue('after_content', ''),
                 })}
               >
                 <NativeSelectOption value="">고치지 않음</NativeSelectOption>
@@ -231,6 +246,28 @@ export function ProposalForm({
               </NativeSelect>
               {documentId && (
                 <>
+                  {content.isLoading && (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      기준 원문을 불러오는 중…
+                    </p>
+                  )}
+                  {content.error && (
+                    <div
+                      role="alert"
+                      className="flex flex-wrap items-center gap-2 text-xs text-destructive"
+                    >
+                      기준 원문을 불러오지 못했어요.{' '}
+                      {getApiErrorMessage(content.error)}
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void content.refetch()}
+                      >
+                        다시 불러오기
+                      </Button>
+                    </div>
+                  )}
                   <Textarea
                     aria-label="고친 글"
                     rows={6}

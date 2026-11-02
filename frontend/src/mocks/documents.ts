@@ -181,17 +181,28 @@ export async function documentRoutes(
       return upload(context)
     case 'DOC-A12':
       return upload(context, params.document_id)
-    case 'DOC-A02':
+    case 'DOC-A02': {
+      // 백엔드 목록 API처럼 버전 본문(content)은 빼고 준다. 본문은 DOC-A03으로 따로 받는다.
+      const withoutContent = <T extends { content?: string }>(version?: T) =>
+        version && { ...version, content: undefined }
       return {
         data: page(
-          project.documents.filter(
-            (document) =>
-              (!query.get('kind') || document.kind === query.get('kind')) &&
-              (!query.get('domain') || document.domain === query.get('domain')),
-          ),
+          project.documents
+            .filter(
+              (document) =>
+                (!query.get('kind') || document.kind === query.get('kind')) &&
+                (!query.get('domain') ||
+                  document.domain === query.get('domain')),
+            )
+            .map((document) => ({
+              ...document,
+              approved_version: withoutContent(document.approved_version),
+              latest_draft: withoutContent(document.latest_draft),
+            })),
           query,
         ),
       }
+    }
     case 'DOC-A03': {
       const document = findById(project.documents, params.document_id)
       const version = query.has('version_no')

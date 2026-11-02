@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { webcrypto } from 'node:crypto'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -313,4 +313,19 @@ it('목 상세는 항목별 바뀌기 전·뒤 문장을 item_texts로 준다', 
     before_text: expect.stringContaining('참여 프로젝트를 조회한다'),
     after_text: expect.stringContaining('초대를 기다리라는 안내'),
   })
+})
+
+// PR #72 리뷰 2: 문서 목록 응답에는 본문이 없어 고른 문서의 기준 원문을 따로 받는다. 못 받으면 칸 위에 알린다.
+it('고칠 문서의 기준 원문을 받지 못하면 고친 글 칸 위에 오류와 다시 불러오기를 보인다', async () => {
+  vi.spyOn(documentsApi, 'get').mockRejectedValue(new Error('network'))
+  useWorkspaceStore.getState().openPane('changes', 'doc:203')
+  renderPanel()
+  expect(
+    await screen.findByText(/기준 원문을 불러오지 못했어요/),
+  ).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '다시 불러오기' })).toBeEnabled()
+  expect((screen.getByLabelText('고친 글') as HTMLTextAreaElement).value).toBe(
+    '',
+  )
+  vi.restoreAllMocks()
 })
