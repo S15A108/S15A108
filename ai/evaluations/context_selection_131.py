@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -78,6 +79,91 @@ def assess(case, result):
     }
 
 
+class _RecordingProvider:
+    """Keep successful provider batches in memory for this case only."""
+
+    def __init__(self, provider):
+        self.provider = provider
+        self.batches = []
+
+    async def embed(self, texts, profile, purpose, request_key):
+        result = await self.provider.embed(texts, profile, purpose, request_key)
+        self.batches.append((texts, profile, purpose, result))
+        return result
+
+
+class _ReplayProvider:
+    def __init__(self, batches):
+        self.batches = batches
+        self.index = 0
+
+    async def embed(self, texts, profile, purpose, request_key):
+        if self.index >= len(self.batches):
+            raise ValueError("Replay attempted an extra provider call")
+        saved_texts, saved_profile, saved_purpose, result = self.batches[self.index]
+        self.index += 1
+        if (texts, profile, purpose) != (saved_texts, saved_profile, saved_purpose):
+            raise ValueError("Replay inputs changed")
+        return result.model_copy(
+            update={
+                "usage": result.usage.model_copy(update={"request_key": request_key})
+            }
+        )
+
+
+async def evaluate_thresholds(
+    snapshot,
+    provider,
+    profile,
+    counter,
+    policy,
+    *,
+    threshold,
+    comparisons,
+    max_items,
+    max_evidence,
+):
+    """Use the real selector for every threshold without extra provider calls."""
+    if len(comparisons) > 10 or any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not -1 <= value <= 1
+        for value in (threshold, *comparisons)
+    ):
+        raise ValueError("Invalid experimental thresholds")
+
+    def make_selector(source, value):
+        return EmbeddingContextSelector(
+            source,
+            profile,
+            counter,
+            min_similarity=value,
+            max_items=max_items,
+            max_evidence=max_evidence,
+            policy=policy,
+        )
+
+    recorded = _RecordingProvider(provider)
+    primary = await select_context(snapshot, make_selector(recorded, threshold))
+    results = []
+    for value in comparisons:
+        replay = _ReplayProvider(recorded.batches)
+        try:
+            result = await select_context(snapshot, make_selector(replay, value))
+            if replay.index != len(recorded.batches):
+                raise ValueError("Replay did not consume all provider batches")
+        except asyncio.CancelledError as exc:
+            exc.embedding_usage = primary.usage
+            raise
+        except Exception:  # noqa: BLE001
+            # Replay is local; keep the actual calls and never count fake usage.
+            raise ContextSelectionError("selection_failed", primary.usage) from None
+        # Replayed batches are not external calls and must not inflate usage.
+        results.append((value, result.model_copy(update={"usage": ()})))
+    return primary, results
+
+
 def checkpoint(path, output):
     """Keep the previous checkpoint if writing the next one fails."""
     temporary = None
@@ -97,6 +183,12 @@ def checkpoint(path, output):
 
 
 async def run(args):
+    comparisons = tuple(getattr(args, "compare_threshold", ()) or ())
+    if len(comparisons) > 10 or any(
+        not math.isfinite(value) or not -1 <= value <= 1
+        for value in (args.threshold, *comparisons)
+    ):
+        raise ValueError("Invalid experimental thresholds")
     raw = FIXTURE.read_bytes()
     data = json.loads(raw)
     settings = Settings(_env_file=args.env_file)
@@ -122,6 +214,7 @@ async def run(args):
         "model": profile.model,
         "dimension": profile.dimension,
         "threshold": args.threshold,
+        "compare_thresholds": list(comparisons),
         "max_items": args.max_items,
         "max_evidence": args.max_evidence,
         "max_provider_calls": len(SCENARIOS) * 2,
@@ -139,8 +232,9 @@ async def run(args):
     # The fixture has at most ten candidate texts per case: one query and one
     # document batch per case. Disable retries and stop immediately on failure.
     async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as http:
+        provider = GmsEmbeddingProvider(http, settings.gms_key)
         selector = EmbeddingContextSelector(
-            GmsEmbeddingProvider(http, settings.gms_key),
+            provider,
             profile,
             counter,
             min_similarity=args.threshold,
@@ -152,8 +246,33 @@ async def run(args):
             output["in_flight"] = case["id"]
             checkpoint(args.output, output)
             try:
-                result = await select_context(snapshot, selector)
-                output["cases"].append(assess(case, result))
+                if comparisons:
+                    result, alternatives = await evaluate_thresholds(
+                        snapshot,
+                        provider,
+                        profile,
+                        counter,
+                        policy,
+                        threshold=args.threshold,
+                        comparisons=comparisons,
+                        max_items=args.max_items,
+                        max_evidence=args.max_evidence,
+                    )
+                else:
+                    result, alternatives = await select_context(snapshot, selector), []
+                report = assess(case, result)
+                report["threshold_comparisons"] = [
+                    {
+                        "threshold": value,
+                        **{
+                            k: v
+                            for k, v in assess(case, alternative).items()
+                            if k != "usage"
+                        },
+                    }
+                    for value, alternative in alternatives
+                ]
+                output["cases"].append(report)
             except ContextSelectionError as exc:
                 output["error"] = {
                     "case": case["id"],
@@ -186,6 +305,13 @@ def main():
     )
     parser.add_argument("--max-items", type=int, default=2)
     parser.add_argument("--max-evidence", type=int, default=2)
+    parser.add_argument(
+        "--compare-threshold",
+        type=float,
+        action="append",
+        default=[],
+        help="Compare another experimental threshold without additional GMS calls (maximum 10)",
+    )
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
