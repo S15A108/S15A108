@@ -5,6 +5,7 @@ import {
   isMissingApi,
   MISSING_API_MESSAGE,
   shouldRetryQuery,
+  unlessMissing,
 } from './error'
 
 const failure = (code: string) =>
@@ -72,4 +73,19 @@ it('조회는 5xx와 네트워크 오류만 3번까지 다시 부르고 4xx는 �
   const offline = new AxiosError('Network Error', 'ERR_NETWORK')
   expect(shouldRetryQuery(0, offline)).toBe(true)
   expect(shouldRetryQuery(0, new Error('schema'))).toBe(false)
+})
+
+// 추가 점검 4: unlessMissing도 없는 API만 undefined로 바꾸고, 있는 API의 '항목 없음' 404는 그대로 던진다.
+it('unlessMissing은 없는 API만 준비 중(undefined)으로 바꾼다', async () => {
+  const missing = response(404, {
+    error: { code: 'not_found', message: MISSING_API_MESSAGE },
+  })
+  await expect(unlessMissing(Promise.reject(missing))).resolves.toBeUndefined()
+  await expect(
+    unlessMissing(Promise.reject(response(501))),
+  ).resolves.toBeUndefined()
+  const notFound = response(404, {
+    error: { code: 'not_found', message: '없는 프로젝트' },
+  })
+  await expect(unlessMissing(Promise.reject(notFound))).rejects.toBe(notFound)
 })

@@ -32,12 +32,11 @@ export function shouldRetryQuery(failureCount: number, error: unknown) {
   return (status === undefined || status >= 500) && failureCount < 3
 }
 
-// 아직 없다고 알고 부르는 API(호출하는 쪽이 고른다)는 404·405·501이면 undefined로 바꿔,
-// 그 부분만 '준비 중'으로 두고 화면 전체가 실패하지 않게 한다.
+// 서버에 아직 없을 수 있는 API는 없는 API(isMissingApi)일 때만 undefined로 바꿔, 그 부분만 '준비 중'으로 두고
+// 화면 전체가 실패하지 않게 한다. 있는 API의 '항목 없음' 404 같은 다른 오류는 그대로 보인다.
 export const unlessMissing = <T>(request: Promise<T>) =>
   request.catch((error: unknown) => {
-    const status = getApiErrorStatus(error)
-    if (status === 404 || status === 405 || status === 501) return undefined
+    if (isMissingApi(error)) return undefined
     throw error
   })
 const messages: Record<string, string> = {
