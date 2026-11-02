@@ -3642,7 +3642,7 @@ HTTP `200`.
 #### 처리 규칙
 
 - 조회·변경 대상의 현재 프로젝트 소속과 권한을 검사한다.
-- (수정안 요청) IN_PROGRESS는 작성 건(DOC-A13)이 EDITING·SUBMITTED·REJECTED인 문서, CURRENT는 현재 기준에 들어 있는 승인본이다. 승인되면 진행 중에서 빠지고 현재 문서로 옮겨진다.
+- IN_PROGRESS는 작성 건(DOC-A13)이 EDITING·SUBMITTED·REJECTED인 문서, CURRENT는 현재 기준(baseline)에 들어 있는 문서다. 승인되면 진행 중에서 빠지고, 최초 기준 설계 생성(PLN-A10) 이후 현재 문서에 나타난다. 최초 기준 생성 전에는 승인된 문서가 두 단계 어디에도 나오지 않으므로, `stage` 없이 조회해 `approved_version` 유무로 구분한다(DOC-A03으로 승인본 조회 가능).
 - (수정안 요청) 각 문서에 `preview_text`(본문 앞부분 300자)를 넣어 썸네일 보기가 미리보기를 그린다. 이미지 썸네일은 나중이다.
 - `preview_text`는 작성 건(DOC-A13)이 EDITING·SUBMITTED·REJECTED이면 작성 중 본문, 아니면 승인본(없으면 최신 초안) 본문의 연속 공백·개행을 한 칸으로 줄이고 앞 300자(코드 포인트 기준)를 자른 값이다. 본문이 없으면 생략한다.
 
