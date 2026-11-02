@@ -109,6 +109,7 @@ final class DocumentChunkValidator {
             checkLocator(locator, start, end, lines);
             String reason = text(excluded.get("reason"));
             if (!Set.of("blank", "thematic_break", "container_marker").contains(reason)) throw invalid("invalid_excluded_range");
+            if ("text/plain".equals(input.get("media_type")) && !"blank".equals(reason)) throw invalid("invalid_excluded_range");
             for (int line = start; line <= end; line++) {
                 String value = new String(points, starts.get(line - 1), starts.get(line) - starts.get(line - 1));
                 if (!validExcludedLine(value, reason)) throw invalid("invalid_excluded_range");
