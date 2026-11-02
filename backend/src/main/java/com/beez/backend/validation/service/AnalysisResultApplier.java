@@ -255,16 +255,15 @@ public class AnalysisResultApplier {
             return Optional.empty();
         }
         long runId = ((Number) run.get().get("id")).longValue();
-        // 결과를 기다리는 사이 계획 리비전이 바뀌었으면 이 결과는 지난 계획의 것이다. 진행 중 계획 변경(S2)은 끝난 검증만
-        // STALE 로 바꾸고 도는 검증은 워커에 맡기므로, 여기서 버리고 STALE(PLAN_CHANGED) 로 닫는다.
-        // project 행은 잠그지 않는다 — 계획 변경이 project → validation 순서로 잠가, 여기서 잡으면 순서가 거꾸로 된다.
-        // 이 확인과 커밋 사이의 짧은 틈은 시작 관문(G1)이 계획 리비전으로 거른다
-        Optional<Long> currentPlan = validations.currentPlanRevision(v.taskId());
-        if (currentPlan.isEmpty() || !currentPlan.get().equals(v.planRevisionId())) {
-            validations.finishRun(runId, "DISCARDED", "계획이 바뀐 뒤 도착한 결과", null, 0);
-            validations.markStale(v.id(), "PLAN_CHANGED");
+        // 결과를 기다리는 사이 분석 입력(이 작업의 계획, 같은 항목을 보는 관련 작업과 그 계획)이 바뀌었으면 이 결과는 지난 입력의
+        // 것이다. 진행 중 계획 변경(S2)은 끝난 검증만 STALE 로 바꾸고 도는 검증은 워커에 맡기므로, 여기서 버리고 STALE 로 닫는다.
+        // project 행은 잠그지 않는다 — 계획 변경이 project → validation 순서로 잠가, 여기서 잡으면 순서가 거꾸로 된다
+        Optional<String> changed = inputChange(v);
+        if (changed.isPresent()) {
+            validations.finishRun(runId, "DISCARDED", "검증 입력이 바뀐 뒤 도착한 결과 (" + changed.get() + ")", null, 0);
+            validations.markStale(v.id(), changed.get());
             validations.finishJob(lease.jobId(), "CANCELLED");
-            log.info("validation {} attempt {} result discarded: plan changed", v.id(), lease.attempt());
+            log.info("validation {} attempt {} result discarded: input changed ({})", v.id(), lease.attempt(), changed.get());
             return Optional.empty();
         }
         // job 은 lock() 이 이미 잠갔다. 이 리스가 아직 job 을 쥐고 있는지, 유효기간이 지났는지 본다
@@ -291,6 +290,35 @@ public class AnalysisResultApplier {
     }
 
     private record Current(ValidationRow validation, long runId) {
+    }
+
+    /**
+     * 접수 때 고정한 분석 입력이 지금도 그대로인가. 바뀌었으면 무효화 사유:
+     * <ul>
+     *   <li>PLAN_CHANGED — 이 작업의 현재 계획 리비전이 검증한 리비전과 다름</li>
+     *   <li>RELATED_PLAN_CHANGED — 같은 설계 항목을 보는 열린 다른 작업과 그 현재 계획(작업 → 계획 리비전)이 접수 때 고정한
+     *       관련 작업(validation_task_ref)과 다름. 관련 작업의 계획이 바뀐 경우, 새 관련 작업이 생긴 경우, 관련 작업이 닫힌 경우 모두</li>
+     * </ul>
+     * 설계 발행으로 참조 버전이 바뀐 경우는 설계 발행 수신(-163)이 검증을 STALE 로 바꾸고, 그 전까지는 시작 관문(G2)이 막는다.
+     * 워커가 AI 를 부르기 전에도 같은 확인을 해 버릴 결과로 모델을 부르지 않는다.
+     */
+    public Optional<String> inputChange(ValidationRow v) {
+        Optional<Long> currentPlan = validations.currentPlanRevision(v.taskId());
+        if (currentPlan.isEmpty() || !currentPlan.get().equals(v.planRevisionId())) {
+            return Optional.of("PLAN_CHANGED");
+        }
+        Map<Long, Long> fixed = new LinkedHashMap<>();
+        for (Map<String, Object> row : validations.taskRefs(v.id())) {
+            fixed.put(((Number) row.get("related_task_id")).longValue(), ((Number) row.get("related_plan_revision_id")).longValue());
+        }
+        Map<Long, Long> now = new LinkedHashMap<>();
+        for (Map<String, Object> row : validations.openTasksSharingItems(v.projectId(), v.taskId(), v.planRevisionId())) {
+            now.put(((Number) row.get("task_id")).longValue(), ((Number) row.get("plan_revision_id")).longValue());
+        }
+        if (!now.equals(fixed)) {
+            return Optional.of("RELATED_PLAN_CHANGED");
+        }
+        return Optional.empty();
     }
 
     /** 항목·버전이 지금 기준에서 낡았는가. 항목이 없는 후보는 대조할 수 없으니 낡았다고 보지 않는다 */

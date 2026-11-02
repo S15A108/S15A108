@@ -609,6 +609,70 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     }
 
     @Test
+    void relatedTaskPlanChangedDuringAnalysis_discardsResult_andStartIsRefused() throws Exception {
+        // A 와 B 가 같은 설계 항목을 본다. A 의 검증에는 B 의 지금 계획이 관련 계획으로 들어간다
+        long[] b = createTask(planJson("B", api.implementsRef("API-01"), true, null), member);
+        long[] a = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+        assertThat(api.jdbc.sql("select related_plan_revision_id from validation_task_ref where validation_id = :v and related_task_id = :t")
+                .param("v", id).param("t", b[0]).query(Long.class).single()).isEqualTo(b[1]);
+        doAnswer(inv -> {
+            // AI 가 도는 동안 B 의 계획이 바뀐다
+            String plan = api.planJson("B2", api.implementsRef("API-01"), "[]").trim();
+            String revision = plan.substring(0, plan.lastIndexOf('}'))
+                    + ",\n  \"expected_revision_no\": 1,\n  \"expected_lock_version\": " + b[2] + "\n}";
+            HttpResponse<String> res = api.post(tasksPath() + "/" + b[0] + "/plan-revisions", revision, member);
+            assertThat(res.statusCode()).as(res.body()).isEqualTo(201);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+        worker.runOnce();
+
+        // B 의 지난 계획으로 낸 결과는 PASS 로 남기지 않는다
+        assertThat(column("validation", "status", id)).isEqualTo("STALE");
+        assertThat(column("validation", "stale_reason", id)).isEqualTo("RELATED_PLAN_CHANGED");
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("DISCARDED");
+        assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("CANCELLED");
+        assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isZero();
+        // 그 검증으로는 A 를 시작할 수 없다
+        HttpResponse<String> start = api.post(tasksPath() + "/" + a[0] + "/state-events",
+                "{\"event\":\"START\",\"plan_revision_id\":\"" + a[1] + "\",\"expected_lock_version\":" + a[2]
+                        + ",\"validation_id\":\"" + id + "\"}", member);
+        assertThat(start.statusCode()).as(start.body()).isEqualTo(409);
+    }
+
+    @Test
+    void newRelatedTaskDuringAnalysis_discardsResult() throws Exception {
+        long[] a = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+        assertThat(count("select count(*) from validation_task_ref where validation_id = " + id)).isZero();
+        doAnswer(inv -> {
+            // AI 가 도는 동안 같은 항목을 보는 새 작업이 생긴다 — 분석에 들어가지 않은 관련 계획이다
+            createTask(planJson("C", api.implementsRef("API-01"), true, null), member);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+        worker.runOnce();
+
+        assertThat(column("validation", "status", id)).isEqualTo("STALE");
+        assertThat(column("validation", "stale_reason", id)).isEqualTo("RELATED_PLAN_CHANGED");
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("DISCARDED");
+    }
+
+    @Test
+    void relatedTaskChangedWhileQueued_doesNotCallAi() throws Exception {
+        long[] a = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
+        long id = body(accept(a, member), 202).get("id").asLong();
+        createTask(planJson("C", api.implementsRef("API-01"), true, null), member);   // 꺼내기 전에 관련 작업이 생긴다
+        AtomicReference<Boolean> called = new AtomicReference<>(false);
+        doAnswer(inv -> {
+            called.set(true);
+            return aiResponse(inv.getArgument(0), List.of(), List.of());
+        }).when(analyzer).analyze(any());
+        worker.runOnce();
+        assertThat(called.get()).isFalse();
+        assertThat(column("validation", "stale_reason", id)).isEqualTo("RELATED_PLAN_CHANGED");
+    }
+
+    @Test
     void worker_planChangedWhileQueued_doesNotCallAi() throws Exception {
         long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
         long id = body(accept(t, member), 202).get("id").asLong();

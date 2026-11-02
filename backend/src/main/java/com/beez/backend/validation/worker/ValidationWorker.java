@@ -152,10 +152,9 @@ public class ValidationWorker {
         if (v == null || !"RUNNING".equals(v.status()) || v.currentAttempt() != lease.attempt()) {
             return null;
         }
-        // 큐에서 기다리는 사이 계획이 바뀌었으면 AI 를 부르지 않는다 (지난 계획을 분석해 봐야 버릴 결과다).
-        // null 을 돌려주면 반영 단계가 STALE(PLAN_CHANGED) 로 닫는다
-        Optional<Long> currentPlan = validations.currentPlanRevision(v.taskId());
-        if (currentPlan.isEmpty() || !currentPlan.get().equals(v.planRevisionId())) {
+        // 큐에서 기다리는 사이 분석 입력(이 작업·관련 작업의 계획)이 바뀌었으면 AI 를 부르지 않는다 (버릴 결과다).
+        // null 을 돌려주면 반영 단계가 같은 확인으로 STALE 로 닫는다
+        if (applier.inputChange(v).isPresent()) {
             return null;
         }
         TaskPlanRevision plan = revisions.findByIdAndTaskId(v.planRevisionId(), v.taskId()).orElseThrow();
