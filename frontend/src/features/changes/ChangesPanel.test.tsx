@@ -272,3 +272,32 @@ it('변경 제안 창에는 새 제안 버튼 대신 공용 문서함으로 가�
   )
   expect(useWorkspaceStore.getState().pane).toBe('documents')
 })
+
+// PR #72 리뷰 4: 다시 낼 때 설계 항목 변경은 승인본으로 다시 만들지 않고 원래 proposed_content 그대로 보낸다.
+it('반려된 제안을 다시 내면 설계 항목 변경을 원래 그대로 보낸다', async () => {
+  const { proposal } = await changesApi.get('101', '71')
+  await changesApi.reject('101', '71', {
+    reason: '다시 봐 주세요.',
+    expected_revision: proposal.revision,
+    expected_snapshot_hash: proposal.snapshot_hash,
+  })
+  await authApi.login({ email: 'member@beez.local', password: DEMO_PASSWORD })
+  const update = vi.spyOn(changesApi, 'update')
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ChangesPanel projectId="101" isLeader={false} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await user.click(
+    await screen.findByRole('button', { name: '고쳐서 다시 올리기' }),
+  )
+  await user.click(screen.getByRole('button', { name: '다시 올리기' }))
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    '고친 내용을 올렸어요.',
+  )
+  expect(update.mock.calls[0][2].items).toEqual(proposal.items)
+  vi.restoreAllMocks()
+})
