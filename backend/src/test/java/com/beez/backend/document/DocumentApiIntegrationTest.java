@@ -526,6 +526,28 @@ class DocumentApiIntegrationTest {
         assertThat(JSON.readTree(send("GET", "/api/projects/" + otherProject + "/documents?stage=IN_PROGRESS", null, false).body()).get("items")).isEmpty();
     }
 
+    @Test void previewFollowsInProgressWorkingCopyUntilApproval() throws Exception {
+        var document = uploaded();
+        long id = document.get("id").asLong(), version = document.get("latest_draft").get("id").asLong();
+        String path = "/api/projects/" + project + "/documents/" + id + "/working-copy";
+        var edit = send("PATCH", path, "{\"expected_revision\":1,\"content\":\"# 수정본\\n\\n작성 중   내용\",\"file_name\":\"input.md\"}", true);
+        assertThat(edit.statusCode()).withFailMessage(edit.body()).isEqualTo(200);
+        String listPath = "/api/projects/" + project + "/documents?stage=IN_PROGRESS";
+        assertThat(JSON.readTree(send("GET", listPath, null, false).body()).get("items").get(0).get("preview_text").asText()).isEqualTo("# 수정본 작성 중 내용");
+
+        jdbc.update("UPDATE document_working_copy SET status='REJECTED' WHERE document_id=?", id);
+        jdbc.update("UPDATE document_version SET status='SUPERSEDED' WHERE id=?", version);
+        var rejected = JSON.readTree(send("GET", listPath, null, false).body()).get("items").get(0);
+        assertThat(rejected.has("latest_draft")).isFalse();
+        assertThat(rejected.get("preview_text").asText()).isEqualTo("# 수정본 작성 중 내용");
+
+        jdbc.update("UPDATE document_working_copy SET status='APPROVED' WHERE document_id=?", id);
+        jdbc.update("UPDATE document_version SET status='DRAFT' WHERE id=?", version);
+        publish(id, version);
+        var approved = JSON.readTree(send("GET", "/api/projects/" + project + "/documents", null, false).body()).get("items").get(0);
+        assertThat(approved.get("preview_text").asText()).isEqualTo("# 요구사항 REQ-01: 로그인한 멤버만 조회한다.");
+    }
+
     @Test void documentAndVersionResponsesCarryPreviewCreatorAndBaselineFlag() throws Exception {
         String longLine = "가".repeat(299) + "😀😀 tail";
         var response = upload(UUID.randomUUID().toString(), ("# 제목\r\n\r\n본문   첫 줄\n" + longLine + "\n").getBytes(StandardCharsets.UTF_8), "REQUIREMENTS");

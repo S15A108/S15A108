@@ -114,7 +114,10 @@ public class DocumentApplicationService {
                 .stream().findFirst();
         approved.ifPresent(v -> result.put("approved_version", versionView(v, false, currentBaseline)));
         draft.ifPresent(v -> result.put("latest_draft", versionView(v, false, currentBaseline)));
-        (approved.isPresent() ? approved : draft).map(v -> preview(v.get("content_text")))
+        // An in-progress working copy holds the latest edits; version bodies only change when it is submitted or approved.
+        var inProgress = rows("SELECT content_text FROM document_working_copy WHERE document_id=:id AND status IN ('EDITING','SUBMITTED','REJECTED')", Map.of("id", id))
+                .stream().findFirst();
+        (inProgress.isPresent() ? inProgress : approved.isPresent() ? approved : draft).map(v -> preview(v.get("content_text")))
                 .filter(text -> !text.isEmpty()).ifPresent(text -> result.put("preview_text", text));
         return result;
     }
