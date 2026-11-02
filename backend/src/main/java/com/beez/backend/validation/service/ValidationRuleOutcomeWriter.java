@@ -68,6 +68,16 @@ public class ValidationRuleOutcomeWriter {
             finish(e.validationId(), "CANCELLED");
             return Applied.DISCARDED;
         }
+        String previous = row.get("input_snapshot_hash") instanceof String value ? value : "";
+        boolean acceptedFirstAttempt = e.attempt() == 1 && !previous.startsWith("pending:") && !previous.isBlank();
+        // #159 fixes the referenced related plans at acceptance. Status changes of
+        // those same plans can create a conflict, but a new/removed/revised related
+        // plan is a different input and must be revalidated from the start.
+        if (acceptedFirstAttempt && !sameRelatedPlans(e)) {
+            if (!leaseValid(e.validationId())) return Applied.DISCARDED;
+            discardChangedInput(e);
+            return Applied.DISCARDED;
+        }
         var result = checker.check(e.projectId(), e.taskId(), e.planRevisionId(), e.baselineId());
         if (!leaseValid(e.validationId())) return Applied.DISCARDED;
         var summary = new LinkedHashMap<String, Object>();
@@ -78,12 +88,8 @@ public class ValidationRuleOutcomeWriter {
                 .param("summary", json.writeValueAsString(summary)).param("id", e.validationId()).update();
         if (result.findings().isEmpty()) return Applied.CONTINUE;
         // A previously captured full input must not be replaced by different retry facts.
-        if (!(row.get("input_snapshot_hash") instanceof String previous) || !previous.startsWith("pending:")) {
-            jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
-                    .param("id", e.runId()).update();
-            jdbc.sql("update validation set status='STALE',stale_reason='INPUT_CHANGED',finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
-                    .param("id", e.validationId()).update();
-            finish(e.validationId(), "CANCELLED");
+        if ((!previous.startsWith("pending:") || e.attempt() != 1) && !acceptedFirstAttempt) {
+            discardChangedInput(e);
             return Applied.DISCARDED;
         }
         for (var finding : result.findings()) {
@@ -126,7 +132,7 @@ public class ValidationRuleOutcomeWriter {
                 .param("id", e.validationId()).query().listOfRows());
         summary.put("rule_input", ruleInput);
         String status = result.findings().stream().anyMatch(f -> !"MISSING_INPUT".equals(f.kind())) ? "NEEDS_REVIEW" : "NEEDS_INPUT";
-        jdbc.sql("update validation_run set kind='RULE',status='OK',finished_at=now(),updated_at=now() where id=:id")
+        jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
                 .param("id", e.runId()).update();
         jdbc.sql("update validation set status=:status,input_snapshot_hash=:hash,rule_version='validation-rule-v1',summary=coalesce(summary,'{}'::jsonb) || cast(:summary as jsonb),finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
                 .param("status", status).param("hash", hash(ruleInput)).param("summary", json.writeValueAsString(summary))
@@ -138,6 +144,29 @@ public class ValidationRuleOutcomeWriter {
     private void finish(long id, String status) {
         jdbc.sql("update validation_job set status=:status,lease_token=null,lease_until=null,updated_at=now() where validation_id=:id")
                 .param("id", id).param("status", status).update();
+    }
+    private boolean sameRelatedPlans(ValidationOutcomeWriter.Execution e) {
+        var accepted = jdbc.sql("""
+                select related_task_id as task_id, related_plan_revision_id as revision_id
+                  from validation_task_ref where validation_id=:validation order by related_task_id
+                """).param("validation", e.validationId()).query().listOfRows();
+        var current = jdbc.sql("""
+                select distinct t.id as task_id,t.current_plan_revision_id as revision_id
+                  from task t join task_plan_design_ref r on r.plan_revision_id=t.current_plan_revision_id
+                 where t.project_id=:project and t.id<>:task
+                   and t.status in ('READY','IN_PROGRESS','WAITING')
+                   and r.design_item_id in (select design_item_id from task_plan_design_ref where plan_revision_id=:revision)
+                 order by t.id
+                """).param("project", e.projectId()).param("task", e.taskId())
+                .param("revision", e.planRevisionId()).query().listOfRows();
+        return accepted.equals(current);
+    }
+    private void discardChangedInput(ValidationOutcomeWriter.Execution e) {
+        jdbc.sql("update validation_run set status='DISCARDED',finished_at=now(),updated_at=now() where id=:id")
+                .param("id", e.runId()).update();
+        jdbc.sql("update validation set status='STALE',stale_reason='INPUT_CHANGED',finished_at=now(),updated_at=now(),lock_version=lock_version+1 where id=:id")
+                .param("id", e.validationId()).update();
+        finish(e.validationId(), "CANCELLED");
     }
     private boolean leaseValid(long id) {
         return Boolean.TRUE.equals(jdbc.sql("select lease_until>clock_timestamp() from validation_job where validation_id=:id")

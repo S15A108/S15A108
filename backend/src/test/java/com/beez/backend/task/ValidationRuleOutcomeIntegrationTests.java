@@ -98,6 +98,64 @@ class ValidationRuleOutcomeIntegrationTests extends IntegrationTestSupport {
     }
 
     @Test
+    void existingRelatedTaskBecomingActiveFinalizesConflictWithoutModel() {
+        long target = create("대상", true), other = create("관련 작업", true);
+        var execution = claim(target); // Both related revisions are captured while READY.
+        long approved = api.jdbc.sql("""
+                insert into validation(task_id,plan_revision_id,baseline_id,status,trigger,input_snapshot_hash,rule_version)
+                values(:task,:revision,:baseline,'PASS','AGENT','fixture','test') returning id
+                """).param("task", other).param("revision", revision(other)).param("baseline", baseline).query(Long.class).single();
+        api.jdbc.sql("update task set status='IN_PROGRESS',started_validation_id=:validation where id=:id")
+                .param("id", other).param("validation", approved).update();
+
+        assertThat(writer.apply(execution, CallerContext.human(owner))).isEqualTo(ValidationRuleOutcomeWriter.Applied.FINALIZED);
+        assertThat(api.jdbc.sql("select status from validation where id=:id").param("id", execution.validationId()).query(String.class).single()).isEqualTo("NEEDS_REVIEW");
+        assertThat(api.jdbc.sql("select kind || ':' || status from validation_run where id=:id").param("id", execution.runId()).query(String.class).single()).isEqualTo("MODEL:DISCARDED");
+        assertThat(api.jdbc.sql("select count(*) from validation_finding where validation_id=:id and source='RULE' and kind='CONFLICT' and related_task_id=:other")
+                .param("id", execution.validationId()).param("other", other).query(Long.class).single()).isEqualTo(1);
+        assertThat(api.jdbc.sql("select status from validation_job where validation_id=:id").param("id", execution.validationId()).query(String.class).single()).isEqualTo("DONE");
+        assertThat(api.jdbc.sql("select count(*) from llm_usage where validation_run_id=:id").param("id", execution.runId()).query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void changedRelatedRevisionDiscardsAcceptedSnapshot() throws Exception {
+        long target = create("대상", true), other = create("관련 작업", true);
+        var execution = claim(target);
+        int lock = api.jdbc.sql("select lock_version from task where id=:id").param("id", other).query(Integer.class).single();
+        String plan = api.planJson("변경된 관련 작업", api.changesRef("API-01"), "[]")
+                .replace("\"no_contract_change\": true", "\"no_contract_change\": false").trim();
+        String request = plan.substring(0, plan.lastIndexOf('}'))
+                + ",\n  \"expected_revision_no\": 1,\n  \"expected_lock_version\": " + lock + "\n}";
+        var response = api.post("/api/projects/" + project + "/tasks/" + other + "/plan-revisions", request, owner);
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+
+        assertThat(writer.apply(execution, CallerContext.human(owner))).isEqualTo(ValidationRuleOutcomeWriter.Applied.DISCARDED);
+        assertThat(api.jdbc.sql("select status from validation where id=:id").param("id", execution.validationId()).query(String.class).single()).isEqualTo("STALE");
+        assertThat(api.jdbc.sql("select status from validation_run where id=:id").param("id", execution.runId()).query(String.class).single()).isEqualTo("DISCARDED");
+    }
+
+    @Test
+    void retryCannotReplaceItsPriorInputWithNewConflict() {
+        long target = create("대상", true), other = create("관련 작업", true);
+        var first = claim(target);
+        api.jdbc.sql("update validation set current_attempt=2 where id=:id").param("id", first.validationId()).update();
+        api.jdbc.sql("update validation_run set attempt=2 where id=:id").param("id", first.runId()).update();
+        api.jdbc.sql("update validation_job set attempts=2 where validation_id=:id").param("id", first.validationId()).update();
+        long approved = api.jdbc.sql("""
+                insert into validation(task_id,plan_revision_id,baseline_id,status,trigger,input_snapshot_hash,rule_version)
+                values(:task,:revision,:baseline,'PASS','AGENT','fixture','test') returning id
+                """).param("task", other).param("revision", revision(other)).param("baseline", baseline).query(Long.class).single();
+        api.jdbc.sql("update task set status='IN_PROGRESS',started_validation_id=:validation where id=:id")
+                .param("id", other).param("validation", approved).update();
+        var retry = new ValidationOutcomeWriter.Execution(first.projectId(), first.taskId(), first.validationId(), first.runId(), 2,
+                first.leaseToken(), first.baselineId(), first.planRevisionId(), first.relatedPlanRevisions(), first.provider(), first.caller());
+
+        assertThat(writer.apply(retry, CallerContext.human(owner))).isEqualTo(ValidationRuleOutcomeWriter.Applied.DISCARDED);
+        assertThat(api.jdbc.sql("select status from validation where id=:id").param("id", first.validationId()).query(String.class).single()).isEqualTo("STALE");
+        assertThat(api.jdbc.sql("select count(*) from validation_finding where validation_id=:id").param("id", first.validationId()).query(Long.class).single()).isZero();
+    }
+
+    @Test
     void noFindingsLeaveOwnedRunForModelAndExpiredLeaseCannotFinalize() {
         var execution = claim(create("정상", false));
         assertThat(writer.apply(execution, CallerContext.human(owner))).isEqualTo(ValidationRuleOutcomeWriter.Applied.CONTINUE);

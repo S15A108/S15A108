@@ -39,14 +39,15 @@ public class ValidationOutcomeWriter {
     @Autowired
     public ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
                                    ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks,
-                                   @Value("${beez.validation.fake-analyzer:false}") boolean fakeAnalyzerEnabled) {
+                                   @Value("${beez.validation.fake-analyzer:false}") boolean fakeAnalyzerEnabled,
+                                   ValidationRepository validationRepository) {
         this.jdbc = jdbc; this.json = json; this.rules = rules; this.assembler = assembler;
         this.relatedTasks = relatedTasks; this.fakeAnalyzerEnabled = fakeAnalyzerEnabled;
-        this.validationRepository = new ValidationRepository(jdbc, json);
+        this.validationRepository = validationRepository;
     }
     ValidationOutcomeWriter(JdbcClient jdbc, ObjectMapper json, ValidationRuleChecker rules,
                             ValidationInputAssembler assembler, RelatedTaskCandidateFinder relatedTasks) {
-        this(jdbc, json, rules, assembler, relatedTasks, false);
+        this(jdbc, json, rules, assembler, relatedTasks, false, new ValidationRepository(jdbc, json));
     }
 
     public record Execution(long projectId, long taskId, long validationId, long runId, int attempt,
@@ -119,7 +120,9 @@ public class ValidationOutcomeWriter {
         var ruleResult = rules.check(execution.projectId(), execution.taskId(),
                 execution.planRevisionId(), execution.baselineId());
         if (!owned(execution)) return discardIfObsolete(execution);
-        if (!ruleResult.findings().isEmpty()) return stale(execution);
+        // The input snapshot is still current, but another task's state may have
+        // changed while the model ran. Preserve any newly established rule finding.
+        for (var finding : ruleResult.findings()) insertRuleFinding(execution, finding);
         String status = classify(maps(result.get("findings")), existingRuleFindings(execution.validationId()));
         var diagnostics = summary(request, result, execution, searchComplete, List.copyOf(reasons));
         diagnostics.put("rule_checks", ruleResult.checkedRules());
@@ -506,6 +509,22 @@ public class ValidationOutcomeWriter {
                 .param("check_key", f.get("check_key")).param("evidence_ids", stringify(f.get("evidence_ids"))).update();
     }
 
+    private void insertRuleFinding(Execution e, ValidationRuleChecker.Finding f) {
+        jdbc.sql("""
+                insert into validation_finding(validation_id,validation_run_id,source,kind,severity,design_item_id,
+                    design_item_version_id,related_task_id,message,sources,resolution,next_action)
+                select :validation,:run,'RULE',:kind,:severity,:item,:version,:task,:message,'[]'::jsonb,:resolution,:action
+                where not exists (select 1 from validation_finding old
+                    where old.validation_id=:validation and old.source='RULE' and old.kind=:kind
+                      and old.severity=:severity and old.design_item_id is not distinct from :item
+                      and old.design_item_version_id is not distinct from :version
+                      and old.related_task_id is not distinct from :task)
+                """).param("validation", e.validationId()).param("run", e.runId())
+                .param("kind", f.kind()).param("severity", f.severity()).param("item", f.designItemId())
+                .param("version", f.designItemVersionId()).param("task", f.relatedTaskId())
+                .param("message", f.message()).param("resolution", f.resolution()).param("action", f.nextAction()).update();
+    }
+
     private static Map<String, Object> summary(Map<String, Object> request, Map<String, Object> result, Execution e,
                                                 boolean searchComplete, List<String> incompleteReasons) {
         var value = new LinkedHashMap<String, Object>();
@@ -631,6 +650,24 @@ public class ValidationOutcomeWriter {
     }
 
     private void saveUsage(Execution e, List<Map<String, Object>> usage) {
+        if (!usage.isEmpty()) {
+            // Keep first occurrence of each provider call, including late responses after
+            // recovery; fence the write to the original run, attempt and lease token.
+            jdbc.sql("""
+                    update validation_run set usage=(
+                        select jsonb_agg(d.item order by d.ord) from (
+                            select distinct on (item->>'request_key') item, ord
+                              from jsonb_array_elements(coalesce(usage,'[]'::jsonb) || cast(:usage as jsonb))
+                                   with ordinality as entries(item, ord)
+                             order by item->>'request_key', ord
+                        ) d
+                    ),analyzer_version=case when analyzer_version is null or analyzer_version='task-validation-v1'
+                           then :model else analyzer_version end,updated_at=now()
+                    where id=:run and validation_id=:validation and attempt=:attempt and lease_token=:token
+                    """).param("usage", stringify(usage)).param("model", usage.getFirst().get("model"))
+                    .param("run", e.runId()).param("validation", e.validationId())
+                    .param("attempt", e.attempt()).param("token", e.leaseToken()).update();
+        }
         for (var u : usage) {
             jdbc.sql("""
                     insert into llm_usage(project_id,feature,request_key,task_id,validation_run_id,provider,model,tokens_known,

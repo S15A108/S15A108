@@ -59,7 +59,10 @@ class ValidationOutcomeWriterFlowTest {
             when(rowQuery.listOfRows()).thenReturn(List.of(Map.of(
                     "current_baseline_id", currentBaseline, "current_plan_revision_id", currentPlanRevision)));
         } else if (sql.startsWith("select kind,severity from validation_finding")) {
-            when(rowQuery.listOfRows()).thenReturn(List.of());
+            when(rowQuery.listOfRows()).thenAnswer(ignored -> writes.stream()
+                    .filter(w -> w.sql().contains("select :validation,:run,'RULE'"))
+                    .map(w -> Map.<String, Object>of("kind", w.params().get("kind"), "severity", w.params().get("severity")))
+                    .toList());
         } else if (sql.startsWith("select id,source_document_version_id from design_item_version")) {
             when(rowQuery.listOfRows()).thenReturn(List.of(Map.of("id", 11L, "source_document_version_id", 20L)));
         } else {
@@ -220,15 +223,19 @@ class ValidationOutcomeWriterFlowTest {
         assertThat(wrote("insert into validation_design_ref")).isFalse();
     }
 
-    @Test void newBlockingRuleAfterAiDiscardsResultAsStale() {
+    @Test void newBlockingRuleAfterAiIsRecordedAndRequiresReview() {
         var conflict = new ValidationRuleChecker.Finding("CONFLICT", "BLOCKING", "다른 작업 충돌",
                 10L, 11L, 8L, "HUMAN_REVIEW", "확인");
         when(rules.check(1, 2, 6, 5)).thenReturn(ruleResult(List.of(conflict), List.of()));
         assertThat(writer.complete(execution, request(), response(complete(List.of())), true))
-                .isEqualTo(ValidationOutcomeWriter.Applied.DISCARDED);
-        assertThat(validationWrite().sql()).contains("status='STALE'");
+                .isEqualTo(ValidationOutcomeWriter.Applied.APPLIED);
+        assertThat(validationWrite().params()).containsEntry("status", "NEEDS_REVIEW");
         assertThat(wrote("insert into llm_usage")).isTrue();
-        assertThat(wrote("insert into validation_finding")).isFalse();
+        assertThat(writes).anySatisfy(w -> {
+            assertThat(w.sql()).contains("select :validation,:run,'RULE'");
+            assertThat(w.params()).containsEntry("kind", "CONFLICT").containsEntry("task", 8L)
+                    .containsEntry("resolution", "HUMAN_REVIEW");
+        });
     }
 
     @Test void unsupportedRulesDoNotAllowPass() {
