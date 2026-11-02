@@ -27,6 +27,8 @@ interface Props {
   tasks: TaskDetail[]
   /** 고칠 수 있는 현재 문서(기준 원문 포함) */
   documents?: { id: string; label: string; content: string }[]
+  /** 다시 내는 제안에서 폼 밖에 그대로 함께 올라가는 문서 이름 */
+  keptDocuments?: string[]
   defaultValues?: ProposalFormValues
   // 제안 고치기 · 고쳐서 새로 올리기에서 쓴다.
   status?: ReactNode
@@ -56,6 +58,7 @@ export function ProposalForm({
   items,
   tasks,
   documents = [],
+  keptDocuments = [],
   defaultValues,
   status,
   description,
@@ -113,7 +116,7 @@ export function ProposalForm({
           !!base &&
           normalizeDocument(form.after_content ?? '') ===
             normalizeDocument(base.content)
-        if (unchanged && !form.items.length) {
+        if (unchanged && !form.items.length && !keptDocuments.length) {
           setError('after_content', {
             message: '기준 문서와 달라진 내용이 없어요.',
           })
@@ -242,6 +245,15 @@ export function ProposalForm({
                 </>
               )}
             </div>
+          )}
+          {keptDocuments.length > 0 && (
+            <p className="rounded-xl bg-muted/40 p-3 text-sm">
+              함께 올라가는 문서 변경 {keptDocuments.length}개:{' '}
+              {keptDocuments.join(', ')}
+              <span className="block text-xs text-muted-foreground">
+                고치지 않아도 처음 올린 글 그대로 다시 올라가요.
+              </span>
+            </p>
           )}
           <details className="rounded-xl border p-3 text-sm">
             <summary className="cursor-pointer font-medium">

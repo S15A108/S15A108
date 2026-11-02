@@ -38,6 +38,7 @@ import {
   kindLabel,
   operationLabel,
   toChangeItems,
+  toDocumentChanges,
   toRows,
 } from './proposalItems'
 import type { ProposalFormValues } from './proposalItems'
@@ -254,17 +255,13 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
         ? { previous_proposal_id: source.id }
         : {}),
       items: toChangeItems(values.items, approved),
-      documents: values.document_id
-        ? [
-            {
-              document_id: values.document_id,
-              base_document_version_id: documentOptions.find(
-                (item) => item.id === values.document_id,
-              )!.versionId,
-              after_content: values.after_content,
-            },
-          ]
-        : [],
+      // 폼은 첫 문서만 고치고, 나머지 문서 변경은 원래 제안 값 그대로 함께 보낸다.
+      documents: toDocumentChanges(
+        values,
+        documentOptions.find((item) => item.id === values.document_id)
+          ?.versionId,
+        source?.documents.slice(1),
+      ),
     }
     await action.run(
       async () => {
@@ -433,6 +430,14 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
             <ProposalForm
               key={documents.isSuccess ? 'documents' : 'loading'}
               documents={documentOptions}
+              keptDocuments={mode.source?.documents
+                .slice(1)
+                .map(
+                  (change) =>
+                    documentOptions.find(
+                      (item) => item.id === change.document_id,
+                    )?.title ?? '문서',
+                )}
               // 올린 제안(PROPOSED·IN_REVIEW)은 잠기고, 반려된 제안만 같은 번호로 고쳐 다시 올린다(CHG-A04, 사용자 결정 10-30).
               heading={
                 mode.update
@@ -481,6 +486,10 @@ export function ChangesPanel({ projectId, isLeader }: Props) {
                       document_id: mode.source.documents[0]?.document_id ?? '',
                       after_content:
                         mode.source.documents[0]?.after_content ?? '',
+                      kept_documents: Math.max(
+                        0,
+                        mode.source.documents.length - 1,
+                      ),
                     }
                   : mode.documentId
                     ? {

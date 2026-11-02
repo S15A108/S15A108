@@ -1,5 +1,10 @@
 import { z } from 'zod'
-import type { ChangeItem, DesignItemVersion } from '@/api/contracts/common'
+import type {
+  ChangeItem,
+  DesignItemVersion,
+  DocumentChange,
+  ResolvedDocumentChange,
+} from '@/api/contracts/common'
 import { describeContent } from '@/lib/display'
 
 export const kindLabel = {
@@ -60,9 +65,11 @@ export const proposalFormSchema = z
     // 고칠 문서(선택): 고친 글을 after_content로 보낸다(CHG-A01 documents).
     document_id: z.string().optional(),
     after_content: z.string().optional(),
+    // 다시 내는 제안에서 폼 밖에 그대로 남는 문서 변경 수(toDocumentChanges의 kept)
+    kept_documents: z.number().int().optional(),
   })
   .superRefine((form, context) => {
-    if (!form.items.length && !form.document_id)
+    if (!form.items.length && !form.document_id && !form.kept_documents)
       context.addIssue({
         code: 'custom',
         path: ['items'],
@@ -115,6 +122,33 @@ export function toChangeItems(
           proposed_content: { ...base.content, description: row.sentence },
         }
   })
+}
+
+// 제안의 문서 변경. 폼은 문서 하나(document_id)를 고치고, 원래 제안의 나머지 문서 변경은 받은 값 그대로 함께 보낸다.
+// 폼에서 같은 문서를 고르면 폼의 글이 그 문서를 대신한다.
+export function toDocumentChanges(
+  form: Pick<ProposalFormValues, 'document_id' | 'after_content'>,
+  editedVersionId: string | undefined,
+  kept: ResolvedDocumentChange[] = [],
+): DocumentChange[] {
+  return [
+    ...(form.document_id && editedVersionId
+      ? [
+          {
+            document_id: form.document_id,
+            base_document_version_id: editedVersionId,
+            after_content: form.after_content ?? '',
+          },
+        ]
+      : []),
+    ...kept
+      .filter((change) => change.document_id !== form.document_id)
+      .map((change) => ({
+        document_id: change.document_id,
+        base_document_version_id: change.base_document_version_id,
+        after_content: change.after_content,
+      })),
+  ]
 }
 
 export function toRows(items: ChangeItem[]): ProposalRow[] {
