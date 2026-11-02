@@ -184,3 +184,31 @@ it('팀원 목록을 못 불러오면 프로젝트 삭제 폼을 보이지 않�
   ).not.toBeInTheDocument()
   vi.restoreAllMocks()
 })
+
+// PR #72 전수 리뷰 AMP-03: 일괄 초대 중 하나가 실패해도 이미 만든 링크를 지키고, 실패한 이메일만 칸에 남겨 알린다.
+it('일괄 초대 중 하나가 실패해도 만든 링크를 보여 주고 실패한 이메일만 남긴다', async () => {
+  const user = userEvent.setup()
+  const create = membersApi.createInvitation
+  vi.spyOn(membersApi, 'createInvitation').mockImplementation(
+    async (projectId, input, options) => {
+      if (input?.email === 'two@beez.local') throw new Error('서버 오류')
+      return create(projectId, input, options)
+    },
+  )
+  renderTeam()
+  await screen.findByText('김동료')
+  const form = screen.getByRole('form', { name: '팀원 초대' })
+  await user.type(
+    within(form).getByLabelText('초대할 이메일'),
+    'one@beez.local, two@beez.local',
+  )
+  await user.click(within(form).getByRole('button', { name: '초대' }))
+  expect(await screen.findAllByLabelText('팀원 초대 링크')).toHaveLength(1)
+  expect(screen.getByText('one@beez.local')).toBeInTheDocument()
+  expect(
+    screen.getByText('1명은 초대하지 못했어요. 입력 칸에 남겨 뒀어요.'),
+  ).toBeInTheDocument()
+  expect(within(form).getByLabelText('초대할 이메일')).toHaveValue(
+    'two@beez.local',
+  )
+})

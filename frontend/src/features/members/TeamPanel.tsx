@@ -77,6 +77,9 @@ export function TeamPanel({
   const [dialog, setDialog] = useState<DialogAction | null>(null)
   const [fresh, setFresh] = useState<{ id: string; url: string }[]>([])
   const [copyMessage, setCopyMessage] = useState('')
+  const [inviteFailures, setInviteFailures] = useState<
+    { email: string; message: string }[]
+  >([])
   const project = useQuery({
     queryKey: ['projects', projectId, 'team-project'],
     queryFn: () => projectsApi.get(projectId),
@@ -127,6 +130,8 @@ export function TeamPanel({
   )
   // 여러 명은 한 명씩 만든다. 이미 초대 중이거나 이미 팀원(409 already_member)이면 건너뛴다(Q05 3 ALREADY_INVITED).
   // API 없음: 초대 메일 발송·여러 명 한 번에(emails, PR #42). 지금은 만든 링크를 아래 '초대 중'에 보여 준다.
+  // 초대 목록 조회는 링크(토큰)를 다시 주지 않아, 만든 링크는 바로 보관한다. 중간에 하나가 실패해도 나머지를 계속 만들고
+  // 목록을 새로 고친 뒤 성공과 실패를 나눠 보여 준다(PR #72 전수 리뷰 AMP-03). 실패한 이메일은 입력 칸에 남긴다.
   const invite = async (emails: string[]) => {
     const pending = new Set(
       invitations.data?.pages
@@ -134,28 +139,43 @@ export function TeamPanel({
         .filter((item) => !item.accepted_at && !item.revoked_at)
         .map((item) => item.invited_email?.toLowerCase()),
     )
+    let created = 0
     let skipped = 0
-    await action.run(async () => {
-      const created = []
-      for (const email of emails) {
-        if (pending.has(email.toLowerCase())) {
-          skipped++
-          continue
-        }
-        try {
-          const result = await membersApi.createInvitation(projectId, {
-            email,
-          })
-          created.push({ id: result.invitation.id, url: result.invite_url })
-        } catch (cause) {
-          if (getApiErrorCode(cause) !== 'already_member') throw cause
-          skipped++
-        }
+    const failed: { email: string; message: string }[] = []
+    setInviteFailures([])
+    setCopyMessage('')
+    for (const email of emails) {
+      if (pending.has(email.toLowerCase())) {
+        skipped++
+        continue
       }
-      setFresh(created)
-    }, '초대 링크를 만들었어요.')
-    if (skipped)
-      setCopyMessage(`이미 팀원이거나 초대 중인 ${skipped}명은 건너뛰었어요.`)
+      try {
+        const result = await membersApi.createInvitation(projectId, {
+          email,
+        })
+        created++
+        setFresh((items) => [
+          ...items,
+          { id: result.invitation.id, url: result.invite_url },
+        ])
+      } catch (cause) {
+        if (getApiErrorCode(cause) === 'already_member') skipped++
+        else failed.push({ email, message: getApiErrorMessage(cause) })
+      }
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ['projects', projectId, 'invitations'],
+    })
+    setInviteFailures(failed)
+    setCopyMessage(
+      [
+        created > 0 && `초대 링크 ${created}개를 만들었어요.`,
+        skipped > 0 && `이미 팀원이거나 초대 중인 ${skipped}명은 건너뛰었어요.`,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    )
+    return failed.map((item) => item.email)
   }
   // 제거·나가기 뒤에는 바로 도시로 간다. 이 프로젝트를 다시 부르면 404·403이라 캐시에서 지우고, 목록만 뒤에서 새로 고친다.
   const leaveProject = () => {
@@ -189,6 +209,24 @@ export function TeamPanel({
         </div>
       </header>
       {view === 'team' && isLeader && <InviteForm onInvite={invite} />}
+      {inviteFailures.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-lg bg-destructive/5 p-3 text-sm text-destructive"
+        >
+          <strong className="block">
+            {inviteFailures.length}명은 초대하지 못했어요. 입력 칸에 남겨
+            뒀어요.
+          </strong>
+          <ul className="mt-1 grid gap-0.5">
+            {inviteFailures.map((item) => (
+              <li key={item.email}>
+                {item.email} · {item.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* 결과는 화면 안 글 대신 오른쪽 위 토스트로 잠깐 보여 준다. */}
       {action.message && <Toast>{action.message}</Toast>}
       {handoff.done && (
@@ -823,7 +861,8 @@ const inviteSchema = z.object({
 function InviteForm({
   onInvite,
 }: {
-  onInvite: (emails: string[]) => Promise<unknown>
+  /** 초대하지 못한 이메일을 돌려준다. 그 이메일은 입력 칸에 남긴다. */
+  onInvite: (emails: string[]) => Promise<string[]>
 }) {
   const {
     register,
@@ -841,7 +880,7 @@ function InviteForm({
       className="grid gap-1.5"
       onSubmit={handleSubmit((values) =>
         onInvite(splitEmails(values.emails))
-          .then(() => reset())
+          .then((failed) => reset({ emails: failed.join(', ') }))
           .catch(() => undefined),
       )}
     >
