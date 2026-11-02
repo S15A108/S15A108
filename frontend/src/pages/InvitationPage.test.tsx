@@ -58,6 +58,15 @@ it('로그인한 채로 초대 링크를 열면 버튼 없이 참여하고 프�
   expect(await screen.findByText('프로젝트 화면')).toBeInTheDocument()
 })
 
+it('미리보기가 초대한 팀장과 초대받은 이메일을 주면 카드에 보여 준다', async () => {
+  await authApi.logout()
+  open()
+  expect(
+    await screen.findByText('이팀장님(demo@beez.local)이 초대했어요'),
+  ).toBeInTheDocument()
+  expect(screen.getByText('초대받은 이메일 new@beez.local')).toBeInTheDocument()
+})
+
 it('로그아웃 상태로 열면 로그인·가입하고 참여하는 길만 보여 준다', async () => {
   await authApi.logout()
   open()

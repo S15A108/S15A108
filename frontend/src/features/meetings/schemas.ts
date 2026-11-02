@@ -47,7 +47,7 @@ export const inviteResponseSchema = z.object({
 export type InviteResponse = z.infer<typeof inviteResponseSchema>
 
 export const respondInputSchema = z.object({
-  status: z.enum(['ACCEPTED', 'DECLINED']),
+  status: z.enum(['JOINED', 'DECLINED']),
 })
 export type RespondInput = z.infer<typeof respondInputSchema>
 

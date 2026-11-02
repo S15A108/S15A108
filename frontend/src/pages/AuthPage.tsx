@@ -69,7 +69,7 @@ export default function AuthPage() {
               block
               auth
               fields={[
-                // API 없음: 비밀번호 찾기는 지금 email만 받는다. 이름 대조는 백엔드 계약 추가 뒤에 보낸다.
+                // ACC-A07 수정안 요청: 가입 때 쓴 이름을 이메일과 함께 보내 대조한다.
                 {
                   name: 'name',
                   label: '이름',
@@ -91,6 +91,7 @@ export default function AuthPage() {
               onSubmit={async (values) => {
                 const result = await authApi.forgotPassword({
                   email: values.email,
+                  name: values.name.trim(),
                 })
                 setNotice(result.message)
               }}

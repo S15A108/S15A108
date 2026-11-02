@@ -831,7 +831,7 @@ export type SearchHit = z.infer<typeof searchHitSchema>
 
 export const participantSchema = z.object({
   member_id: idSchema,
-  status: z.enum(['INVITED', 'ACCEPTED', 'DECLINED']),
+  status: z.enum(['INVITED', 'JOINED', 'DECLINED']),
 })
 export type Participant = z.infer<typeof participantSchema>
 

@@ -137,7 +137,7 @@ describe('documented REST mock adapter', () => {
       email: user.email,
       password: 'changed-password-8832',
     })
-    await authApi.forgotPassword({ email: user.email })
+    await authApi.forgotPassword({ email: user.email, name: user.name })
     expect(
       (await authApi.verifyResetToken({ token: `mock-reset-${user.id}` }))
         .valid,

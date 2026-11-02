@@ -328,13 +328,36 @@ export async function accountRoutes(
         database.projects.find(
           (item) => item.project.id === invitation.project_id,
         ) ?? fail(404, 'not_found', '프로젝트를 찾을 수 없어요.')
-      if (id === 'MEM-A04')
+      if (id === 'MEM-A04') {
+        // 수정안 요청 필드(inviter·project_description·invited_email·account_matches)도 명세대로 채운다.
+        const leader = database.accounts.find(
+          (item) =>
+            item.profile.id ===
+            project.members.find((member) => member.role === 'LEADER')
+              ?.account_id,
+        )?.profile
         return {
           data: {
             project_name: project.project.name,
             login_required: !context.account,
+            ...(leader
+              ? { inviter: { name: leader.name, email: leader.email } }
+              : {}),
+            ...(project.project.description
+              ? { project_description: project.project.description }
+              : {}),
+            ...(invitation.invited_email
+              ? { invited_email: invitation.invited_email }
+              : {}),
+            ...(context.account && invitation.invited_email
+              ? {
+                  account_matches:
+                    context.account.email === invitation.invited_email,
+                }
+              : {}),
           },
         }
+      }
       const account = requireAccount(context)
       if (
         invitation.invited_email &&

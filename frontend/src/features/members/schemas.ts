@@ -37,6 +37,11 @@ export const previewInvitationResponseSchema = z.object({
   project_name: z.string(),
   expires_at: common.timeSchema.optional(),
   login_required: z.boolean(),
+  // MEM-A04 수정안 요청 필드(docs/api 01-backend-rest). 서버가 아직 안 줄 수 있어 모두 선택으로 받는다.
+  inviter: z.object({ name: z.string(), email: z.string() }).optional(),
+  project_description: z.string().optional(),
+  invited_email: z.string().optional(),
+  account_matches: z.boolean().optional(),
 })
 export type PreviewInvitationResponse = z.infer<
   typeof previewInvitationResponseSchema

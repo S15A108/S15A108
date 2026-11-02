@@ -55,7 +55,6 @@ export const characters = [
 ] as const
 
 export type Character = (typeof characters)[number]
-export type CharacterKey = Character['key']
 
 const hex = (value: string) =>
   [1, 3, 5].map((start) => parseInt(value.slice(start, start + 2), 16))

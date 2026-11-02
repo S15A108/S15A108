@@ -86,7 +86,7 @@ export function collaborationRoutes(
   switch (id) {
     case 'MTG-A01': {
       const participants: Participant[] = [
-        { member_id: context.member!.id, status: 'ACCEPTED' },
+        { member_id: context.member!.id, status: 'JOINED' },
       ]
       for (const memberId of strings(body.participant_member_ids)) {
         findById(project.members, memberId)
@@ -141,7 +141,7 @@ export function collaborationRoutes(
         meeting!.participants.find(
           (item) => item.member_id === context.member?.id,
         ) ?? fail(403, 'forbidden', '초대된 회의 참여자만 응답할 수 있어요.')
-      if (body.status !== 'ACCEPTED' && body.status !== 'DECLINED')
+      if (body.status !== 'JOINED' && body.status !== 'DECLINED')
         fail(400, 'validation_failed', '참여 상태를 확인해 주세요.')
       participant.status = body.status
       return { data: meeting! }
@@ -150,7 +150,7 @@ export function collaborationRoutes(
       if (
         !meeting!.participants.some(
           (item) =>
-            item.member_id === context.member?.id && item.status === 'ACCEPTED',
+            item.member_id === context.member?.id && item.status === 'JOINED',
         )
       )
         fail(403, 'forbidden', '회의 참여를 수락한 뒤 기록해 주세요.')

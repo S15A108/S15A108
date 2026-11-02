@@ -83,12 +83,27 @@ export default function InvitationPage() {
             <p className="text-[13px] font-medium text-muted-foreground">
               프로젝트 초대
             </p>
-            {/* API 없음: 미리보기 응답에 초대한 팀장(이름·역할·이메일)과 프로젝트 소개, 초대받은 이메일이 생기면
-                초대한 사람 줄, 카드의 소개, '초대받은 이메일 / 로그인한 계정 + 일치' 줄을 넣는다(PR #42 inviter·project_description). */}
+            {/* MEM-A04 수정안 요청 필드(inviter·project_description·invited_email)는 서버가 줄 때만 보인다. */}
             <div className="mt-3 rounded-2xl border p-5">
               <h2 className="text-2xl font-bold">
                 {invitation.data.project_name}
               </h2>
+              {invitation.data.project_description && (
+                <p className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">
+                  {invitation.data.project_description}
+                </p>
+              )}
+              {invitation.data.inviter && (
+                <p className="mt-3 text-[13px] text-[#57534e]">
+                  {invitation.data.inviter.name}님(
+                  {invitation.data.inviter.email})이 초대했어요
+                </p>
+              )}
+              {invitation.data.invited_email && (
+                <p className="mt-1 text-[13px] text-[#57534e]">
+                  초대받은 이메일 {invitation.data.invited_email}
+                </p>
+              )}
             </div>
             {signedIn ? (
               accept.error ? (

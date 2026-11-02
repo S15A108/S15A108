@@ -1,8 +1,8 @@
 import { apiMode } from '@/lib/apiMode'
 
-// API 없음: 가입 이메일 인증(ACC-A11 코드 보내기 · ACC-A12 코드 확인)은 PR #42에 '수정안 요청(협의 필요)'으로만 있고
-// dev 계약에는 없다. 계약이 정해지기 전에는 실제 API를 부르지 않고, 목 모드에서만 같은 응답 모양을 브라우저 안에서 흉내 낸다.
-// 계약이 생기면 sendCode·confirmCode를 authApi 호출로 바꾸고 가입 요청에 verified_token을 넣는다.
+// 가입 이메일 인증(ACC-A11 코드 보내기 · ACC-A12 코드 확인, ACC-A01 verified_token)은 dev의 docs/api에 들어왔지만
+// 상태가 '수정안 요청(협의 필요)'이라 서버 구현이 정해지지 않았다. 그때까지는 실제 API를 부르지 않고, 목 모드에서만
+// 같은 응답 모양을 브라우저 안에서 흉내 낸다. 협의가 끝나면 sendCode·confirmCode를 authApi 호출로 바꾸고 가입 요청에 verified_token을 넣는다.
 export const emailVerificationEnabled = apiMode === 'mock'
 
 export const CODE_TTL_MS = 5 * 60_000

@@ -29,7 +29,7 @@ import type {
 import { contractExamples } from './contract-examples'
 
 // 예시 데이터를 바꾸면 버전을 올려 브라우저에 남은 예전 데이터 대신 새 예시를 불러온다.
-export const MOCK_STORAGE_KEY = 'beez.mock.api.v8'
+export const MOCK_STORAGE_KEY = 'beez.mock.api.v9'
 export const DEMO_EMAIL = 'demo@beez.local'
 export const DEMO_PASSWORD = 'beez-demo-2026'
 export const MOCK_NOTICE =
@@ -427,7 +427,7 @@ function seededProject(
     status: 'OPEN',
     participants: ['21', '22', '25'].map((member_id) => ({
       member_id,
-      status: 'ACCEPTED' as const,
+      status: 'JOINED' as const,
     })),
     created_at: '2026-10-28T01:40:00Z',
   })
@@ -444,7 +444,7 @@ function seededProject(
     closed_by: '11',
     participants: ['21', '26'].map((member_id) => ({
       member_id,
-      status: 'ACCEPTED' as const,
+      status: 'JOINED' as const,
     })),
     created_at: '2026-10-26T05:40:00Z',
   })

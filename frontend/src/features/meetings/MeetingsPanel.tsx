@@ -28,7 +28,7 @@ interface Props {
 }
 const participationLabel = {
   INVITED: '참여 요청',
-  ACCEPTED: '',
+  JOINED: '',
   DECLINED: '불참',
 }
 
@@ -574,7 +574,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                               회의 끝내기
                             </Button>
                           </div>
-                        ) : participant?.status === 'ACCEPTED' ? (
+                        ) : participant?.status === 'JOINED' ? (
                           <ActionForm
                             key={`${meeting.id}:${notes.length}`}
                             fields={[
@@ -608,7 +608,7 @@ export function MeetingsPanel({ projectId, isLeader }: Props) {
                                 perform(
                                   () =>
                                     meetingsApi.respond(projectId, meeting.id, {
-                                      status: 'ACCEPTED',
+                                      status: 'JOINED',
                                     }),
                                   '회의에 참여했어요.',
                                 )

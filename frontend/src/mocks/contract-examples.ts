@@ -182,7 +182,7 @@ export const contractExamples = {
     participants: [
       {
         member_id: '21',
-        status: 'ACCEPTED',
+        status: 'JOINED',
       },
     ],
     created_at: '2026-10-23T03:00:00Z',
