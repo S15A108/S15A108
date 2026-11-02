@@ -140,10 +140,11 @@ public class ValidationWorker {
         try {
             applier.applySuccess(lease, request, response, System.currentTimeMillis() - started);
         } catch (RuntimeException e) {
-            // 반영 자체가 실패하면(기록 실패) 상태 전이도 함께 롤백됐다. 실패로 종결해 사람이 재시도할 수 있게 한다
+            // 반영 자체가 실패하면(기록 실패) 상태 전이도 함께 롤백됐다. 실패로 종결해 사람이 재시도할 수 있게 한다.
+            // 모델은 이미 불렀으므로 응답의 사용량은 실패 기록에 같이 남긴다
             log.error("validation {} 결과 반영 실패: {}", lease.validationId(), e.toString());
             applier.applyFailure(lease, "validation_execution_failed", "결과 반영 중 오류: " + e.getMessage(),
-                    System.currentTimeMillis() - started);
+                    System.currentTimeMillis() - started, AnalysisResultApplier.usageIn(response));
         }
         return true;
     }
@@ -177,7 +178,10 @@ public class ValidationWorker {
         if (!relatedRevisionIds.isEmpty()) {
             Map<Long, List<TaskPlanDesignRef>> refsByRevision = new LinkedHashMap<>();
             for (TaskPlanDesignRef ref : designRefs.findByPlanRevisionIdIn(relatedRevisionIds)) {
-                refsByRevision.computeIfAbsent(ref.getPlanRevisionId(), k -> new ArrayList<>()).add(ref);
+                if (!refsByRevision.containsKey(ref.getPlanRevisionId())) {
+                    refsByRevision.put(ref.getPlanRevisionId(), new ArrayList<>());
+                }
+                refsByRevision.get(ref.getPlanRevisionId()).add(ref);
             }
             for (TaskPlanRevision related : revisions.findByIdIn(relatedRevisionIds)) {
                 List<TaskPlanDesignRef> relatedRefs = new ArrayList<>();

@@ -583,6 +583,30 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     }
 
     @Test
+    void worker_applyCrash_isClosedAsExecutionFailure_withUsageKept() throws Exception {
+        long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
+        long id = body(accept(t, member), 202).get("id").asLong();
+        when(analyzer.analyze(any())).thenAnswer(inv -> aiResponse(inv.getArgument(0), List.of(), List.of()));
+        // 정상 결과를 저장하는 순간 DB 오류 — 첫 번째 저장만 실패하고 실패 기록은 들어간다
+        AtomicBoolean crashed = new AtomicBoolean(false);
+        doAnswer(inv -> {
+            if (crashed.compareAndSet(false, true)) {
+                throw new IllegalStateException("저장 실패 (시험용)");
+            }
+            return inv.callRealMethod();
+        }).when(repository).finish(anyLong(), any(), any());
+
+        worker.runOnce();
+        JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(v.get("status").asText()).isEqualTo("ERROR");
+        assertThat(v.get("error_code").asText()).isEqualTo("validation_execution_failed");
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
+        // 모델은 불렀으니 사용량은 남는다
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
+        assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isEqualTo(1);   // 롤백돼 ERROR 하나만
+    }
+
+    @Test
     void worker_invalidUsageShape_isInvalidOutput_notExecutionFailure() throws Exception {
         long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
         long id = body(accept(t, member), 202).get("id").asLong();
@@ -769,7 +793,14 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
                 throw new IllegalStateException(e);
             }
         });
-        Thread.sleep(1500);
+        // B 의 요청이 DB 잠금에서 기다리는 것을 확인한다 (고정 시간 대기 대신 pg_stat_activity 로 실제로 막힌 상태를 본다)
+        boolean blocked = false;
+        for (int i = 0; i < 100 && !blocked; i++) {
+            Thread.sleep(100);
+            blocked = count("select count(*) from pg_stat_activity where wait_event_type = 'Lock' and state = 'active' "
+                    + "and query ilike '%from project%for update%'") > 0;
+        }
+        assertThat(blocked).as("B 의 계획 변경이 프로젝트 잠금에서 기다려야 한다").isTrue();
         assertThat(changingB.isDone()).as("관련 작업의 계획 변경이 결과 반영 중간에 끼어들면 안 된다").isFalse();
         assertThat(column("validation", "status", id)).isEqualTo("RUNNING");
 

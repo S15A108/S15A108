@@ -302,6 +302,14 @@ public class AnalysisResultApplier {
         return usage;
     }
 
+    /** 응답 본문의 usage 배열 (모양이 맞을 때만). 반영이 실패해 실패로 닫을 때 워커가 꺼내 쓴다 */
+    public static List<Map<String, Object>> usageIn(Map<String, Object> response) {
+        if (response == null || validUsage(response.get("usage")) == null) {
+            return null;
+        }
+        return objects(response.get("usage"));
+    }
+
     /** 결과 반영(워커가 받은 응답·실패)인지, 리스 만료 회수인지 */
     private enum Mode { RESULT, RECOVERY }
 
