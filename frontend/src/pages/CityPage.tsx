@@ -297,11 +297,7 @@ function City() {
               </DialogDescription>
             </DialogHeader>
             {/* API 없음: 건물 디자인은 Project에 design 필드가 생기면 생성 요청에 같이 보낸다. */}
-            <BuildingDesignPicker
-              value={design}
-              onChange={setDesign}
-              detailed
-            />
+            <BuildingDesignPicker value={design} onChange={setDesign} />
             <hr />
             <ActionForm
               fields={[

@@ -7,7 +7,7 @@ import { BuildingDesignPicker } from './BuildingDesignPicker'
 
 function Picker() {
   const [design, setDesign] = useState<BuildingDesign>('modern')
-  return <BuildingDesignPicker value={design} onChange={setDesign} detailed />
+  return <BuildingDesignPicker value={design} onChange={setDesign} />
 }
 
 // 프로젝트 만들기 수정안(SCR-04-v2-create-project): 카드마다 설명을 보이고, 고른 건물을 큰 미리 보기에 보인다.

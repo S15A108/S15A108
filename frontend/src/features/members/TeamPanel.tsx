@@ -84,6 +84,20 @@ export function TeamPanel({
     queryKey: ['projects', projectId, 'team-project'],
     queryFn: () => projectsApi.get(projectId),
   })
+  // 부지는 도시와 같은 규칙(전체 프로젝트 순서, 저장된 부지 먼저)으로 정한다. 이 프로젝트만 넘기면
+  // 다른 프로젝트가 쓰는 0번 부지를 골라 덮어썼다(PR #72 전수 리뷰 AMP-04).
+  const cityProjects = useQuery({
+    queryKey: ['projects', 'placement-ids'],
+    queryFn: () => projectsApi.list({ limit: 100 }),
+    enabled: view === 'project',
+  })
+  const lot = cityProjects.data
+    ? projectPlacements(
+        cityProjects.data.items.map((item) => item.id),
+        accountId,
+        placements,
+      ).find((item) => item.id === projectId)?.lot
+    : placements[placementKey(accountId, projectId)]?.lot
   const members = useInfiniteQuery({
     // 다른 창은 같은 팀원 목록을 useQuery로 ['projects', id, 'members']에 담는다. 모양이 달라 키를 나눈다.
     queryKey: ['projects', projectId, 'team-members'],
@@ -516,7 +530,21 @@ export function TeamPanel({
           {(data) => (
             <div className="space-y-6">
               {/* API 없음: 건물 디자인은 이 브라우저에만 저장된다. Project에 design 필드가 생기면 수정 요청에 넣는다. */}
-              <BuildingDesignPicker value={design} onChange={setDesign} />
+              <BuildingDesignPicker
+                value={design}
+                onChange={setDesign}
+                small
+                note={
+                  typeof lot === 'number' && (
+                    <p className="grid justify-items-center gap-1 text-center text-xs leading-[17px] text-[#6b6658]">
+                      <span className="inline-flex h-[22px] items-center rounded-full bg-white px-2 font-semibold text-foreground">
+                        지금 부지 {lot + 1}
+                      </span>
+                      자리는 그대로예요. 건물 디자인은 이 브라우저에만 저장돼요.
+                    </p>
+                  )
+                }
+              />
               <ActionForm
                 fields={[
                   {
@@ -531,11 +559,14 @@ export function TeamPanel({
                     name: 'description',
                     label: '프로젝트 소개',
                     type: 'textarea',
+                    column: 2,
                     max: 300,
                     counter: true,
                     value: data.description,
                   },
                 ]}
+                // 설정 창 높이(680)를 지키려고 이름·소개를 한 줄에 나란히 둔다(SCR-06-v2-settings-project 11-02).
+                columns
                 submitLabel="저장"
                 onSubmit={async (values) => {
                   await action.run(
@@ -546,12 +577,9 @@ export function TeamPanel({
                       }),
                     '프로젝트 정보를 저장했어요.',
                   )
-                  placeProject(accountId, projectId, {
-                    lot:
-                      projectPlacements([projectId], accountId, placements)[0]
-                        .lot ?? 0,
-                    design,
-                  })
+                  // 도시 부지 8칸 밖(9번째 이후) 프로젝트는 3D 도시에 없어 디자인을 둘 자리가 없다.
+                  if (typeof lot === 'number')
+                    placeProject(accountId, projectId, { lot, design })
                   await queryClient.invalidateQueries({
                     queryKey: ['projects'],
                   })

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import brickArt from '@/assets/buildings/brick.svg'
 import glassArt from '@/assets/buildings/glass.svg'
@@ -88,240 +89,109 @@ function DesignDot({ design, size }: { design: BuildingDesign; size: number }) {
   )
 }
 
-function DesignIcon({
-  design,
-  className,
-}: {
-  design: BuildingDesign
-  className?: string
-}) {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 48 48" className={className}>
-      {design === 'glass' && (
-        <>
-          <rect
-            x="12"
-            y="8"
-            width="24"
-            height="34"
-            rx="2"
-            fill="#d6e8f1"
-            stroke="#6f9db4"
-            strokeWidth="2"
-          />
-          <path
-            d="M12 18h24M12 28h24M24 8v34"
-            stroke="#6f9db4"
-            strokeWidth="1.5"
-          />
-        </>
-      )}
-      {design === 'brick' && (
-        <>
-          <rect
-            x="10"
-            y="14"
-            width="28"
-            height="28"
-            rx="2"
-            fill="#c96a4f"
-            stroke="#8a3f2c"
-            strokeWidth="2"
-          />
-          <g fill="#f3e3d3">
-            <rect x="15" y="19" width="6" height="6" />
-            <rect x="27" y="19" width="6" height="6" />
-            <rect x="15" y="30" width="6" height="6" />
-            <rect x="27" y="30" width="6" height="6" />
-          </g>
-        </>
-      )}
-      {design === 'modern' && (
-        <>
-          <rect
-            x="12"
-            y="10"
-            width="24"
-            height="32"
-            rx="2"
-            fill="#ffffff"
-            stroke="#a3a3a3"
-            strokeWidth="2"
-          />
-          <g fill="#d9e4ea">
-            <rect x="16" y="15" width="6" height="5" />
-            <rect x="26" y="15" width="6" height="5" />
-            <rect x="16" y="24" width="6" height="5" />
-            <rect x="26" y="24" width="6" height="5" />
-          </g>
-          <rect x="21" y="33" width="6" height="9" fill="#f3c530" />
-        </>
-      )}
-      {design === 'tower' && (
-        <>
-          <rect
-            x="16"
-            y="4"
-            width="16"
-            height="38"
-            rx="2"
-            fill="#3f3f46"
-            stroke="#18181b"
-            strokeWidth="2"
-          />
-          <g fill="#f3c530">
-            <rect x="20" y="10" width="3" height="3" />
-            <rect x="25" y="16" width="3" height="3" />
-            <rect x="20" y="24" width="3" height="3" />
-            <rect x="25" y="31" width="3" height="3" />
-          </g>
-        </>
-      )}
-      {design === 'wood' && (
-        <>
-          <path
-            d="M8 22 24 10l16 12"
-            fill="none"
-            stroke="#7a5532"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-          <rect
-            x="12"
-            y="22"
-            width="24"
-            height="20"
-            rx="1"
-            fill="#cfa577"
-            stroke="#7a5532"
-            strokeWidth="2"
-          />
-          <rect x="21" y="30" width="6" height="12" fill="#7a5532" />
-        </>
-      )}
-    </svg>
-  )
-}
-
-// 프로젝트 만들기와 설정 › 프로젝트 정보가 같이 쓰는 건물 디자인 카드 + 미리 보기.
-// detailed: 프로젝트 만들기 수정안(SCR-04-v2-create-project)의 큰 미리 보기와 그림·설명 카드.
-// 설정 › 프로젝트 정보 보드는 아직 작은 그림 카드라 기본값은 그대로 둔다.
+// 프로젝트 만들기(SCR-04-v2-create-project)와 설정 › 프로젝트 정보(SCR-06-v2-settings-project 11-02)가 같이 쓰는
+// 건물 디자인 고르기: 왼쪽 큰 미리 보기와 이름·특징, 오른쪽 그림·이름·특징 카드에 노란 테두리와 체크.
+// small: 설정 창 높이에 맞춘 작은 미리 보기. note: 미리 보기 아래 안내(설정의 '지금 부지').
 export function BuildingDesignPicker({
   value,
   onChange,
-  detailed,
+  small,
+  note,
 }: {
   value: BuildingDesign
   onChange: (value: BuildingDesign) => void
-  detailed?: boolean
+  small?: boolean
+  note?: ReactNode
 }) {
   const label = designOf(value).label
-  if (detailed)
-    return (
-      <div className="grid gap-6 sm:grid-cols-[240px_minmax(0,1fr)]">
-        <figure
-          aria-label={`선택한 건물 미리 보기: ${label}`}
-          className="m-0 grid content-center justify-items-center gap-2.5 rounded-2xl bg-[#f4f2ec] px-4 py-5"
+  return (
+    <div
+      className={cn(
+        'grid sm:grid-cols-[240px_minmax(0,1fr)]',
+        small ? 'gap-4 sm:grid-cols-[196px_minmax(0,1fr)]' : 'gap-6',
+      )}
+    >
+      <figure
+        aria-label={`선택한 건물 미리 보기: ${label}`}
+        className={cn(
+          'm-0 grid content-center justify-items-center gap-2.5 rounded-2xl bg-[#f4f2ec]',
+          small ? 'px-3 py-4' : 'px-4 py-5',
+        )}
+      >
+        <BuildingArt
+          design={value}
+          className={small ? 'h-[136px]' : 'h-[196px]'}
+        />
+        <figcaption className="grid justify-items-center gap-0.5 text-center">
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold">
+            <DesignDot design={value} size={9} />
+            {label}
+          </span>
+          <span className="text-xs leading-[17px] text-[#6b6658]">
+            {designOf(value).description}
+          </span>
+        </figcaption>
+        {note}
+      </figure>
+      <fieldset className="grid content-start gap-2.5">
+        <legend
+          className={cn(
+            'mb-2.5 font-medium',
+            small ? 'text-[13px]' : 'text-sm',
+          )}
         >
-          <BuildingArt design={value} className="h-[196px]" />
-          <figcaption className="grid justify-items-center gap-0.5 text-center">
-            <span className="inline-flex items-center gap-1.5 text-sm font-bold">
-              <DesignDot design={value} size={9} />
-              {label}
-            </span>
-            <span className="text-xs leading-[17px] text-[#6b6658]">
-              {designOf(value).description}
-            </span>
-          </figcaption>
-        </figure>
-        <fieldset className="grid content-start gap-2.5">
-          <legend className="mb-2.5 text-sm font-medium">건물 디자인</legend>
-          <div className="grid grid-cols-3 gap-2.5">
-            {buildingDesigns.map((item) => {
-              const checked = value === item.value
-              return (
-                <label
-                  key={item.value}
+          건물 디자인
+        </legend>
+        <div className="grid grid-cols-3 gap-2.5">
+          {buildingDesigns.map((item) => {
+            const checked = value === item.value
+            return (
+              <label
+                key={item.value}
+                className={cn(
+                  'relative grid cursor-pointer gap-1.5 rounded-[14px] border border-border bg-white px-2 pt-2 pb-2.5 has-focus-visible:ring-2 has-focus-visible:ring-ring',
+                  checked &&
+                    'border-2 border-[#c99e1e] bg-[#fffaeb] px-[7px] pt-[7px] pb-[9px]',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="building-design"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={() => onChange(item.value)}
+                />
+                <span
                   className={cn(
-                    'relative grid cursor-pointer gap-1.5 rounded-[14px] border border-border bg-white px-2 pt-2 pb-2.5 has-focus-visible:ring-2 has-focus-visible:ring-ring',
-                    checked &&
-                      'border-2 border-[#c99e1e] bg-[#fffaeb] px-[7px] pt-[7px] pb-[9px]',
+                    'flex h-[70px] items-end justify-center overflow-hidden rounded-[10px] bg-[#f6f3ea]',
+                    checked && 'bg-[#fdf3cf]',
                   )}
                 >
-                  <input
-                    type="radio"
-                    name="building-design"
-                    className="sr-only"
-                    checked={checked}
-                    onChange={() => onChange(item.value)}
-                  />
-                  <span
-                    className={cn(
-                      'flex h-[70px] items-end justify-center overflow-hidden rounded-[10px] bg-[#f6f3ea]',
-                      checked && 'bg-[#fdf3cf]',
-                    )}
-                  >
-                    <BuildingArt design={item.value} className="h-[62px]" />
-                  </span>
-                  <span
-                    className={cn(
-                      'flex items-center gap-1.5 text-[13px] leading-[18px] font-semibold',
-                      checked && 'font-bold',
-                    )}
-                  >
-                    <DesignDot design={item.value} size={8} />
-                    {item.label}
-                  </span>
-                  <span className="text-[11.5px] leading-[15px] break-keep text-[#6b6658]">
-                    {item.description}
-                  </span>
-                  {checked && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute top-1.5 right-1.5 grid size-5 place-items-center rounded-full bg-primary text-primary-foreground"
-                    >
-                      <Check className="size-3" strokeWidth={3.5} />
-                    </span>
+                  <BuildingArt design={item.value} className="h-[62px]" />
+                </span>
+                <span
+                  className={cn(
+                    'flex items-center gap-1.5 text-[13px] leading-[18px] font-semibold',
+                    checked && 'font-bold',
                   )}
-                </label>
-              )
-            })}
-          </div>
-        </fieldset>
-      </div>
-    )
-  return (
-    <div className="grid gap-5 sm:grid-cols-[200px_1fr]">
-      <figure
-        role="img"
-        aria-label={`선택한 건물 미리 보기: ${label}`}
-        className="grid place-items-center rounded-2xl bg-muted p-4"
-      >
-        <DesignIcon design={value} className="size-32" />
-      </figure>
-      <fieldset className="grid content-start gap-2">
-        <legend className="mb-2 text-sm font-medium">건물 디자인</legend>
-        <div className="grid grid-cols-3 gap-2">
-          {buildingDesigns.map((item) => (
-            <label
-              key={item.value}
-              className={cn(
-                'grid cursor-pointer justify-items-center gap-1.5 rounded-xl border p-3 text-xs',
-                value === item.value &&
-                  'border-primary bg-primary/10 font-semibold',
-              )}
-            >
-              <input
-                type="radio"
-                name="building-design"
-                className="sr-only"
-                checked={value === item.value}
-                onChange={() => onChange(item.value)}
-              />
-              <DesignIcon design={item.value} className="size-10" />
-              {item.label}
-            </label>
-          ))}
+                >
+                  <DesignDot design={item.value} size={8} />
+                  {item.label}
+                </span>
+                <span className="text-[11.5px] leading-[15px] break-keep text-[#6b6658]">
+                  {item.description}
+                </span>
+                {checked && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1.5 right-1.5 grid size-5 place-items-center rounded-full bg-primary text-primary-foreground"
+                  >
+                    <Check className="size-3" strokeWidth={3.5} />
+                  </span>
+                )}
+              </label>
+            )
+          })}
         </div>
       </fieldset>
     </div>

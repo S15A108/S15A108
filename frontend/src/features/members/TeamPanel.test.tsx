@@ -212,3 +212,31 @@ it('일괄 초대 중 하나가 실패해도 만든 링크를 보여 주고 실�
     'two@beez.local',
   )
 })
+
+// PR #72 전수 리뷰 AMP-04: 프로젝트 정보 저장은 다른 프로젝트가 쓰는 부지를 덮어쓰지 않는다.
+it('프로젝트 정보를 저장해도 다른 프로젝트의 부지를 덮어쓰지 않는다', async () => {
+  const user = userEvent.setup()
+  const { useWorkspaceStore } = await import('@/stores/workspaceStore')
+  const account = await authApi.me()
+  useWorkspaceStore.setState({
+    placements: { [`${account.id}:102`]: { lot: 0, design: 'wood' } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TeamPanel projectId="101" isLeader view="project" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText(/지금 부지 \d/)).toBeInTheDocument()
+  await user.click(screen.getByRole('radio', { name: /유리 오피스/ }))
+  await user.click(screen.getByRole('button', { name: '저장' }))
+  await vi.waitFor(() =>
+    expect(
+      useWorkspaceStore.getState().placements[`${account.id}:101`],
+    ).toMatchObject({ design: 'glass' }),
+  )
+  const placements = useWorkspaceStore.getState().placements
+  expect(placements[`${account.id}:101`].lot).not.toBe(0)
+  expect(placements[`${account.id}:102`]).toEqual({ lot: 0, design: 'wood' })
+})
