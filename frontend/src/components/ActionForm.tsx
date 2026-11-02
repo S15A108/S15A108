@@ -8,6 +8,7 @@ import { getApiErrorMessage } from '@/api/error'
 import { DISPLAY_COLORS, objectParticle } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { SheetSubmit } from '@/components/PaneSheet'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -54,6 +55,8 @@ interface Props {
   auth?: boolean
   /** 넓은 화면에서 두 칸으로 놓는다. column: 2인 칸은 오른쪽으로 간다. */
   columns?: boolean
+  /** 다이얼로그 폼: 제출 버튼 왼쪽에 '취소'를 둔다(캔버스 SCR-04-v2-create-project). */
+  onCancel?: () => void
 }
 
 export function ActionForm({
@@ -67,6 +70,7 @@ export function ActionForm({
   disabled,
   auth,
   columns,
+  onCancel,
 }: Props) {
   const formId = useId()
   const [error, setError] = useState('')
@@ -346,13 +350,34 @@ export function ActionForm({
           {error}
         </p>
       )}
-      <SheetSubmit
-        destructive={destructive}
-        disabled={isSubmitting || disabled}
-        className={cn(block ? 'w-full' : 'self-end', auth && 'h-10')}
-      >
-        {isSubmitting ? '처리 중…' : submitLabel}
-      </SheetSubmit>
+      {onCancel ? (
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 px-4"
+            disabled={isSubmitting}
+            onClick={onCancel}
+          >
+            취소
+          </Button>
+          <SheetSubmit
+            destructive={destructive}
+            disabled={isSubmitting || disabled}
+            className="h-10 px-[18px] font-bold"
+          >
+            {isSubmitting ? '처리 중…' : submitLabel}
+          </SheetSubmit>
+        </div>
+      ) : (
+        <SheetSubmit
+          destructive={destructive}
+          disabled={isSubmitting || disabled}
+          className={cn(block ? 'w-full' : 'self-end', auth && 'h-10')}
+        >
+          {isSubmitting ? '처리 중…' : submitLabel}
+        </SheetSubmit>
+      )}
     </form>
   )
 }

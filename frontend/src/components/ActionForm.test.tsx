@@ -146,4 +146,21 @@ describe('공용 입력 폼', () => {
       expect(submit).toHaveBeenCalledWith({ reason: 'APPROVAL' }),
     )
   })
+
+  // 프로젝트 만들기(SCR-04-v2-create-project): 제출 버튼 왼쪽 '취소'는 보내지 않고 닫는다.
+  it('취소를 누르면 제출하지 않고 onCancel만 부른다', async () => {
+    const submit = vi.fn()
+    const cancel = vi.fn()
+    render(
+      <ActionForm
+        fields={[{ name: 'name', label: '이름', required: true }]}
+        onSubmit={submit}
+        submitLabel="만들기"
+        onCancel={cancel}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: '취소' }))
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(submit).not.toHaveBeenCalled()
+  })
 })

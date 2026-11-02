@@ -5,21 +5,22 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { ArrowUpRight, Plus, Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { projectsApi } from '@/api/services'
 import { RequireAccount } from '@/features/auth/RequireAccount'
 import { useSession } from '@/features/auth/useSession'
 import { projectPlacements } from '@/features/projects/placements'
 import {
+  BuildingArt,
   BuildingDesignPicker,
-  DesignIcon,
 } from '@/features/projects/BuildingDesignPicker'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { BuildingDesign } from '@/stores/workspaceStore'
+import { formatAgo } from '@/lib/formatDate'
+import { cn } from '@/lib/utils'
 import { AsyncState } from '@/components/AsyncState'
 import { ActionForm } from '@/components/ActionForm'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -96,7 +97,7 @@ function City() {
     setCreatingAt(lot)
   }
   return (
-    <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-8">
+    <main className="mx-auto max-w-[1376px] px-4 pt-6 pb-10 sm:px-8">
       <AsyncState query={projects}>
         {() => (
           <>
@@ -105,7 +106,7 @@ function City() {
               aria-label="내 프로젝트 도시"
             >
               <div className="pointer-events-none absolute top-6 left-6 z-10">
-                <h2 className="text-2xl font-bold">
+                <h2 className="text-[26px] leading-[34px] font-bold">
                   {session.data?.name}님의 도시
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -116,6 +117,7 @@ function City() {
               </div>
               <div className="absolute top-6 right-6 z-10">
                 <Button
+                  className="h-10 rounded-xl px-4 font-bold"
                   disabled={nextLot === undefined}
                   onClick={() => startCreate(nextLot ?? null)}
                 >
@@ -146,9 +148,9 @@ function City() {
             </section>
             <section className="mt-7">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold">
-                  내 프로젝트{' '}
-                  <span className="ml-1 text-muted-foreground">
+                <h3 className="flex items-center gap-2 text-lg font-bold">
+                  내 프로젝트
+                  <span className="text-[15px] font-semibold text-muted-foreground">
                     {allProjects.length}
                   </span>
                 </h3>
@@ -159,7 +161,7 @@ function City() {
                       type="search"
                       aria-label="프로젝트 검색"
                       placeholder="프로젝트 이름 검색"
-                      className="w-60 pl-8"
+                      className="w-[260px] pl-8"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                     />
@@ -184,57 +186,80 @@ function City() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {shownProjects.map((project) => (
                   <Link
-                    className="group rounded-2xl border bg-card p-5 transition hover:-translate-y-1 hover:shadow-md"
+                    className="flex flex-col gap-3.5 rounded-[18px] border bg-card p-4 transition hover:-translate-y-1 hover:shadow-md"
                     key={project.id}
                     to={`/projects/${project.id}`}
                   >
-                    {/* 카드 왼쪽 위 건물 그림으로 목록과 3D 건물을 짝짓는다(SCR-04 수정안 10-29). 상태 숫자·팀 얼굴·마지막 활동은 API 없음(나의 도시 백엔드 메모 7). */}
-                    <div className="mb-4 flex items-center justify-between">
-                      <DesignIcon
-                        design={
-                          assigned.find((item) => item.id === project.id)
-                            ?.design ?? 'modern'
-                        }
-                        className="size-10"
-                      />
-                      <ArrowUpRight className="size-4 text-muted-foreground group-hover:text-foreground" />
-                    </div>
-                    <h4 className="font-semibold">{project.name}</h4>
-                    <p className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">
-                      {project.description ||
-                        '비비와 프로젝트를 준비해 보세요.'}
-                    </p>
-                    <div className="mt-5 flex items-center justify-between text-xs">
-                      <Badge
-                        variant={
-                          project.my_role === 'LEADER' ? 'default' : 'outline'
-                        }
+                    {/* SCR-04-v2-city 카드. 왼쪽 위 건물 그림으로 목록과 3D 건물을 짝짓는다. 검토할 변경·진행 중 작업·승인 문서 수,
+                        문서 초안 진행, 팀 얼굴·인원·에이전트 수, 마지막 활동은 목록 API에 없어(PRJ-A02, 나의 도시 백엔드 메모 7) 상태 줄만 둔다. */}
+                    <span className="flex items-start gap-3">
+                      <span className="flex size-14 shrink-0 items-end justify-center overflow-hidden rounded-[14px] bg-[#f4f2ec]">
+                        <BuildingArt
+                          design={
+                            assigned.find((item) => item.id === project.id)
+                              ?.design ?? 'modern'
+                          }
+                          className="h-12"
+                        />
+                      </span>
+                      <span className="grid min-w-0 flex-1 gap-0.5">
+                        <strong className="truncate text-base font-bold">
+                          {project.name}
+                        </strong>
+                        <span className="line-clamp-2 text-[13px] leading-[19px] break-keep text-[#57534e]">
+                          {project.description ||
+                            '비비와 프로젝트를 준비해 보세요.'}
+                        </span>
+                      </span>
+                      <span
+                        className={cn(
+                          'inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap',
+                          project.my_role === 'LEADER'
+                            ? 'bg-foreground text-white'
+                            : 'bg-[#f0eee8] text-[#57534e]',
+                        )}
                       >
-                        {project.my_role === 'LEADER' ? '인간 팀장' : '팀원'}
-                      </Badge>
-                      <Badge variant="secondary">
+                        {project.my_role === 'LEADER' ? '팀장' : '팀원'}
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-between gap-2 rounded-xl bg-[#fbfaf6] px-3 py-2.5 text-[13px] leading-[18px] font-semibold">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'size-[7px] rounded-full',
+                            project.current_baseline
+                              ? 'bg-[#22a35a]'
+                              : 'bg-[#e0b400]',
+                          )}
+                        />
                         {project.current_baseline
-                          ? `기준 v${project.current_baseline.version_no}`
-                          : '준비 중'}
-                      </Badge>
-                    </div>
+                          ? `진행 중 · 기준 v${project.current_baseline.version_no}`
+                          : '시작 준비 중'}
+                      </span>
+                      <span className="text-xs leading-4 font-medium text-muted-foreground">
+                        {formatAgo(project.created_at)} 만듦
+                      </span>
+                    </span>
                   </Link>
                 ))}
                 <button
                   type="button"
-                  className="grid min-h-40 place-content-center gap-3 rounded-2xl border border-dashed text-sm text-muted-foreground hover:bg-muted/50"
+                  className="grid min-h-[132px] place-content-center justify-items-center gap-1.5 rounded-[18px] border border-dashed border-[#d4d0c6] text-[#57534e] hover:bg-muted/50"
                   disabled={nextLot === undefined}
                   onClick={() => startCreate(nextLot ?? null)}
                 >
-                  <Plus className="mx-auto size-6" />
-                  {nextLot === undefined
-                    ? '모든 부지를 사용 중이에요'
-                    : '프로젝트 만들기'}
+                  <Plus className="size-6" />
+                  <span className="text-sm font-semibold">
+                    {nextLot === undefined
+                      ? '모든 부지를 사용 중이에요'
+                      : '프로젝트 만들기'}
+                  </span>
                   {nextLot !== undefined && (
-                    <span className="text-xs">
-                      남은 부지{' '}
+                    <span className="text-xs leading-4 text-muted-foreground">
+                      빈 부지{' '}
                       {8 - assigned.filter((item) => item.lot !== null).length}
-                      칸
+                      칸 남음
                     </span>
                   )}
                 </button>
@@ -260,16 +285,23 @@ function City() {
             if (!open && !create.isPending) setCreatingAt(null)
           }}
         >
-          <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+          <DialogContent className="max-h-[90dvh] gap-5 overflow-y-auto rounded-[22px] p-7 sm:max-w-[760px]">
             <DialogHeader>
-              <DialogTitle>프로젝트 만들기</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-xl font-bold">
+                프로젝트 만들기
+              </DialogTitle>
+              {/* 보드는 제목만 보인다. 어느 부지에 짓는지는 화면 읽기 도구에만 알린다. */}
+              <DialogDescription className="sr-only">
                 부지 {creatingAt + 1}에 지어요. 부지와 건물 디자인은 이
                 브라우저에 보관돼요.
               </DialogDescription>
             </DialogHeader>
             {/* API 없음: 건물 디자인은 Project에 design 필드가 생기면 생성 요청에 같이 보낸다. */}
-            <BuildingDesignPicker value={design} onChange={setDesign} />
+            <BuildingDesignPicker
+              value={design}
+              onChange={setDesign}
+              detailed
+            />
             <hr />
             <ActionForm
               fields={[
@@ -291,12 +323,14 @@ function City() {
                 },
               ]}
               footer={
-                <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+                <p className="rounded-[10px] bg-[#fbfaf6] px-3 py-2.5 text-[13px] leading-5 text-[#57534e]">
                   만든 뒤 문서 초안 4종(기획안 · ERD · 요구사항 명세서 · API
-                  명세서)을 올리면 프로젝트가 시작돼요.
+                  명세서)을 올리고 팀장이 모두 승인하면 '프로젝트 시작'으로
+                  시작해요.
                 </p>
               }
               submitLabel="프로젝트 만들기"
+              onCancel={() => setCreatingAt(null)}
               onSubmit={async (values) => {
                 const project = await create.mutateAsync({
                   name: values.name.trim(),
