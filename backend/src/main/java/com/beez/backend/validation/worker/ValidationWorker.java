@@ -129,7 +129,8 @@ public class ValidationWorker {
         try {
             response = analyzer.analyze(request);
         } catch (ValidationAnalyzer.AnalyzerException e) {
-            applier.applyFailure(lease, e.errorCode(), e.getMessage(), System.currentTimeMillis() - started);
+            // 오류 응답에 사용량이 있으면(모델을 부른 뒤 실패) 실행에 남긴다
+            applier.applyFailure(lease, e.errorCode(), e.getMessage(), System.currentTimeMillis() - started, e.usage());
             return true;
         } catch (RuntimeException e) {
             applier.applyFailure(lease, "validation_execution_failed", "분석 호출 중 오류: " + e.getMessage(),

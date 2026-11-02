@@ -211,7 +211,22 @@ public class AnalysisResultApplier {
     /** 호출 실패(시간 초과·연결·HTTP 오류·그 밖의 BE 오류) 반영. 모델 응답이 없으니 진단 값도 없다 */
     @Transactional
     public void applyFailure(JobLease lease, String errorCode, String message, long durationMs) {
-        Optional<Current> current = current(lease, Mode.RESULT, Map.of(), durationMs);
+        applyFailure(lease, errorCode, message, durationMs, null);
+    }
+
+    /**
+     * 호출 실패 반영. AI 가 모델을 부른 뒤 실패한 오류 응답(504 등)에 사용량을 넣어 줬으면 그 사용량을 실행에 남긴다
+     * (AI-A02 오류 규약 "실패 호출 비용도 보존"). 늦은 결과·입력 변경으로 버릴 때도 같은 사용량을 남긴다
+     *
+     * @param usage 오류 응답의 usage 배열. 없으면 null
+     */
+    @Transactional
+    public void applyFailure(JobLease lease, String errorCode, String message, long durationMs, List<Map<String, Object>> usage) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        if (validUsage(usage) != null) {
+            diagnostics.put("usage", usage);
+        }
+        Optional<Current> current = current(lease, Mode.RESULT, diagnostics, durationMs);
         if (current.isEmpty()) {
             return;
         }
@@ -220,7 +235,7 @@ public class AnalysisResultApplier {
             runStatus = "TIMEOUT";
         }
         fail(lease, current.get().validation(), current.get().runId(), errorCode, runStatus, message, "RETRY",
-                "같은 입력으로 다시 실행합니다 (VAL-A04)", null, durationMs, Map.of());
+                "같은 입력으로 다시 실행합니다 (VAL-A04)", null, durationMs, diagnostics);
     }
 
     /**
@@ -268,8 +283,23 @@ public class AnalysisResultApplier {
         out.put("unassessed", result.get("unassessed"));
         out.put("partial_findings", result.get("findings"));
         out.put("model", response.get("model"));
-        out.put("usage", response.get("usage"));      // 비용 기록(-168)에서 실패한 실행의 사용량도 빠지지 않게
+        // 비용 기록(-168)에서 실패한 실행의 사용량도 빠지지 않게. 다만 모양이 틀린 값(배열이 아님 등)은 실행의 usage 칸이
+        // 객체 배열만 받으므로 저장하지 않는다 — 저장이 실패하면 원래 오류 분류(ai_invalid_output)가 BE 오류로 바뀐다
+        Object usage = validUsage(response.get("usage"));
+        if (usage != null) {
+            out.put("usage", usage);
+        } else if (response.containsKey("usage")) {
+            out.put("usage_rejected", String.valueOf(response.get("usage")));   // 진단용 원문 (문자열이라 어떤 모양이든 안전)
+        }
         return out;
+    }
+
+    /** 객체 배열(명세 Usage[])이면 그대로, 아니면 null. 빈 배열은 "호출 없음" 이므로 그대로 둔다 */
+    private static Object validUsage(Object usage) {
+        if (usage == null || !isObjectList(usage)) {
+            return null;
+        }
+        return usage;
     }
 
     /** 결과 반영(워커가 받은 응답·실패)인지, 리스 만료 회수인지 */
@@ -306,9 +336,15 @@ public class AnalysisResultApplier {
         boolean live = "RUNNING".equals(v.status()) && v.currentAttempt() == lease.attempt() && sameLease
                 && run.isPresent() && "RUNNING".equals(run.get().get("status"));
         if (!live) {
-            // 늦은 결과: STALE·취소·새 시도·다른 리스. 실행이 아직 열려 있으면 DISCARDED 로 닫고 상태는 그대로
-            if (run.isPresent() && "RUNNING".equals(run.get().get("status"))) {
-                validations.finishRun(((Number) run.get().get("id")).longValue(), "DISCARDED", "늦은 결과", model, durationMs, usage);
+            // 늦은 결과: STALE·취소·새 시도·다른 리스. 실행이 아직 열려 있으면 DISCARDED 로 닫고 상태는 그대로.
+            // 이미 닫힌 실행(리스 회수로 ERROR)이라도 모델을 부른 사용량은 그 실행에 남긴다 — 판정만 버린다
+            if (run.isPresent()) {
+                long lateRunId = ((Number) run.get().get("id")).longValue();
+                if ("RUNNING".equals(run.get().get("status"))) {
+                    validations.finishRun(lateRunId, "DISCARDED", "늦은 결과", model, durationMs, usage);
+                } else if (usage != null) {
+                    validations.recordLateUsage(lateRunId, usage);
+                }
             }
             validations.cancelJobIfStillLeased(lease.jobId(), lease.leaseToken());
             log.info("validation {} attempt {} result discarded (status={}, current_attempt={})", v.id(), lease.attempt(),

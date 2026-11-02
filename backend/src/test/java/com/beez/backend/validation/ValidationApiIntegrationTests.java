@@ -568,12 +568,37 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     void worker_timeout_isErrorRetry_withTimeoutRun() throws Exception {
         long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
         long id = body(accept(t, member), 202).get("id").asLong();
-        when(analyzer.analyze(any())).thenThrow(new ValidationAnalyzer.AnalyzerException("ai_timeout", "시간 초과", null));
+        // AI 가 모델을 부른 뒤 504 로 실패하면서 오류 본문에 사용량을 넣어 준 경우
+        List<Map<String, Object>> usage = List.of(Map.of("request_key", "llm-validate-x-attempt-1-call-1", "input_tokens", 7,
+                "output_tokens", 0, "tokens_known", true));
+        when(analyzer.analyze(any())).thenThrow(new ValidationAnalyzer.AnalyzerException("ai_timeout", "시간 초과", null, usage));
         worker.runOnce();
         JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
         assertThat(v.get("status").asText()).isEqualTo("ERROR");
         assertThat(v.get("error_code").asText()).isEqualTo("ai_timeout");
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("TIMEOUT");
+        // 실패한 호출의 사용량도 실행에 남는다
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
+        assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1");
+    }
+
+    @Test
+    void worker_invalidUsageShape_isInvalidOutput_notExecutionFailure() throws Exception {
+        long[] t = createTask(planJson("A", api.readsRef("API-01"), true, "[{\"text\":\"x\"}]"), member);
+        long id = body(accept(t, member), 202).get("id").asLong();
+        // usage 가 배열이 아니라 객체로 온다 — 계약 위반이지만, 그 값을 그대로 저장하려다 BE 오류로 바뀌면 안 된다
+        when(analyzer.analyze(any())).thenAnswer(inv -> {
+            Map<String, Object> res = aiResponse(inv.getArgument(0), List.of(), List.of());
+            res.put("usage", Map.of("input_tokens", 10));
+            return res;
+        });
+        worker.runOnce();
+        JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(v.get("status").asText()).isEqualTo("ERROR");
+        assertThat(v.get("error_code").asText()).isEqualTo("ai_invalid_output");
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).isNull();      // 모양이 틀린 사용량은 저장하지 않는다
+        assertThat(column("validation", "summary", id)).contains("usage_rejected");            // 원문은 진단용으로만
     }
 
     @Test
@@ -851,10 +876,17 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(worker.recoverExpired()).isFalse();
         assertThat(worker.runOnce()).isFalse();
 
-        // 죽은 줄 알았던 워커의 결과가 늦게 와도 상태·발견 항목을 바꾸지 않는다
-        applier.applySuccess(lease, Map.of(), Map.of(), 0);
+        // 죽은 줄 알았던 워커의 결과가 늦게 와도 상태·발견 항목을 바꾸지 않는다. 다만 모델을 부른 사용량은 그 실행에 남긴다
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).isNull();
+        Map<String, Object> request = new LinkedHashMap<>();
+        Map<String, Object> planCheck = new LinkedHashMap<>();
+        planCheck.put("key", "plan-completeness");
+        request.put("checks", List.of(planCheck));
+        applier.applySuccess(lease, request, aiResponse(request, List.of(), List.of()), 0);
         assertThat(column("validation", "status", id)).isEqualTo("ERROR");
         assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isEqualTo(1);
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
+        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
     }
 
     @Test
