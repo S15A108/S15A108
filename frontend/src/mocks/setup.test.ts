@@ -235,6 +235,29 @@ describe('documented REST mock adapter', () => {
     expect(file).toBeInstanceOf(Blob)
   })
 
+  // PR #72 전수 리뷰 AMP-01: 실제 서버처럼 문서 등록·분석만으로는 설계 초안이 생기지 않고, 초안 만들기(PLN-A05)로 생긴다.
+  it('does not create design drafts on upload until drafts are generated', async () => {
+    await login()
+    const project = await projectsApi.create({ name: '초안 경로 검증' })
+    const result = await documentsApi.upload(project.id, {
+      file: new File(['# 기획\n사용자가 예약을 만든다.'], 'plan.md', {
+        type: 'text/markdown',
+      }),
+      title: '예약 기획',
+      kind: 'PLAN',
+    })
+    const version = result.document.latest_draft!
+    expect(
+      (await planningApi.items(project.id, { status: 'DRAFT' })).items,
+    ).toHaveLength(0)
+    await planningApi.generateDrafts(project.id, {
+      document_version_ids: [version.id],
+    })
+    expect(
+      (await planningApi.items(project.id, { status: 'DRAFT' })).items,
+    ).toHaveLength(1)
+  })
+
   it('publishes the exact reviewed four-document baseline and answers planning questions', async () => {
     await login()
     const question = (await planningApi.questions('102')).items[0]

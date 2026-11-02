@@ -35,10 +35,36 @@ export function draftSnapshotHash(project: MockProject): string {
     .join('-')}`
 }
 
+const sourceOf = (version: DocumentVersion) => ({
+  document_id: version.document_id,
+  document_version_id: version.id,
+  version_no: version.version_no,
+  location: '1. 예시 분석',
+})
+
+// 원문 분석(색인)은 보완 질문만 남긴다. 실제 서버처럼 문서 등록·승인·색인만으로는 설계 초안을 만들지 않는다
+// (PR #72 전수 리뷰 AMP-01). 초안은 기획 분석 창의 초안 만들기(PLN-A05)나 직접 추가(PLN-A07)로만 생긴다.
 export function analyzeDocument(
   context: MockContext,
   version: DocumentVersion,
 ): void {
+  const project = requireProject(context)
+  if (
+    project.questions.some(
+      (question) => question.source?.document_version_id === version.id,
+    )
+  )
+    return
+  const document = findById(project.documents, version.document_id)
+  project.questions.push({
+    id: nextId(context.database),
+    question: `${document.title}의 완료 기준을 어떻게 확인하나요? (규칙 기반 예시)`,
+    source: sourceOf(version),
+  })
+}
+
+// 초안 만들기(PLN-A05): 원문 첫 줄로 요구사항 초안 하나를 만든다(규칙 기반 예시).
+function draftFromDocument(context: MockContext, version: DocumentVersion) {
   const project = requireProject(context)
   if (
     project.items.some(
@@ -46,12 +72,7 @@ export function analyzeDocument(
     )
   )
     return
-  const source = {
-    document_id: version.document_id,
-    document_version_id: version.id,
-    version_no: version.version_no,
-    location: '1. 예시 분석',
-  }
+  const source = sourceOf(version)
   const document = findById(project.documents, version.document_id)
   project.items.push({
     id: nextId(context.database),
@@ -70,11 +91,6 @@ export function analyzeDocument(
     },
     source,
     content_hash: `sha256:mock-${version.id}`,
-  })
-  project.questions.push({
-    id: nextId(context.database),
-    question: `${document.title}의 완료 기준을 어떻게 확인하나요? (규칙 기반 예시)`,
-    source,
   })
 }
 
@@ -324,9 +340,11 @@ export async function documentRoutes(
       const ids = strings(body.document_version_ids)
       if (!ids.length)
         fail(400, 'validation_failed', '초안의 원문 버전을 선택해 주세요.')
-      ids.forEach((versionId) =>
-        analyzeDocument(context, findById(project.versions, versionId)),
-      )
+      ids.forEach((versionId) => {
+        const version = findById(project.versions, versionId)
+        analyzeDocument(context, version)
+        draftFromDocument(context, version)
+      })
       const sourceIds = new Set(ids)
       const previousDrafts = project.items.filter(
         (item) =>

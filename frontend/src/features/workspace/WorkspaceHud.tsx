@@ -320,19 +320,22 @@ export function WorkspaceHud({
       detail: started
         ? '프로젝트를 시작했어요.'
         : allApproved
-          ? `문서 4종 승인 4 / 4 · ${start.indexed ? '색인 완료' : '문서 색인 중이에요'}`
+          ? `문서 4종 승인 4 / 4 · ${start.indexed ? '설계 초안 준비됨' : start.needsDrafts ? '설계 항목 초안을 만들어야 시작할 수 있어요' : '설계 초안 확인 중'}`
           : `팀장 승인 ${approvedKinds} / 4${pendingApprovals ? ` · 승인 요청 ${pendingApprovals}건` : ''} · 팀장이 4종을 승인하고 색인이 끝나면 '프로젝트 시작'이 켜져요. 누르면 기준 v1이 생기고 프로젝트가 시작돼요.`,
       done: started,
       locked: !allUploaded,
+      // 서버는 문서 승인·색인 뒤 설계 초안을 만들지 않아, 초안이 없으면 기획 분석 창(초안 만들기·직접 추가)으로 보낸다.
       action: pendingApprovals
         ? { label: '승인 요청 보기', pane: 'documents' }
-        : allApproved
-          ? {
-              label: '프로젝트 시작',
-              run: () => void start.start().catch(() => undefined),
-              disabled: !start.ready || start.busy,
-            }
-          : { label: '문서함 보기', pane: 'documents' },
+        : allApproved && start.needsDrafts
+          ? { label: '설계 초안 만들기', pane: 'planning' }
+          : allApproved
+            ? {
+                label: '프로젝트 시작',
+                run: () => void start.start().catch(() => undefined),
+                disabled: !start.ready || start.busy,
+              }
+            : { label: '문서함 보기', pane: 'documents' },
       note: start.error
         ? start.error
         : allApproved

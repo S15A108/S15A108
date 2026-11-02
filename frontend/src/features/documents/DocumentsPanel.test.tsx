@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { AxiosError } from 'axios'
 import { documentsApi } from '@/api/services/documents'
+import { planningApi } from '@/api/services/planning'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import type { DocumentVersion } from '@/api/contracts/common'
 import { DocumentsPanel } from './DocumentsPanel'
@@ -255,4 +256,33 @@ it('서버가 거절하면 원인별로 알리고 입력값을 남긴다', async
   expect(
     screen.getByRole('button', { name: '변경 제안 쓰기' }),
   ).toBeInTheDocument()
+})
+
+// PR #72 전수 리뷰 AMP-01: 서버는 문서 승인·색인 뒤 설계 초안을 만들지 않는다.
+// 4종이 승인됐는데 초안이 0개면 '프로젝트 시작'을 끈 채 기획 분석 창(초안 만들기·직접 추가)으로 보낸다.
+it('4종이 승인됐어도 설계 초안이 없으면 기획 분석으로 보내고 시작을 막는다', async () => {
+  const user = userEvent.setup()
+  const approved = { ...version, status: 'APPROVED' as const }
+  vi.mocked(documentsApi.list).mockResolvedValue({
+    items: (['PLAN', 'ERD', 'REQUIREMENTS', 'API_SPEC'] as const).map(
+      (kind, index) => ({
+        ...listedDocument,
+        id: String(index + 1),
+        kind,
+        approved_version: approved,
+      }),
+    ),
+    has_more: false,
+  })
+  vi.spyOn(planningApi, 'items').mockResolvedValue({
+    items: [],
+    has_more: false,
+    draft_snapshot_hash: 'sha256:empty',
+  })
+  mount()
+  await user.click(
+    await screen.findByRole('button', { name: '기획 분석에서 초안 만들기' }),
+  )
+  expect(useWorkspaceStore.getState().pane).toBe('planning')
+  expect(screen.getByRole('button', { name: '프로젝트 시작' })).toBeDisabled()
 })

@@ -14,6 +14,7 @@ import {
   Lock,
   Play,
   Search,
+  Sparkles,
   Upload,
   X,
 } from 'lucide-react'
@@ -357,9 +358,22 @@ export function DocumentsPanel({
                       {isLeader
                         ? start.indexed
                           ? '시작하면 4종으로 기준 v1이 발행되고 변경 제안과 작업 현황이 열려요. 그 뒤 문서 수정은 모두 변경 제안으로 가요.'
-                          : '문서 색인 중이에요. 끝나면 버튼이 켜져요.'
+                          : start.needsDrafts
+                            ? '기준 v1에 넣을 설계 항목 초안이 아직 없어요. 기획 분석에서 초안을 만들거나 직접 추가하면 시작할 수 있어요.'
+                            : '설계 항목 초안을 확인하는 중이에요. 끝나면 버튼이 켜져요.'
                         : '팀장이 프로젝트를 시작하면 알려 드려요.'}
                     </span>
+                    {isLeader && start.needsDrafts && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="justify-self-start"
+                        onClick={() => openPane('planning')}
+                      >
+                        <Sparkles />
+                        기획 분석에서 초안 만들기
+                      </Button>
+                    )}
                     {start.error && (
                       <span role="alert" className="text-sm text-destructive">
                         {start.error}
