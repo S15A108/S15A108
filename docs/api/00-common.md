@@ -1142,6 +1142,9 @@ kind=ERROR finding은 source=MODEL·severity=BLOCKING이며 해당 validation과
 | `created_at` | `Time` | Y | 접수 시각 |
 | `finished_at` | `Time` | N | 완료 시각 |
 | `error_code` | `string` | N | ERROR일 때 필수, 그 외 생략. 현재 실패 attempt의 [검증 실행 오류 코드](#validation-execution-errors) |
+| `diagnostics` | `object` | N | 현재 실패 시도의 검색 진단. `search_complete`, `retrieval_coverage` 및 `search_incomplete_reasons`를 포함하며 알려진 누락이 없더라도 검색의 완전한 재현율을 보장하지 않는다. |
+
+`diagnostics.search_incomplete_reasons`의 값은 `search_query_too_long`, `search_query_limit`, `search_results_truncated`, `design_candidate_limit`, `unmapped_search_document`, `related_task_limit`, `source_evidence_unavailable`이다. 검색어 상한은 현재 10개이며 이를 초과하거나 다른 알려진 누락이 있으면 자동 PASS하지 않는다. `retrieval_coverage`의 현재 값 `UNKNOWN`은 검색이 전체 관련 문서를 찾았는지 확정할 수 없다는 뜻이다.
 
 <a id="schema-taskdetail"></a>
 

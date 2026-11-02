@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.beez.backend.common.api.ApiException;
 import com.beez.backend.common.auth.CallerContext;
+import com.beez.backend.document.service.HybridDocumentCandidateSearch;
 import com.beez.backend.mcp.dto.ValidateTaskPlanArgs;
 import com.beez.backend.mcp.service.ValidationMcpService;
 import com.beez.backend.support.IntegrationTestSupport;
@@ -17,9 +18,9 @@ import com.beez.backend.task.service.StartGate;
 import com.beez.backend.validation.dto.ValidationResponse;
 import com.beez.backend.validation.repository.JobLease;
 import com.beez.backend.validation.repository.ValidationRepository;
-import com.beez.backend.validation.service.AnalysisResultApplier;
 import com.beez.backend.validation.service.FakeValidationAnalyzer;
 import com.beez.backend.validation.service.ValidationAnalyzer;
+import com.beez.backend.validation.service.ValidationOutcomeWriter;
 import com.beez.backend.validation.worker.ValidationWorker;
 import java.net.http.HttpResponse;
 import java.sql.Types;
@@ -68,13 +69,16 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     ValidationRepository repository;
 
     @Autowired
-    AnalysisResultApplier applier;
+    ValidationOutcomeWriter outcomeWriter;
 
     @Autowired
     StartGate startGate;
 
     @MockitoBean
     ValidationAnalyzer analyzer;
+
+    @MockitoBean
+    HybridDocumentCandidateSearch search;
 
     TaskApiSupport api;
     Long projectId;
@@ -90,6 +94,13 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         leader = api.accountId("leader@test");
         member = api.accountId("member@test");
         outsider = api.accountId("outsider@test");
+        when(search.search(any(), org.mockito.ArgumentMatchers.eq(projectId), any(),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(100)))
+                .thenAnswer(inv -> {
+                    Long baseline = api.jdbc.sql("select current_baseline_id from project where id=:id")
+                            .param("id", projectId).query(Long.class).single();
+                    return new HybridDocumentCandidateSearch.Result(baseline.toString(), List.of(), false, false);
+                });
     }
 
     // ---- 도우미 ----
@@ -120,8 +131,9 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     }
 
     private HttpResponse<String> accept(long[] t, Long account) throws Exception {
-        return api.post(tasksPath() + "/" + t[0] + "/validations",
-                "{\"plan_revision_id\":\"" + t[1] + "\",\"expected_lock_version\":" + t[2] + "}", account);
+        return api.postWithHeaders(tasksPath() + "/" + t[0] + "/validations",
+                "{\"plan_revision_id\":\"" + t[1] + "\",\"expected_lock_version\":" + t[2] + "}", account,
+                "Idempotency-Key", java.util.UUID.randomUUID().toString());
     }
 
     private JsonNode body(HttpResponse<String> res, int status) {
@@ -144,6 +156,35 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
             out.add(f.get("kind").asText());
         }
         return out;
+    }
+
+    private static String designCheck(long versionId) {
+        return "referenced-design-" + versionId;
+    }
+
+    private void assertModelUsageRecorded(long validationId) {
+        assertThat(count("select count(*) from llm_usage u join validation_run r on r.id=u.validation_run_id "
+                + "where r.validation_id=" + validationId + " and u.request_key='llm-validate-" + validationId
+                + "-attempt-1-call-1' and u.feature='TASK_VALIDATION' and u.model='test-model'"))
+                .isEqualTo(1);
+    }
+
+    private void provideCompleteApiContent(String... keys) {
+        Map<String, Long> versions = new LinkedHashMap<>();
+        versions.put("API-01", api.currentVersionId("API-01"));
+        versions.put("API-02", api.currentVersionId("API-02"));
+        for (String key : keys) {
+            Long version = api.jdbc.sql("""
+                    insert into design_item_version (design_item_id, version_no, status, title, schema_version,
+                        content, content_hash, origin, approved_at)
+                    values (:item, 2, 'APPROVED', :title, 1, cast(:content as jsonb), :hash, 'HUMAN', now())
+                    returning id
+                    """).param("item", api.designItemId(key)).param("title", key + " complete")
+                    .param("content", "{\"request_fields\":[],\"responses\":[{\"fields\":[]}]}")
+                    .param("hash", "complete-" + key).query(Long.class).single();
+            versions.put(key, version);
+        }
+        api.publish(2, versions);
     }
 
     /** AI 성공 응답 (COMPLETE 또는 PARTIAL). checks 는 요청에서 그대로 받아 checked_keys 로 쓴다 */
@@ -173,7 +214,10 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         response.put("result", result);
         response.put("origin", "MODEL");
         response.put("model", "test-model");
-        response.put("usage", List.of(Map.of("request_key", "llm-validate-x-attempt-1-call-1", "input_tokens", 10, "output_tokens", 5)));
+        response.put("usage", List.of(Map.of(
+                "request_key", "llm-validate-" + request.get("validation_id") + "-attempt-" + request.get("attempt") + "-call-1",
+                "feature", "TASK_VALIDATION", "model", "test-model", "failed", false,
+                "tokens_known", true, "input_tokens", 10, "output_tokens", 5, "latency_ms", 10)));
         return response;
     }
 
@@ -307,8 +351,20 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
                 .query(Long.class).single();
     }
 
+    private ValidationOutcomeWriter.Execution execution(long[] task, long validationId, JobLease lease) {
+        long baseline = api.jdbc.sql("select baseline_id from validation where id=:id")
+                .param("id", validationId).query(Long.class).single();
+        return new ValidationOutcomeWriter.Execution(projectId, task[0], validationId, id(validationId, "validation_run"),
+                lease.attempt(), lease.leaseToken(), baseline, task[1], Map.of(), "gms", CallerContext.human(member));
+    }
+
+    private Map<String, Object> lateRequest(long validationId) {
+        return Map.of("validation_id", String.valueOf(validationId), "attempt", 1,
+                "checks", List.of(Map.of("key", "plan-completeness")));
+    }
+
     @Test
-    void worker_complete_withoutCandidates_isPass() throws Exception {
+    void worker_complete_withUnresolvedRules_cannotPass() throws Exception {
         long[] t = createTask(planJson("A", api.implementsRef("API-01"), true, "[{\"text\":\"응답 캐시 기준 미정\"}]"), member);
         long id = body(accept(t, member), 202).get("id").asLong();
         AtomicReference<Map<String, Object>> sent = new AtomicReference<>();
@@ -329,17 +385,34 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         for (Object c : (List<?>) req.get("checks")) {
             checkKeys.add(String.valueOf(((Map<?, ?>) c).get("key")));
         }
-        assertThat(checkKeys).containsExactly("plan-completeness", "design-" + api.designItemId("API-01"));
+        assertThat(checkKeys).containsExactly("plan-completeness", designCheck(api.currentVersionId("API-01")));
         assertThat((List<?>) req.get("approved_items")).hasSize(1);
         assertThat(((Map<?, ?>) ((Map<?, ?>) req.get("plan_revision")).get("plan")).get("unlinked")).isNotNull();
         assertThat(req.get("evidence")).isEqualTo(List.of());
 
         JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
-        assertThat(v.get("status").asText()).isEqualTo("PASS");
+        assertThat(v.get("status").asText()).isEqualTo("ERROR");
+        assertThat(v.get("findings").get(0).get("resolution").asText()).isEqualTo("HUMAN_REVIEW");
         assertThat(v.get("finished_at").isNull()).isFalse();
+        assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
+        assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("FAILED");
+        assertThat(column("validation", "summary", id)).contains("UNRESOLVED_Q02_RULES");
+        assertModelUsageRecorded(id);
+    }
+
+    @Test
+    void worker_complete_withCompleteInputs_isPass() throws Exception {
+        provideCompleteApiContent("API-01");
+        long[] t = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
+        long id = body(accept(t, member), 202).get("id").asLong();
+        when(analyzer.analyze(any())).thenAnswer(inv -> aiResponse(inv.getArgument(0), List.of(), List.of()));
+
+        assertThat(worker.runOnce()).isTrue();
+        JsonNode validation = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
+        assertThat(validation.get("status").asText()).isEqualTo("PASS");
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("OK");
         assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("DONE");
-        assertThat(column("validation", "summary", id)).contains("\"analysis_status\": \"COMPLETE\"").contains("test-model");
+        assertModelUsageRecorded(id);
     }
 
     /** START 요청 (검증 번호를 실어 보낸다) */
@@ -352,10 +425,16 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     @Test
     void fakeAnalyzerPass_isRejectedByStartGate_whenFakeAnalyzerIsOff() throws Exception {
         // 가짜 분석기로 PASS 를 만든다 (실행 기록의 분석기 버전 = fake-analyzer)
+        provideCompleteApiContent("API-01");
         long[] t = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
         long id = body(accept(t, member), 202).get("id").asLong();
         when(analyzer.analyze(any())).thenAnswer(inv -> new FakeValidationAnalyzer().analyze(inv.getArgument(0)));
-        assertThat(worker.runOnce()).isTrue();
+        ReflectionTestUtils.setField(outcomeWriter, "fakeAnalyzerEnabled", true);
+        try {
+            assertThat(worker.runOnce()).isTrue();
+        } finally {
+            ReflectionTestUtils.setField(outcomeWriter, "fakeAnalyzerEnabled", false);
+        }
         assertThat(column("validation", "status", id)).isEqualTo("PASS");
         assertThat(column("validation_run", "analyzer_version", id(id, "validation_run"))).isEqualTo(FakeValidationAnalyzer.MODEL);
 
@@ -379,6 +458,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
 
     @Test
     void worker_complete_withCandidates_judgesByRules() throws Exception {
+        provideCompleteApiContent("API-01", "API-02");
         long item = api.designItemId("API-01");
         long version = api.currentVersionId("API-01");
         // ① MISSING_INPUT 만 → NEEDS_INPUT
@@ -393,23 +473,23 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(r1.get("findings").get(0).get("resolution").asText()).isEqualTo("FIX_PLAN");
         assertThat(column("validation_finding", "check_key", r1.get("findings").get(0).get("id").asLong())).isEqualTo("plan-completeness");
 
-        // ② MISSING_INPUT + MISSING_POLICY → 검토 필요 우선
+        // ② MISSING_INPUT + BLOCKING 불일치 → 검토 필요 우선
         long[] t2 = createTask(planJson("B", api.implementsRef("API-02"), true, "[{\"text\":\"y\"}]"), member);
         long v2 = body(accept(t2, member), 202).get("id").asLong();
         doAnswer(inv -> aiResponse(inv.getArgument(0), List.of(
                 candidate("plan-completeness", "MISSING_INPUT", "BLOCKING", null, null),
-                candidate("design-" + api.designItemId("API-02"), "MISSING_POLICY", "BLOCKING",
+                candidate(designCheck(api.currentVersionId("API-02")), "MISMATCH", "BLOCKING",
                         String.valueOf(api.designItemId("API-02")), String.valueOf(api.currentVersionId("API-02")))), List.of())).when(analyzer).analyze(any());
         worker.runOnce();
         JsonNode r2 = body(api.get("/api/projects/" + projectId + "/validations/" + v2, member), 200);
         assertThat(r2.get("status").asText()).isEqualTo("NEEDS_REVIEW");
-        assertThat(kinds(r2.get("findings"))).containsExactlyInAnyOrder("MISSING_INPUT", "MISSING_POLICY");
+        assertThat(kinds(r2.get("findings"))).containsExactlyInAnyOrder("MISSING_INPUT", "MISMATCH");
 
         // ③ INFO 불일치만 → PASS (BLOCKING 이 아니면 막지 않는다)
-        long[] t3 = createTask(planJson("C", api.implementsRef("API-01"), true, "[{\"text\":\"z\"}]"), member);
+        long[] t3 = createTask(planJson("C", api.implementsRef("API-01"), true, null), member);
         long v3 = body(accept(t3, member), 202).get("id").asLong();
         doAnswer(inv -> aiResponse(inv.getArgument(0),
-                List.of(candidate("design-" + item, "MISMATCH", "INFO", String.valueOf(item), String.valueOf(version))), List.of())).when(analyzer).analyze(any());
+                List.of(candidate(designCheck(version), "MISMATCH", "INFO", String.valueOf(item), String.valueOf(version))), List.of())).when(analyzer).analyze(any());
         worker.runOnce();
         JsonNode r3 = body(api.get("/api/projects/" + projectId + "/validations/" + v3, member), 200);
         assertThat(r3.get("status").asText()).isEqualTo("PASS");
@@ -420,7 +500,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         long[] t4 = createTask(planJson("D", api.implementsRef("API-01"), true, "[{\"text\":\"w\"}]"), member);
         long v4 = body(accept(t4, member), 202).get("id").asLong();
         doAnswer(inv -> aiResponse(inv.getArgument(0),
-                List.of(candidate("design-" + item, "MISMATCH", "BLOCKING", String.valueOf(item),
+                List.of(candidate(designCheck(version), "MISMATCH", "BLOCKING", String.valueOf(item),
                         String.valueOf(api.currentVersionId("API-02")))), List.of())).when(analyzer).analyze(any());
         worker.runOnce();
         JsonNode r4 = body(api.get("/api/projects/" + projectId + "/validations/" + v4, member), 200);
@@ -444,8 +524,9 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(f.get("severity").asText()).isEqualTo("BLOCKING");
         assertThat(f.get("resolution").asText()).isEqualTo("HUMAN_REVIEW");
         // 모델은 돌았으니 사용량·검사 키·미검사 사유를 진단용으로 남긴다 (비용 기록에서 빠지지 않게)
-        assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1")
-                .contains("\"analysis_status\": \"PARTIAL\"").contains("EVIDENCE_INSUFFICIENT").contains("partial_findings");
+        assertModelUsageRecorded(id);
+        assertThat(column("validation", "summary", id))
+                .contains("\"analysis_status\": \"PARTIAL\"").contains("EVIDENCE_INSUFFICIENT");
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
         assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("FAILED");
         assertThat(column("validation_job", "lease_token", id(id, "validation_job"))).isNull();
@@ -466,14 +547,14 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(v.get("status").asText()).isEqualTo("ERROR");
         assertThat(v.get("error_code").asText()).isEqualTo("ai_invalid_output");
         assertThat(v.get("findings").get(0).get("resolution").asText()).isEqualTo("RETRY");
-        assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1");
+        assertModelUsageRecorded(id);
     }
 
     @Test
     void worker_malformedResponses_areInvalidOutput_notPass() throws Exception {
         long item = api.designItemId("API-01");
         long version = api.currentVersionId("API-01");
-        String design = "design-" + item;
+        String design = designCheck(version);
         List<Function<Map<String, Object>, Map<String, Object>>> broken = new ArrayList<>();
         // ① findings 칸이 없음 — 빈 목록으로 보면 PASS 가 된다
         broken.add(req -> {
@@ -535,7 +616,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     void worker_aiStaleRef_isRecheckedAgainstCurrentBaseline() throws Exception {
         long item = api.designItemId("API-01");
         long version = api.currentVersionId("API-01");
-        Map<String, Object> stale = candidate("design-" + item, "STALE_REF", "BLOCKING", String.valueOf(item), String.valueOf(version));
+        Map<String, Object> stale = candidate(designCheck(version), "STALE_REF", "BLOCKING", String.valueOf(item), String.valueOf(version));
 
         // ① 다시 대조해 보니 아직 최신 → 추론만으로 낡았다고 확정하지 않고 사람 검토
         long[] t1 = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
@@ -547,7 +628,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(r1.get("findings")).hasSize(1);
         assertThat(r1.get("findings").get(0).get("resolution").asText()).isEqualTo("HUMAN_REVIEW");
 
-        // ② AI 가 도는 사이 기준이 바뀌어 정말 낡음 → 규칙 판정과 같이 보완 필요(NEEDS_INPUT)
+        // ② AI 가 도는 사이 기준이 바뀌면 옛 입력에 대한 결과는 폐기하고 새 검증을 요청한다
         long[] t2 = createTask(planJson("B", api.implementsRef("API-01"), true, null), member);
         long v2 = body(accept(t2, member), 202).get("id").asLong();
         doAnswer(inv -> {
@@ -556,12 +637,9 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         }).when(analyzer).analyze(any());
         worker.runOnce();
         JsonNode r2 = body(api.get("/api/projects/" + projectId + "/validations/" + v2, member), 200);
-        assertThat(r2.get("status").asText()).isEqualTo("NEEDS_INPUT");
-        List<String> sources = new ArrayList<>();
-        for (JsonNode f : r2.get("findings")) {
-            sources.add(f.get("source").asText() + ":" + f.get("kind").asText() + ":" + f.get("resolution").asText());
-        }
-        assertThat(sources).containsExactlyInAnyOrder("RULE:STALE_REF:FIX_PLAN", "MODEL:STALE_REF:FIX_PLAN");
+        assertThat(r2.get("status").asText()).isEqualTo("STALE");
+        assertThat(r2.get("findings")).isEmpty();
+        assertThat(column("validation_run", "status", id(v2, "validation_run"))).isEqualTo("DISCARDED");
     }
 
     @Test
@@ -642,12 +720,10 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isZero();
         // 판정은 버려도 실제로 모델을 부른 사용량·모델은 남긴다 (비용 집계)
         assertThat(column("validation_run", "analyzer_version", id(id, "validation_run"))).isEqualTo("test-model");
-        assertThat(api.jdbc.sql("select summary->>'model' from validation where id = :v").param("v", id).query(String.class).single())
-                .isEqualTo("test-model");
-        assertThat(api.jdbc.sql("select summary->'usage'->0->>'input_tokens' from validation where id = :v").param("v", id)
-                .query(String.class).single()).isEqualTo("10");
+        assertModelUsageRecorded(id);
         assertThat(column("validation", "summary", id)).doesNotContain("partial_findings");
-        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
+        assertThat(column("validation_run", "usage", id(id, "validation_run")))
+                .contains("llm-validate-" + id + "-attempt-1-call-1");
         // 그 검증으로는 A 를 시작할 수 없다
         HttpResponse<String> start = api.post(tasksPath() + "/" + a[0] + "/state-events",
                 "{\"event\":\"START\",\"plan_revision_id\":\"" + a[1] + "\",\"expected_lock_version\":" + a[2]
@@ -709,6 +785,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
     @Test
     void resultApply_holdsProjectLock_soRelatedPlanChangeCannotSlipInBetweenRecheckAndSave() throws Exception {
         // A 의 검증에 B 의 지금 계획이 관련 계획으로 들어간다
+        provideCompleteApiContent("API-01");
         long[] b = createTask(planJson("B", api.implementsRef("API-01"), true, null), member);
         long[] a = createTask(planJson("A", api.implementsRef("API-01"), true, null), member);
         long id = body(accept(a, member), 202).get("id").asLong();
@@ -852,9 +929,11 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(worker.runOnce()).isFalse();
 
         // 죽은 줄 알았던 워커의 결과가 늦게 와도 상태·발견 항목을 바꾸지 않는다
-        applier.applySuccess(lease, Map.of(), Map.of(), 0);
+        Map<String, Object> request = lateRequest(id);
+        outcomeWriter.complete(execution(t, id, lease), request, aiResponse(request, List.of(), List.of()), true);
         assertThat(column("validation", "status", id)).isEqualTo("ERROR");
         assertThat(count("select count(*) from validation_finding where validation_id = " + id)).isEqualTo(1);
+        assertThat(count("select count(*) from llm_usage where validation_run_id = " + id(id, "validation_run"))).isEqualTo(1);
     }
 
     @Test
@@ -865,13 +944,10 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         // AI 응답을 기다리는 사이 리스가 만료됐지만 회수기는 아직 돌지 않았다
         api.jdbc.sql("update validation_job set lease_until = now() - interval '1 second' where id = :j")
                 .param("j", lease.jobId()).update();
-        Map<String, Object> request = new LinkedHashMap<>();
-        Map<String, Object> planCheck = new LinkedHashMap<>();
-        planCheck.put("key", "plan-completeness");
-        request.put("checks", List.of(planCheck));
+        Map<String, Object> request = lateRequest(id);
 
         // 그 상태에서 정상 응답이 도착한다
-        applier.applySuccess(lease, request, aiResponse(request, List.of(), List.of()), 0);
+        outcomeWriter.complete(execution(t, id, lease), request, aiResponse(request, List.of(), List.of()), true);
 
         JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
         assertThat(v.get("status").asText()).isEqualTo("ERROR");                          // PASS 로 저장하지 않는다
@@ -879,13 +955,14 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(v.get("findings").get(0).get("resolution").asText()).isEqualTo("RETRY");
         assertThat(column("validation_run", "status", id(id, "validation_run"))).isEqualTo("ERROR");
         assertThat(column("validation_job", "status", id(id, "validation_job"))).isEqualTo("FAILED");
-        assertThat(column("validation", "summary", id)).contains("llm-validate-x-attempt-1-call-1");   // 모델을 부른 사용량은 남긴다
-        assertThat(column("validation_run", "usage", id(id, "validation_run"))).contains("llm-validate-x-attempt-1-call-1");
+        assertThat(count("select count(*) from llm_usage where validation_run_id = " + id(id, "validation_run"))).isEqualTo(1);
+        assertThat(column("validation_run", "usage", id(id, "validation_run")))
+                .contains("llm-validate-" + id + "-attempt-1-call-1");
         assertThat(worker.recoverExpired()).isFalse();                                     // 이미 닫혀 회수할 것이 없다
     }
 
     @Test
-    void worker_sendsItemSourceOnlyWithLocation_andStoresRequestSource() throws Exception {
+    void worker_sendsItemSourceOnlyWithLocation_butUnavailableOriginalCannotPass() throws Exception {
         // 원문 문서 버전 하나에 항목 두 개를 잇는다: API-01 은 위치 없이(문서 버전만), API-02 는 위치까지
         Long doc;
         Optional<Long> existing = api.jdbc.sql("select id from document where project_id = :p order by id limit 1")
@@ -918,7 +995,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         doAnswer(inv -> {
             Map<String, Object> req = inv.getArgument(0);
             sent.set(req);
-            // 요청에 온 출처를 인용하되 document_id 를 숫자로 바꿔 보낸다 — 저장은 요청의 출처 객체로 해야 한다
+            // 요청에 온 출처를 그대로 인용해도 원문을 복원할 수 없으면 확정하지 않는다
             Map<String, Object> cited = null;
             for (Object o : (List<?>) req.get("approved_items")) {
                 Map<?, ?> item = (Map<?, ?>) o;
@@ -926,8 +1003,7 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
                     cited = new LinkedHashMap<>((Map<String, Object>) item.get("source"));
                 }
             }
-            cited.put("document_id", Long.parseLong(String.valueOf(cited.get("document_id"))));
-            Map<String, Object> f = candidate("design-" + item2, "MISMATCH", "BLOCKING", String.valueOf(item2), String.valueOf(v2));
+            Map<String, Object> f = candidate(designCheck(v2), "MISMATCH", "BLOCKING", String.valueOf(item2), String.valueOf(v2));
             f.put("sources", List.of(cited));
             return aiResponse(req, List.of(f), List.of());
         }).when(analyzer).analyze(any());
@@ -950,10 +1026,11 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
                 .containsEntry("document_version_id", String.valueOf(docVersion));
 
         JsonNode v = body(api.get("/api/projects/" + projectId + "/validations/" + id, member), 200);
-        assertThat(v.get("status").asText()).isEqualTo("NEEDS_REVIEW");
-        JsonNode stored = v.get("findings").get(0).get("sources").get(0);
-        assertThat(stored.get("document_id").isNumber()).isFalse();        // 요청에 넣은 출처 그대로 (문자열 ID)
-        assertThat(stored.get("document_id").asText()).isEqualTo(String.valueOf(doc));
+        assertThat(v.get("status").asText()).isEqualTo("ERROR");
+        assertThat(v.get("error_code").asText()).isEqualTo("validation_execution_failed");
+        assertThat(column("validation", "summary", id)).contains("source_evidence_unavailable");
+        assertThat(v.get("findings").get(0).get("resolution").asText()).isEqualTo("HUMAN_REVIEW");
+        assertThat(v.get("findings").get(0).get("sources")).isEmpty();
     }
 
     /** 원문 출처가 있는 새 승인 버전. locatorJson 이 null 이면 위치 없이 문서 버전만 */
@@ -981,16 +1058,20 @@ class ValidationApiIntegrationTests extends IntegrationTestSupport {
         assertThat(accept(t, outsider).statusCode()).isEqualTo(404);
         assertThat(accept(t, null).statusCode()).isEqualTo(401);
         // 잠금 번호가 다름 409
-        HttpResponse<String> stale = api.post(tasksPath() + "/" + t[0] + "/validations",
-                "{\"plan_revision_id\":\"" + t[1] + "\",\"expected_lock_version\":" + (t[2] + 7) + "}", member);
+        HttpResponse<String> stale = api.postWithHeaders(tasksPath() + "/" + t[0] + "/validations",
+                "{\"plan_revision_id\":\"" + t[1] + "\",\"expected_lock_version\":" + (t[2] + 7) + "}", member,
+                "Idempotency-Key", "stale-lock");
         assertThat(stale.statusCode()).isEqualTo(409);
         assertThat(stale.body()).contains("revision_conflict");
         // 지난 리비전 409
-        HttpResponse<String> old = api.post(tasksPath() + "/" + t[0] + "/validations",
-                "{\"plan_revision_id\":\"" + (t[1] + 999) + "\",\"expected_lock_version\":" + t[2] + "}", member);
+        HttpResponse<String> old = api.postWithHeaders(tasksPath() + "/" + t[0] + "/validations",
+                "{\"plan_revision_id\":\"" + (t[1] + 999) + "\",\"expected_lock_version\":" + t[2] + "}", member,
+                "Idempotency-Key", "stale-revision");
         assertThat(old.statusCode()).isEqualTo(409);
         // 형식 오류 400
-        assertThat(api.post(tasksPath() + "/" + t[0] + "/validations", "{\"plan_revision_id\":\"abc\",\"expected_lock_version\":0}", member)
+        assertThat(api.postWithHeaders(tasksPath() + "/" + t[0] + "/validations",
+                "{\"plan_revision_id\":\"abc\",\"expected_lock_version\":0}", member,
+                "Idempotency-Key", "invalid-revision")
                 .statusCode()).isEqualTo(400);
         assertThat(count("select count(*) from validation")).isZero();
         // 취소된 작업 400 invalid_transition
