@@ -106,3 +106,38 @@ it('검토할 변경 제안이 있으면 그 칸에 검토하기를 붙여 먼�
     }),
   ).toBeInTheDocument()
 })
+
+// PR #72 전수 리뷰 TC-5: 작업 집계가 실패해도 변경 제안 집계는 그대로 보이고, 실패한 칸은 0건으로 보이지 않는다.
+it('작업 집계만 실패하면 변경 제안 수는 그대로 두고 작업 칸은 —로 보인다', async () => {
+  vi.mocked(dashboardApi.changes).mockResolvedValue({
+    by_status: [],
+    review_required_count: 2,
+  })
+  vi.mocked(dashboardApi.tasks).mockRejectedValue(new Error('500'))
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <DashboardOverview
+        projectId="10"
+        usage={query(usage(0))}
+        activities={query(none)}
+        work={query(noWork)}
+        members={[]}
+        actorName={() => '시스템'}
+        onTab={() => undefined}
+      />
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByRole('button', { name: /검토할 변경 제안\s*2/ }),
+  ).toBeInTheDocument()
+  expect(
+    await screen.findByRole('button', { name: /진행 중 작업\s*—/ }),
+  ).toBeInTheDocument()
+  expect(
+    screen.queryByText('아직 기록이 없어요. 이렇게 시작해 보세요.'),
+  ).not.toBeInTheDocument()
+})

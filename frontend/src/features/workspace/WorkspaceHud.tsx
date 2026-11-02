@@ -31,7 +31,7 @@ import { Hotbar } from './Hotbar'
 import { TourGuide } from './TourGuide'
 import type { TourMode } from './TourGuide'
 import { Button } from '@/components/ui/button'
-import { describeContent, statusLabel } from '@/lib/display'
+import { countText, describeContent, statusLabel } from '@/lib/display'
 import { formatAgo } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -145,16 +145,19 @@ export function WorkspaceHud({
   const setOutdoor = useWorkspaceStore((state) => state.setOutdoor)
   const isLeader = project.my_role === 'LEADER'
   const started = onboarding.baseline_published
-  const counts = useQuery({
-    queryKey: ['projects', project.id, 'hud'],
-    queryFn: async () => {
-      const [documents, changes, tasks] = await Promise.all([
-        dashboardApi.documents(project.id),
-        dashboardApi.changes(project.id),
-        dashboardApi.tasks(project.id),
-      ])
-      return { documents, changes, tasks }
-    },
+  // 집계는 따로 받는다. 하나가 실패해도(dev 백엔드에 작업 집계 API가 아직 없음) 다른 숫자와 시작 안내는 그대로 보인다
+  // (PR #72 전수 리뷰 TC-5). 실패한 칸은 0 대신 '—'.
+  const documentCounts = useQuery({
+    queryKey: ['projects', project.id, 'hud', 'documents'],
+    queryFn: () => dashboardApi.documents(project.id),
+  })
+  const changeCounts = useQuery({
+    queryKey: ['projects', project.id, 'hud', 'changes'],
+    queryFn: () => dashboardApi.changes(project.id),
+  })
+  const taskCounts = useQuery({
+    queryKey: ['projects', project.id, 'hud', 'tasks'],
+    queryFn: () => dashboardApi.tasks(project.id),
   })
   // 팀장 시작 가이드: 문서별 승인 요청(DOC-A19)과 프로젝트 시작(PLN-A10)
   const submitted = useQuery({
@@ -166,7 +169,7 @@ export function WorkspaceHud({
   const start = useProjectStart(project.id, isLeader && !started)
   const pendingApprovals = submitted.data?.length ?? 0
   const approvedKinds =
-    counts.data?.documents.by_kind.filter(
+    documentCounts.data?.by_kind.filter(
       (item) => REQUIRED.includes(item.kind) && item.approved_count > 0,
     ).length ?? 0
   const unread = useQuery({
@@ -182,7 +185,7 @@ export function WorkspaceHud({
       changesApi.list(project.id, { group: 'IN_PROGRESS', limit: 20 }),
     // 창이 열린 동안은 '지금 할 일'이 가려지므로 부르지 않는다(목 모드 부하, E2E 시간).
     enabled:
-      started && !pane && (counts.data?.changes.review_required_count ?? 0) > 0,
+      started && !pane && (changeCounts.data?.review_required_count ?? 0) > 0,
   })
   const firstReview = reviewList.data?.items.find((item) =>
     ['PROPOSED', 'IN_REVIEW'].includes(item.status),
@@ -224,7 +227,7 @@ export function WorkspaceHud({
     ? 3
     : !allUploaded
       ? 0
-      : counts.isSuccess
+      : documentCounts.isSuccess
         ? allApproved
           ? 2
           : 1
@@ -452,11 +455,11 @@ export function WorkspaceHud({
       })),
   ]
   const approved =
-    counts.data?.documents.by_kind.reduce(
+    documentCounts.data?.by_kind.reduce(
       (sum, item) => sum + item.approved_count,
       0,
     ) ?? 0
-  const reviewCount = counts.data?.changes.review_required_count ?? 0
+  const reviewCount = changeCounts.data?.review_required_count ?? 0
   // 회의실 배지: 회의실 창과 같은 목록 캐시. 시작 전에는 회의실이 잠겨 부르지 않는다.
   const meetingList = useMeetingList(project.id, started)
   const meetingCount = openMeetingCount(
@@ -464,7 +467,7 @@ export function WorkspaceHud({
     me?.id,
   )
   const inProgress =
-    counts.data?.tasks.by_status.find((item) => item.status === 'IN_PROGRESS')
+    taskCounts.data?.by_status.find((item) => item.status === 'IN_PROGRESS')
       ?.count ?? 0
   // 내 작업 중 계획 검증을 통과해 바로 시작할 수 있는 것만 센다.
   const readyTasks = myTasks.filter(
@@ -562,9 +565,17 @@ export function WorkspaceHud({
     ] satisfies (Todo | false | undefined)[]
   ).flatMap((todo) => (todo ? [todo] : []))
   const chips = [
-    ...(isLeader ? [['검토할 변경', reviewCount, 'changes'] as const] : []),
-    ['진행 중 작업', inProgress, 'tasks'] as const,
-    ['승인 문서', approved, 'documents'] as const,
+    ...(isLeader
+      ? [
+          [
+            '검토할 변경',
+            countText(changeCounts, reviewCount),
+            'changes',
+          ] as const,
+        ]
+      : []),
+    ['진행 중 작업', countText(taskCounts, inProgress), 'tasks'] as const,
+    ['승인 문서', countText(documentCounts, approved), 'documents'] as const,
   ]
   return (
     <>

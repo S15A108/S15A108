@@ -86,3 +86,9 @@ export const DISPLAY_COLORS = [
   '#e2d9f3',
   '#e5e5e5',
 ]
+
+// 집계 숫자 한 칸. 불러오는 중이면 '…', 실패하면 0 대신 '—'를 보여 실패를 0건으로 읽지 않게 한다(PR #72 전수 리뷰 TC-5).
+export const countText = (
+  query: { isPending: boolean; isError: boolean },
+  value: number | undefined,
+) => (query.isError ? '—' : query.isPending ? '…' : String(value ?? 0))

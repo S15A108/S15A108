@@ -3,7 +3,7 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { dashboardApi } from '@/api/services/dashboard'
 import type { Activity, AgentWork, Member } from '@/api/contracts/common'
 import { Button } from '@/components/ui/button'
-import { statusLabel } from '@/lib/display'
+import { countText, statusLabel } from '@/lib/display'
 import { cn } from '@/lib/utils'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { FEATURE_LABELS } from './labels'
@@ -35,20 +35,19 @@ export function DashboardOverview({
 }) {
   const openPane = useWorkspaceStore((state) => state.openPane)
   // API 없음: 대시보드 숫자를 한 번에 주는 요약 응답(백엔드 메모 8). 지금은 작업·변경 제안 집계를 따로 부른다.
-  const counts = useQuery({
-    queryKey: ['projects', projectId, 'dashboard-counts'],
-    queryFn: async () => {
-      const [changes, tasks] = await Promise.all([
-        dashboardApi.changes(projectId),
-        dashboardApi.tasks(projectId),
-      ])
-      return { changes, tasks }
-    },
+  // 하나가 실패해도 다른 집계는 보이도록 따로 받고, 실패한 칸은 0 대신 '—'로 둔다(PR #72 전수 리뷰 TC-5).
+  const changes = useQuery({
+    queryKey: ['projects', projectId, 'dashboard-counts', 'changes'],
+    queryFn: () => dashboardApi.changes(projectId),
+  })
+  const tasks = useQuery({
+    queryKey: ['projects', projectId, 'dashboard-counts', 'tasks'],
+    queryFn: () => dashboardApi.tasks(projectId),
   })
   const inProgress =
-    counts.data?.tasks.by_status.find((entry) => entry.status === 'IN_PROGRESS')
+    tasks.data?.by_status.find((entry) => entry.status === 'IN_PROGRESS')
       ?.count ?? 0
-  const review = counts.data?.changes.review_required_count ?? 0
+  const review = changes.data?.review_required_count ?? 0
   const calls = usage.data?.call_count ?? 0
   const connected = members.filter((member) => member.agent_connected).length
   const recent: Activity[] = activities.data?.items.slice(0, 4) ?? []
@@ -57,7 +56,15 @@ export function DashboardOverview({
     (a, b) => b.call_count - a.call_count,
   )
   const most = features[0]?.call_count || 1
-  const empty = !inProgress && !review && !calls && !recent.length
+  // 집계를 모두 받아 0건일 때만 '아직 기록이 없어요'로 본다.
+  const empty =
+    changes.isSuccess &&
+    tasks.isSuccess &&
+    usage.data !== undefined &&
+    !inProgress &&
+    !review &&
+    !calls &&
+    !recent.length
   const cost =
     usage.data?.estimated_cost_amount === undefined
       ? '비용 미보고'
@@ -65,12 +72,12 @@ export function DashboardOverview({
   const metrics = [
     {
       label: '진행 중 작업',
-      value: String(inProgress),
+      value: countText(tasks, inProgress),
       onClick: () => openPane('tasks'),
     },
     {
       label: '검토할 변경 제안',
-      value: String(review),
+      value: countText(changes, review),
       onClick: () => openPane('changes'),
       todo: review > 0 ? '검토하기 ›' : undefined,
     },
