@@ -5,6 +5,7 @@ import { AxiosError, AxiosHeaders } from 'axios'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MISSING_API_MESSAGE } from '@/api/error'
 import { agentsApi, authApi } from '@/api/services'
 import {
   DEMO_EMAIL,
@@ -81,7 +82,7 @@ it('연결 안내·연결 현황이 404여도 토큰을 발급하고 발급 응�
         statusText: 'Not Found',
         headers: {},
         config: { headers: new AxiosHeaders() },
-        data: { error: { code: 'not_found', message: '없음' } },
+        data: { error: { code: 'not_found', message: MISSING_API_MESSAGE } },
       }),
     )
   vi.spyOn(agentsApi, 'connectionGuide').mockImplementation(missing)
@@ -109,5 +110,36 @@ it('연결 안내·연결 현황이 404여도 토큰을 발급하고 발급 응�
   expect(
     screen.getByRole('button', { name: 'CLAUDE.md 내용 복사' }),
   ).toBeInTheDocument()
+  vi.restoreAllMocks()
+})
+
+// PR #72 리뷰 7: MCP 연결 명령에 Authorization 헤더를 넣는다. 발급 직후에는 그 토큰, 모르면 자리표시자와 안내.
+it('MCP 연결 명령은 발급한 토큰을 Bearer 헤더로 넣고, 모르면 자리표시자와 안내를 보인다', async () => {
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <AgentsPanel projectId="101" />
+    </QueryClientProvider>,
+  )
+  expect(
+    await screen.findByText(/<에이전트 토큰> 자리에 발급할 때 받은 토큰/),
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'MCP 주소 복사' }))
+  expect(await navigator.clipboard.readText()).toContain(
+    '--header "Authorization: Bearer <에이전트 토큰>"',
+  )
+  const issue = vi.spyOn(agentsApi, 'issueToken')
+  await user.click(screen.getByRole('button', { name: '토큰 발급' }))
+  await screen.findByText('이 화면을 닫으면 토큰 값을 다시 볼 수 없어요.')
+  const { token } = await issue.mock.results[0].value
+  await user.click(screen.getByRole('button', { name: 'MCP 주소 복사' }))
+  expect(await navigator.clipboard.readText()).toContain(
+    `--header "Authorization: Bearer ${token}"`,
+  )
+  expect(screen.queryByText(/<에이전트 토큰> 자리에/)).not.toBeInTheDocument()
   vi.restoreAllMocks()
 })

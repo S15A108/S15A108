@@ -172,7 +172,10 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
   const statusReady = agents.isSuccess && agents.data !== undefined
   // 캔버스 SCR-06-v2-settings-agent: 상태 한 줄 → 1 토큰 발급 → 2 Claude Code에 BEEZ 추가 → 3 CLAUDE.md → 내 토큰
   const mcpUrl = shownGuide?.mcp_url
-  const command = `claude mcp add --transport http beez ${mcpUrl ?? 'https://<BEEZ 서버>/mcp'}`
+  // MCP는 매 요청 Authorization: Bearer {agent_token}으로 인증한다(02-mcp-tools). 발급 직후에는 그 토큰을 넣고,
+  // 이미 발급한 토큰처럼 값을 모르면 자리표시자를 두고 바꿔 넣으라고 안내한다.
+  const tokenValue = fresh?.token ?? '<에이전트 토큰>'
+  const command = `claude mcp add --transport http beez ${mcpUrl ?? 'https://<BEEZ 서버>/mcp'} --header "Authorization: Bearer ${tokenValue}"`
   return (
     <div className="space-y-5">
       <div>
@@ -330,6 +333,13 @@ export function AgentsPanel({ projectId }: { projectId: string }) {
                     label="MCP 주소 복사"
                     disabled={!mcpUrl}
                   />
+                  {mcpUrl && !fresh && (
+                    <p className="text-xs text-muted-foreground">
+                      &lt;에이전트 토큰&gt; 자리에 발급할 때 받은 토큰을 넣어요.
+                      토큰 값은 다시 볼 수 없어서, 잃어버렸으면 폐기하고 새로
+                      발급해요.
+                    </p>
+                  )}
                   {!shownGuide && (
                     <p className="text-xs text-muted-foreground">
                       토큰을 발급하면 연결 안내가 나와요.
